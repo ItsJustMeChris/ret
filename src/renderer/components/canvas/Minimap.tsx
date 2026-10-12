@@ -1,0 +1,83 @@
+import { useLayoutEffect, useMemo, useRef } from "react";
+import { useShallow } from "zustand/react/shallow";
+import { useThreads } from "../../state/threads";
+import type { Board } from "../../state/ui";
+import { boundsOf, viewport } from "./viewport";
+
+const W = 168;
+const H = 110;
+
+export function Minimap({ board, viewportEl }: { board: Board; viewportEl: React.RefObject<HTMLDivElement | null> }) {
+  const frame = useRef<HTMLDivElement>(null);
+  const states = useThreads(
+    useShallow((s) => {
+      const waiting = new Set(Object.values(s.requests).map((r) => r.threadId));
+      return board.windows.map((w) => (waiting.has(w.threadId) ? "attention" : s.live[w.threadId]?.activeTurnId || s.external[w.threadId] ? "running" : ""));
+    }),
+  );
+
+  const world = useMemo(() => {
+    const b = boundsOf(board.windows) ?? { x: 0, y: 0, w: 1000, h: 800 };
+    const pad = 200;
+    return { x: b.x - pad, y: b.y - pad, w: b.w + pad * 2, h: b.h + pad * 2 };
+  }, [board.windows]);
+  const scale = Math.min(W / world.w, H / world.h);
+
+  useLayoutEffect(
+    () =>
+      viewport.subscribe((vp) => {
+        const el = viewportEl.current;
+        const f = frame.current;
+        if (!el || !f) return;
+        const vx = -vp.x / vp.zoom;
+        const vy = -vp.y / vp.zoom;
+        const vw = el.clientWidth / vp.zoom;
+        const vh = el.clientHeight / vp.zoom;
+        f.style.transform = `translate(${(vx - world.x) * scale}px, ${(vy - world.y) * scale}px)`;
+        f.style.width = `${vw * scale}px`;
+        f.style.height = `${vh * scale}px`;
+      }),
+    [world, scale, viewportEl],
+  );
+
+  if (board.windows.length < 2) return null;
+
+  const navigate = (e: React.PointerEvent) => {
+    const el = viewportEl.current;
+    if (!el) return;
+    const target = e.currentTarget as HTMLElement;
+    target.setPointerCapture(e.pointerId);
+    const go = (ev: PointerEvent | React.PointerEvent) => {
+      const r = target.getBoundingClientRect();
+      const wx = (ev.clientX - r.left) / scale + world.x;
+      const wy = (ev.clientY - r.top) / scale + world.y;
+      const vp = viewport.vp;
+      viewport.set({ ...vp, x: el.clientWidth / 2 - wx * vp.zoom, y: el.clientHeight / 2 - wy * vp.zoom });
+    };
+    go(e);
+    const move = (ev: PointerEvent) => go(ev);
+    const up = () => {
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("pointerup", up);
+    };
+    target.addEventListener("pointermove", move);
+    target.addEventListener("pointerup", up);
+  };
+
+  return (
+    <div className="minimap" style={{ width: W, height: H }} onPointerDown={navigate}>
+      {board.windows.map((w, i) => (
+        <div
+          key={w.id}
+          className={`mm-win ${states[i] ?? ""}`}
+          style={{
+            transform: `translate(${(w.x - world.x) * scale}px, ${(w.y - world.y) * scale}px)`,
+            width: Math.max(2, w.w * scale),
+            height: Math.max(2, w.h * scale),
+          }}
+        />
+      ))}
+      <div ref={frame} className="mm-frame" />
+    </div>
+  );
+}

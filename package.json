@@ -1,0 +1,56 @@
+{
+  "name": "ret",
+  "productName": "Ret",
+  "version": "0.1.0",
+  "description": "A fast, multi-project desktop workbench for the Codex app-server.",
+  "private": true,
+  "main": "dist/main/index.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "node scripts/dev-web.mjs",
+    "build": "vite build && node scripts/build-main.mjs",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "gen:protocol": "node scripts/gen-protocol.mjs",
+    "dist": "npm run build && electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "@vitejs/plugin-react": "^6.1.2",
+    "dompurify": "^3.4.16",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "highlight.js": "^11.12.0",
+    "lucide-react": "^1.55.0",
+    "marked": "^18.1.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tar": "^7.5.22",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.4",
+    "ws": "^8.22.0",
+    "zustand": "^5.0.15"
+  },
+  "build": {
+    "appId": "dev.ret.workbench",
+    "productName": "Ret",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    }
+  }
+}

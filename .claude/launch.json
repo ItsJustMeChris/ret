@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ret-web",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/dev-web.mjs"],
+      "port": 5199
+    }
+  ]
+}
