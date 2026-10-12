@@ -77,6 +77,15 @@ How Ret detects this: each of those apps runs its own private app-server, so Ret
   - A faint handle at the edge brightens as the intent builds.
 - It tucks away again when you move off. A decisive move away closes it quickly; drifting gets a little grace.
 
+**Plan mode and questions.**
+- Turn on Plan in the composer (or press Shift+Tab, as in Codex) and Codex thinks the task through before changing anything: it can stop to ask you questions, then proposes a plan with an "Implement this plan" button.
+- Questions show up as cards in the thread: pick a suggested answer, write your own, or skip. Questions Codex leaves at the end of a reply get one-click answers that go back as your next message.
+
+**Images and dropped files.**
+- Images show in threads: ones you attach, files the agent looks at (also as thumbnails on folded steps), and local images in its replies. Click one to see it full size, with open, reveal and copy-path buttons.
+- Remote images in the agent's replies stay links instead of loading on their own.
+- Drop files anywhere on a thread (or paste them): PNG, JPEG, GIF and WebP images are attached, other files and folders go into your message as paths (relative to the project when inside it).
+
 **Links, files and right-click.**
 - Web links open in your browser. Right-click a link to open it, copy its address, or copy its text.
 - File references in messages (`C:/…`, `/C:/…`, `file://`, `path:line`, `#L12`) are clickable. Code files open in VS Code at that line (if installed); other files open with their default app. Alt+click reveals the file in File Explorer / Finder.

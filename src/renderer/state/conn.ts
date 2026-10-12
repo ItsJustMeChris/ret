@@ -21,6 +21,8 @@ export interface ConnState {
   accountLoaded: boolean;
   rateLimits: GetAccountRateLimitsResponse | null;
   models: Model[];
+  /** Collaboration mode presets (Plan, Default) with their suggested model/effort. */
+  modes: { name: string; mode: "plan" | "default" | null; model: string | null; reasoning_effort: string | null }[];
   /** config.toml defaults new threads inherit. */
   defaults: { model: string | null; effort: string | null; serviceTier: string | null };
   login: LoginFlow | null;
@@ -35,6 +37,7 @@ export const useConn = create<ConnState>(() => ({
   accountLoaded: false,
   rateLimits: null,
   models: [],
+  modes: [],
   defaults: { model: null, effort: null, serviceTier: null },
   login: null,
 }));

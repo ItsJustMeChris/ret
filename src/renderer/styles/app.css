@@ -1147,6 +1147,165 @@ body.resizing .transcript {
   margin-top: 6px;
 }
 
+/* Images in threads: what you attached, what the agent looked at. Click to see full size. */
+.user-images {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.user-images:last-child {
+  margin-bottom: 0;
+}
+.thread-img {
+  display: block;
+  padding: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  cursor: zoom-in;
+  transition: border-color 0.15s;
+}
+.thread-img:hover {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line-2));
+}
+.thread-img img {
+  display: block;
+}
+.thread-img.md img {
+  max-width: 220px;
+  max-height: 180px;
+  object-fit: contain;
+}
+.user-images.single .thread-img.md img {
+  max-width: min(360px, 100%);
+  max-height: 300px;
+}
+.thread-img.sm {
+  border-radius: 5px;
+}
+.thread-img.sm img {
+  width: 34px;
+  height: 34px;
+  object-fit: cover;
+}
+.thread-img-missing {
+  opacity: 0.8;
+}
+.image-view > .thread-img {
+  margin: 2px 0 6px 22px;
+}
+.activity-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0 6px 22px;
+}
+.activity-thumbs-more {
+  font-size: 11px;
+  color: var(--text-3);
+  padding-left: 2px;
+}
+.md img.md-img {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  margin: 8px 0;
+  border-radius: 8px;
+  border: 1px solid var(--line-2);
+  cursor: zoom-in;
+}
+.md .md-remote-img::before {
+  content: "↗ ";
+}
+
+/* Dragging files over a thread. */
+.thread-pane {
+  position: relative;
+}
+.drop-zone {
+  position: absolute;
+  inset: 6px;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  border: 2px dashed color-mix(in srgb, var(--accent) 70%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 9%, color-mix(in srgb, var(--bg) 70%, transparent));
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+  animation: fade 0.12s;
+}
+.drop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: 300px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.drop-card strong {
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.drop-card svg {
+  color: var(--accent);
+}
+
+/* Full-size image viewer. */
+.overlay.image-viewer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.82);
+  cursor: zoom-out;
+}
+.iv-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: min(720px, 92vw);
+  padding: 4px 4px 4px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-2) 92%, transparent);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow);
+  cursor: default;
+}
+.iv-name {
+  min-width: 0;
+  margin-right: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.iv-img {
+  max-width: 92vw;
+  max-height: calc(100vh - 120px);
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: var(--shadow-lg);
+  cursor: default;
+  /* Transparent images read against a subtle checkerboard. */
+  background: repeating-conic-gradient(#1b1b1b 0% 25%, #242424 0% 50%) 0 0 / 16px 16px;
+}
+
 .msg-agent {
   padding: 2px 2px;
 }
@@ -1857,6 +2016,92 @@ body.resizing .transcript {
 .q-option.selected {
   border-color: var(--accent);
   background: var(--accent-soft);
+}
+.q-option:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-2));
+}
+.q-option:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+/* A question (blocking, from Plan mode) reads as a conversation, not a warning. */
+.approval.asking {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-1));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.approval.asking .approval-title {
+  color: var(--accent);
+}
+.approval .question .input,
+.questions .q-free {
+  width: 100%;
+}
+
+/* Questions at the end of a reply: answer inline, sent back as your next message. */
+.questions {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+}
+.questions.live {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-1));
+}
+.questions-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.questions.live .questions-head {
+  color: var(--accent);
+}
+.questions .question:last-of-type {
+  margin-bottom: 4px;
+}
+.questions-actions,
+.plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.questions-actions .btn,
+.plan-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Plan mode toggle in the composer (Shift+Tab). */
+.plan-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--text-2);
+  border: 1px solid transparent;
+}
+.plan-toggle:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+.plan-toggle.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.composer.planning {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line-2));
 }
 .field {
   display: flex;

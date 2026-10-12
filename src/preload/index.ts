@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "electron";
 import { IPC, type RetBridge } from "../shared/bridge";
 
 function subscribe<T>(channel: string, cb: (payload: T) => void) {
@@ -52,6 +52,13 @@ const bridge: RetBridge = {
   files: {
     saveImage: (data, ext) => ipcRenderer.invoke(IPC.saveImage, data, ext),
     stat: (p) => ipcRenderer.invoke(IPC.stat, p),
+    pathFor: (file) => {
+      try {
+        return webUtils.getPathForFile(file) || null;
+      } catch {
+        return null;
+      }
+    },
   },
   copy: (text) => ipcRenderer.invoke(IPC.copy, text),
   edit: (command, arg) => ipcRenderer.send(IPC.edit, command, arg),

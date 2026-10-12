@@ -23,6 +23,8 @@ import { useThreads } from "../../state/threads";
 import { changeStats, duration, shortPath, unwrapCommand } from "../../lib/format";
 import { highlight } from "../../lib/markdown";
 import { Markdown } from "../Markdown";
+import { ThreadImage } from "./ThreadImage";
+import { PlanActions, ReplyQuestions } from "./Questions";
 
 type Ctx = { threadId: string; cwd: string | null };
 
@@ -65,22 +67,31 @@ function Disclosure({
 
 // ---------------------------------------------------------------------------
 
-function UserMessage({ item }: { item: Extract<ThreadItem, { type: "userMessage" }> }) {
+function UserMessage({ item, cwd }: { item: Extract<ThreadItem, { type: "userMessage" }>; cwd: string | null }) {
   const text = item.content
     .filter((c): c is Extract<typeof c, { type: "text" }> => c.type === "text")
     .map((c) => c.text)
     .join("\n");
-  const files = item.content.filter((c) => c.type !== "text");
+  // Images you sent show as pictures; anything else stays a chip.
+  const images = item.content.filter((c) => c.type === "localImage" || c.type === "image");
+  const files = item.content.filter((c) => c.type !== "text" && c.type !== "localImage" && c.type !== "image");
   return (
     <div className="msg-user">
       <div className="bubble">
+        {images.length > 0 && (
+          <div className={`user-images ${images.length === 1 ? "single" : ""}`}>
+            {images.map((c, i) =>
+              c.type === "localImage" ? <ThreadImage key={i} path={c.path} cwd={cwd} /> : "url" in c ? <ThreadImage key={i} src={c.url} /> : null,
+            )}
+          </div>
+        )}
         {text && <div className="user-text">{text}</div>}
         {files.length > 0 && (
           <div className="attachments">
             {files.map((f, i) => (
               <span className="chip" key={i} data-path={"path" in f ? f.path : undefined}>
                 <Paperclip size={11} />
-                {"path" in f ? shortPath(f.path) : "url" in f ? "image" : f.type}
+                {"path" in f ? shortPath(f.path) : "url" in f ? f.url : "attachment"}
               </span>
             ))}
           </div>
@@ -90,10 +101,11 @@ function UserMessage({ item }: { item: Extract<ThreadItem, { type: "userMessage"
   );
 }
 
-function AgentMessage({ item, streaming }: { item: Extract<ThreadItem, { type: "agentMessage" }>; streaming: boolean }) {
+function AgentMessage({ item, streaming, threadId }: { item: Extract<ThreadItem, { type: "agentMessage" }>; streaming: boolean; threadId: string }) {
   return (
     <div className={`msg-agent ${item.phase === "commentary" ? "commentary" : ""} ${streaming ? "streaming" : ""}`}>
       <Markdown text={item.text} streaming={streaming} />
+      {!streaming && item.questions?.length ? <ReplyQuestions threadId={threadId} itemId={item.id} questions={item.questions} /> : null}
     </div>
   );
 }
@@ -377,9 +389,9 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
   if (!item) return null;
   switch (item.type) {
     case "userMessage":
-      return <UserMessage item={item} />;
+      return <UserMessage item={item} cwd={ctx.cwd} />;
     case "agentMessage":
-      return <AgentMessage item={item} streaming={live} />;
+      return <AgentMessage item={item} streaming={live} threadId={ctx.threadId} />;
     case "reasoning":
       return <Reasoning item={item} live={live} />;
     case "commandExecution":
@@ -399,10 +411,16 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
             <ListChecks size={13} /> Plan
           </div>
           <Markdown text={item.text} />
+          <PlanActions threadId={ctx.threadId} itemId={item.id} />
         </div>
       );
     case "imageView":
-      return <Disclosure icon={<ImageIcon size={13} />} label={<>Viewed <span className="path" data-path={item.path}>{shortPath(item.path, ctx.cwd)}</span></>} />;
+      return (
+        <div className="image-view">
+          <Disclosure icon={<ImageIcon size={13} />} label={<>Viewed <span className="path" data-path={item.path}>{shortPath(item.path, ctx.cwd)}</span></>} />
+          <ThreadImage path={item.path} cwd={ctx.cwd} />
+        </div>
+      );
     case "imageGeneration":
       return (
         <div className="gen-image">

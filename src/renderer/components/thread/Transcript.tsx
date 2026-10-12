@@ -5,6 +5,7 @@ import { useThreads } from "../../state/threads";
 import { forkThread, loadOlder, resendUnanswered } from "../../state/actions";
 import type { ThreadItem } from "../../protocol";
 import { activitySummary, DiffView, isActivity, ItemView } from "./Items";
+import { ThreadImage } from "./ThreadImage";
 import { diffStats, duration } from "../../lib/format";
 import { Approvals } from "./Approvals";
 import { TurnRail } from "./TurnRail";
@@ -32,6 +33,8 @@ function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: bool
   }
   if (ids.length === 1) return <ItemView itemId={ids[0]} ctx={ctx} live={false} />;
   const failed = items.some((i) => i.type === "commandExecution" && i.exitCode != null && i.exitCode !== 0);
+  // Images the agent looked at stay visible while the group is folded.
+  const viewed = items.flatMap((i) => (i.type === "imageView" ? [i.path] : []));
   return (
     <div className={`activity ${open ? "open" : ""}`}>
       <button className="activity-head" onClick={() => setOpen(!open)}>
@@ -39,6 +42,14 @@ function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: bool
         <span>{activitySummary(items)}</span>
         {failed && <span className="badge err">failed step</span>}
       </button>
+      {!open && viewed.length > 0 && (
+        <div className="activity-thumbs">
+          {viewed.slice(0, 6).map((path, i) => (
+            <ThreadImage key={i} path={path} cwd={ctx.cwd} size="sm" />
+          ))}
+          {viewed.length > 6 && <span className="activity-thumbs-more">+{viewed.length - 6}</span>}
+        </div>
+      )}
       {open && (
         <div className="activity-body">
           {ids.map((id) => (

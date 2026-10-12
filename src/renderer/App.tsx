@@ -14,6 +14,7 @@ import { Toasts } from "./components/Toasts";
 import { DialogHost } from "./components/ui/Dialog";
 import { TooltipHost } from "./components/ui/Tooltip";
 import { HoverCardHost } from "./components/HoverCards";
+import { ImageViewer } from "./components/ImageViewer";
 import { ContextMenuHost } from "./components/ContextMenuHost";
 import { fitAll, toggleMaximize, viewport } from "./components/canvas/viewport";
 import { bridge } from "./bridge";
@@ -140,6 +141,7 @@ export function App() {
       <DialogHost />
       <TooltipHost />
       <HoverCardHost />
+      <ImageViewer />
       <ContextMenuHost />
     </div>
   );

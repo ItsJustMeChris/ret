@@ -32,6 +32,8 @@ export interface ThreadSettings {
   approvalPolicy: unknown;
   sandbox: unknown;
   cwd: string | null;
+  /** Collaboration mode: "plan" (think it through, ask questions, propose a plan) or "default". */
+  mode?: "plan" | "default" | null;
 }
 
 export interface LiveThread {
@@ -293,6 +295,7 @@ function apply(d: Draft, method: string, p: any, hooks: Hooks) {
           approvalPolicy: ts.approvalPolicy,
           sandbox: ts.sandboxPolicy,
           cwd: ts.cwd ?? null,
+          mode: ts.collaborationMode?.mode ?? null,
         };
       }
       break;

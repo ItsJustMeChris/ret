@@ -62,6 +62,17 @@ const marked = new Marked({
       const label = language ? `<span class="code-lang">${escapeHtml(language)}</span>` : "";
       return `<div class="code-block">${label}<button class="code-copy" data-copy>Copy</button><pre><code class="hljs">${highlight(text, language)}</code></pre></div>`;
     },
+    image({ href, text }) {
+      const alt = escapeHtml(text || "");
+      // Data URIs are self-contained: show them as they are.
+      if (/^data:image\//i.test(href)) return `<img class="md-img" src="${escapeHtml(href)}" alt="${alt}">`;
+      // A remote image in model output would be fetched just by rendering it, which is a known
+      // way for a prompt-injected agent to leak data. So it stays a link you choose to open.
+      if (/^https?:/i.test(href)) return `<a href="${escapeHtml(href)}" class="md-remote-img">Image: ${alt || escapeHtml(href)}</a>`;
+      // Local files: the Markdown component fills in a ret-img: src (it knows the thread's cwd).
+      const ref = parseFileRef(href);
+      return ref ? `<img class="md-img" data-local="${escapeHtml(ref.path)}" alt="${alt}">` : alt;
+    },
     link({ href, title, tokens }) {
       const inner = this.parser.parseInline(tokens);
       const tip = title ? ` title="${escapeHtml(title)}"` : "";

@@ -147,20 +147,28 @@ export function RequestCard({ req, compact }: { req: PendingRequest; compact?: b
   }
 }
 
+/**
+ * Codex stopped to ask (the request_user_input tool, in Plan mode): one or more questions, each
+ * with suggested answers and/or room to write your own. Skipping tells it you'd rather not say.
+ */
 function UserInputCard({ req }: { req: PendingRequest }) {
   const questions: { id: string; header: string; question: string; isOther: boolean; isSecret: boolean; options: { label: string; description: string }[] | null }[] =
     req.params.questions ?? [];
+  const blocking = req.params.isBlocking !== false;
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const submit = () =>
+  const ready = questions.every((q) => answers[q.id]?.trim());
+  const reply = (values: Record<string, string>) =>
     respondToRequest(req.key, {
-      answers: Object.fromEntries(questions.map((q) => [q.id, { answers: answers[q.id] ? [answers[q.id]] : [] }])),
+      answers: Object.fromEntries(questions.map((q) => [q.id, { answers: values[q.id]?.trim() ? [values[q.id].trim()] : [] }])),
     });
+  const single = questions.length === 1 && !!questions[0].options?.length && !questions[0].isOther;
   return (
-    <div className="approval">
+    <div className="approval asking">
       <div className="approval-title">
-        <MessageCircleQuestion size={14} /> Codex has a question
+        <MessageCircleQuestion size={14} /> {questions.length > 1 ? `Codex has ${questions.length} questions` : "Codex has a question"}
       </div>
-      {questions.map((q) => (
+      {!blocking && <div className="approval-reason">Codex keeps working meanwhile; answer whenever you're ready.</div>}
+      {questions.map((q, n) => (
         <div key={q.id} className="question">
           {q.header && <div className="q-header">{q.header}</div>}
           <div className="q-text">{q.question}</div>
@@ -170,8 +178,11 @@ function UserInputCard({ req }: { req: PendingRequest }) {
                 <button
                   key={o.label}
                   className={`q-option ${answers[q.id] === o.label ? "selected" : ""}`}
-                  onClick={() => setAnswers({ ...answers, [q.id]: o.label })}
-                  title={o.description}
+                  onClick={() => {
+                    const next = { ...answers, [q.id]: o.label };
+                    setAnswers(next);
+                    if (single) reply(next); // one question with fixed choices: one click answers it
+                  }}
                 >
                   <span>{o.label}</span>
                   {o.description && <small>{o.description}</small>}
@@ -183,15 +194,27 @@ function UserInputCard({ req }: { req: PendingRequest }) {
             <input
               className="input"
               type={q.isSecret ? "password" : "text"}
-              placeholder={q.options?.length ? "Other…" : "Your answer"}
+              autoFocus={n === 0 && !q.options?.length}
+              placeholder={q.options?.length ? "Or answer in your own words…" : "Your answer"}
               value={answers[q.id] && !q.options?.some((o) => o.label === answers[q.id]) ? answers[q.id] : ""}
               onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
-              onKeyDown={(e) => e.key === "Enter" && submit()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.nativeEvent.isComposing && ready) reply(answers);
+              }}
             />
           )}
         </div>
       ))}
-      <Buttons choices={[{ label: "Submit", kind: "primary", onClick: submit }]} />
+      <div className="approval-actions">
+        {!single && (
+          <button className="btn primary" disabled={!ready} onClick={() => reply(answers)}>
+            Answer
+          </button>
+        )}
+        <button className="btn ghost" title="Let Codex carry on without an answer" onClick={() => reply({})}>
+          Skip
+        </button>
+      </div>
     </div>
   );
 }

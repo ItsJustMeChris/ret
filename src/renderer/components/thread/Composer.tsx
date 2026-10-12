@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Gauge, LoaderCircle, Paperclip, Rocket, Settings2, Shield, ShieldAlert, ShieldCheck, Square, X, Zap } from "lucide-react";
+import { ArrowUp, Gauge, ListChecks, LoaderCircle, Paperclip, Rocket, Settings2, Shield, ShieldAlert, ShieldCheck, Square, X, Zap } from "lucide-react";
 import { useThreads } from "../../state/threads";
 import { useUI, isDraft, type AccessPreset } from "../../state/ui";
 import { useConn } from "../../state/conn";
@@ -8,7 +8,8 @@ import { bridge, isDesktop } from "../../bridge";
 import { toast } from "../../state/toasts";
 import { Select, type SelectOption } from "../ui/Select";
 import { QueueTray } from "./QueueTray";
-import { composerDrafts as drafts, composerFocus } from "../../state/composerDrafts";
+import { composerDrafts as drafts, composerFocus, takeAttachments } from "../../state/composerDrafts";
+import { addFilesToThread } from "../../state/attach";
 
 const ACCESS_OPTIONS: SelectOption<AccessPreset>[] = [
   { value: "config", label: "Config default", description: "Whatever your config.toml sets", icon: <Settings2 size={13} /> },
@@ -38,7 +39,7 @@ function focusAtEnd(el: HTMLTextAreaElement | null) {
 
 export function Composer({ threadId, autoFocus, compact }: { threadId: string; autoFocus?: boolean; compact?: boolean }) {
   const [text, setText] = useState(() => drafts.get(threadId) ?? "");
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>(() => takeAttachments(threadId));
   const [sending, setSending] = useState(false);
   const ta = useRef<HTMLTextAreaElement>(null);
   const running = useThreads((s) => !!s.live[threadId]?.activeTurnId);
@@ -58,6 +59,8 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
   });
   const defaults = useUI((s) => s.composer);
   const models = useConn((s) => s.models);
+  const hasModes = useConn((s) => s.modes.some((m) => m.mode === "plan"));
+  const threadMode = useThreads((s) => s.live[threadId]?.settings?.mode ?? null);
   const configTier = useConn((s) => s.defaults.serviceTier);
   // New threads start from the last-used defaults; existing threads from their own settings.
   const [over, setOver] = useState<TurnOverrides>(
@@ -75,6 +78,26 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
   useEffect(() => {
     drafts.set(threadId, text);
   }, [threadId, text]);
+
+  // Attachments and focus requests from elsewhere (files dropped on the pane).
+  useEffect(() => {
+    const onAttach = (e: Event) => {
+      if ((e as CustomEvent<{ threadId: string }>).detail.threadId !== threadId) return;
+      const more = takeAttachments(threadId);
+      setAttachments((cur) => [...cur, ...more.filter((m) => !cur.some((c) => c.path === m.path))]);
+    };
+    const onFocus = (e: Event) => {
+      if ((e as CustomEvent<{ threadId: string }>).detail.threadId !== threadId) return;
+      composerFocus.delete(threadId);
+      requestAnimationFrame(() => focusAtEnd(ta.current));
+    };
+    window.addEventListener("ret:composer-attach", onAttach);
+    window.addEventListener("ret:composer-focus", onFocus);
+    return () => {
+      window.removeEventListener("ret:composer-attach", onAttach);
+      window.removeEventListener("ret:composer-focus", onFocus);
+    };
+  }, [threadId]);
 
   // Text handed to this composer from elsewhere (editing a queued follow-up, forking with a quote).
   useEffect(() => {
@@ -120,7 +143,31 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     }
   };
 
+  // Plan mode: Codex thinks it through, can ask you questions, and proposes a plan before changing anything.
+  const planning = (over.mode ?? threadMode) === "plan";
+  const togglePlan = () => setPrefs({ mode: planning ? "default" : "plan" });
+
+  // Answers to Codex's questions go out from here, with the settings picked in this composer.
+  useEffect(() => {
+    const onSend = (e: Event) => {
+      const d = (e as CustomEvent<{ threadId: string; text: string; mode?: "plan" | "default"; handled: boolean }>).detail;
+      if (d.threadId !== threadId) return;
+      d.handled = true;
+      if (d.mode) setPrefs({ mode: d.mode });
+      const prefs = { ...effectiveOverrides(), ...(d.mode ? { mode: d.mode } : {}) };
+      void sendMessage(threadId, d.text, [], prefs, "auto").catch((err) => toast(`Couldn't send: ${(err as Error).message}`, "error"));
+    };
+    window.addEventListener("ret:composer-send", onSend);
+    return () => window.removeEventListener("ret:composer-send", onSend);
+  });
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Tab" && e.shiftKey && hasModes) {
+      // Same as Codex: Shift+Tab switches Plan mode.
+      e.preventDefault();
+      togglePlan();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       // While a turn runs: Enter steers it, Ctrl+Enter queues the message for the next turn.
@@ -131,25 +178,12 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     }
   };
 
-  const addImage = async (file: File) => {
-    if (!isDesktop) return;
-    const ext = file.type.split("/")[1] || "png";
-    const path = await bridge.files.saveImage(await file.arrayBuffer(), ext);
-    setAttachments((a) => [...a, { path, name: file.name || `image.${ext}`, previewUrl: URL.createObjectURL(file) }]);
-  };
-
+  // Pasted files go the same way as dropped ones (dropping is handled by the whole pane).
   const onPaste = (e: React.ClipboardEvent) => {
-    const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
+    const files = Array.from(e.clipboardData.files);
     if (!files.length) return;
     e.preventDefault();
-    files.forEach((f) => void addImage(f));
-  };
-
-  const onDrop = (e: React.DragEvent) => {
-    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
-    if (!files.length) return;
-    e.preventDefault();
-    files.forEach((f) => void addImage(f));
+    void addFilesToThread(threadId, files);
   };
 
   const pickImage = async () => {
@@ -198,9 +232,7 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     <>
     <QueueTray threadId={threadId} />
     <div
-      className={`composer ${running ? "running" : ""} ${elsewhere ? "elsewhere" : ""} ${compact ? "compact" : ""}`}
-      onDrop={onDrop}
-      onDragOver={(e) => e.preventDefault()}
+      className={`composer ${running ? "running" : ""} ${elsewhere ? "elsewhere" : ""} ${compact ? "compact" : ""} ${planning ? "planning" : ""}`}
     >
       {elsewhere && (
         <div className="composer-elsewhere">
@@ -237,6 +269,8 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
               ? "Wrapping up — Enter sends right after this summary  (Esc stops)"
               : running
                 ? "Steer the current turn…  (Ctrl+Enter queues for after · Esc stops)"
+              : planning
+                ? "Plan it with Codex — it can ask you questions before it changes anything…"
               : isDraft(threadId)
                 ? "Describe a task…"
                 : "Reply…"
@@ -251,6 +285,17 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
           {isDesktop && (
             <button className="icon-btn" title="Attach image" onClick={() => void pickImage()}>
               <Paperclip size={14} />
+            </button>
+          )}
+          {hasModes && (
+            <button
+              className={`plan-toggle ${planning ? "on" : ""}`}
+              title={planning ? "Plan mode is on: Codex plans, asks you questions, then proposes a plan (Shift+Tab to turn off)" : "Plan mode (Shift+Tab): think it through, ask questions, and propose a plan before changing anything"}
+              aria-pressed={planning}
+              onClick={togglePlan}
+            >
+              <ListChecks size={13} />
+              <span>Plan</span>
             </button>
           )}
           {modelOptions.length > 0 && (

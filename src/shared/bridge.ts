@@ -125,6 +125,8 @@ export interface RetBridge {
   files: {
     saveImage(data: ArrayBuffer, ext: string): Promise<string>;
     stat(path: string): Promise<{ exists: boolean; isDir: boolean }>;
+    /** Where a dropped/pasted File lives on disk; null when it has no path (e.g. dragged from a web page). */
+    pathFor(file: File): string | null;
   };
   /** Writes to the system clipboard (works regardless of page focus). */
   copy(text: string): Promise<void>;

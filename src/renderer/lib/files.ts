@@ -1,5 +1,14 @@
-import { bridge } from "../bridge";
+import { bridge, isDesktop } from "../bridge";
 import { toast } from "../state/toasts";
+import { IMAGE_SCHEME, imageType } from "../../shared/files";
+
+export { imageType };
+
+/** A URL the page can show a local image from (desktop only; the web build has no file access). */
+export function imageUrl(path: string, cwd?: string | null): string | null {
+  if (!isDesktop || !imageType(path)) return null;
+  return `${IMAGE_SCHEME}://local/${encodeURIComponent(resolvePath(path, cwd))}`;
+}
 
 export interface FileRef {
   path: string;

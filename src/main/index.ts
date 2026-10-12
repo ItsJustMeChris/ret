@@ -1,12 +1,12 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, Notification, shell, screen } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, Notification, protocol, shell, screen } from "electron";
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { tmpdir } from "node:os";
 import { IPC, type EditCommand, type UpdaterSettings } from "../shared/bridge";
-import { RUNNABLE } from "../shared/files";
+import { IMAGE_SCHEME, RUNNABLE, imageType } from "../shared/files";
 import { AppServer, type LaunchTarget } from "./codex/appServer";
 import { CodexUpdater } from "./codex/updater";
 import { AppUpdater } from "./appUpdate";
@@ -14,6 +14,27 @@ import { findSystemCodex, probeVersion } from "./codex/platform";
 import { createWorktree, gitInfo } from "./git";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
+
+// Images in threads (attachments, files the agent viewed, local images in messages) are local
+// files. The page can't load file:// from the dev server, and shouldn't read arbitrary files
+// anyway, so it asks for them as ret-img://local/<encoded absolute path>, images only.
+protocol.registerSchemesAsPrivileged([{ scheme: IMAGE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+const IMAGE_MAX_BYTES = 64 * 1024 * 1024;
+
+function serveImages() {
+  protocol.handle(IMAGE_SCHEME, async (req) => {
+    try {
+      const path = decodeURIComponent(new URL(req.url).pathname.slice(1));
+      const type = imageType(path);
+      if (!type || !isAbsolute(path)) return new Response(null, { status: 403 });
+      const st = await stat(path);
+      if (!st.isFile() || st.size > IMAGE_MAX_BYTES) return new Response(null, { status: 404 });
+      return new Response(await readFile(path), { headers: { "content-type": type, "cache-control": "no-cache" } });
+    } catch {
+      return new Response(null, { status: 404 });
+    }
+  });
+}
 
 
 let vscodeCache: Promise<boolean> | null = null;
@@ -412,6 +433,7 @@ function installMenu() {
 
 app.whenReady().then(() => {
   if (!primaryInstance) return;
+  serveImages();
   const dock = process.platform === "darwin" ? devIcon("icon.png") : undefined;
   if (dock) app.dock?.setIcon(dock);
   installMenu();

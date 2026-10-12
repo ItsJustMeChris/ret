@@ -13,8 +13,10 @@ import {
   Layers,
   Pencil,
   PanelRight,
+  Paperclip,
 } from "lucide-react";
 import { useThreads, markAttended, markVisible } from "../../state/threads";
+import { addFilesToThread } from "../../state/attach";
 import { useUI, isDraft } from "../../state/ui";
 import { addProject, archiveThread, compactThread, forkThread, hydrateThread, openThread, renameThread, retargetDraft } from "../../state/actions";
 import { baseName, buildProjects, threadTitle } from "../../state/projects";
@@ -62,8 +64,50 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
     return () => markAttended(threadId, -1);
   }, [threadId, attends]);
 
+  // Files dragged in from the file manager (or a browser) drop anywhere on the pane.
+  const [dropping, setDropping] = useState(false);
+  const dragDepth = useRef(0);
+  const carriesFiles = (e: React.DragEvent) => e.dataTransfer.types.includes("Files");
+  const drop = {
+    onDragEnter: (e: React.DragEvent) => {
+      if (!carriesFiles(e)) return;
+      e.preventDefault();
+      dragDepth.current++;
+      setDropping(true);
+    },
+    onDragOver: (e: React.DragEvent) => {
+      if (!carriesFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      if (!carriesFiles(e)) return;
+      if (--dragDepth.current <= 0) {
+        dragDepth.current = 0;
+        setDropping(false);
+      }
+    },
+    onDrop: (e: React.DragEvent) => {
+      if (!carriesFiles(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dragDepth.current = 0;
+      setDropping(false);
+      void addFilesToThread(threadId, Array.from(e.dataTransfer.files));
+    },
+  };
+
   return (
-    <div ref={ref} className={`thread-pane size-${size} chrome-${props.chrome} ${props.focused ? "focused" : ""}`} data-cwd={cwd} data-thread={threadId}>
+    <div ref={ref} className={`thread-pane size-${size} chrome-${props.chrome} ${props.focused ? "focused" : ""}`} data-cwd={cwd} data-thread={threadId} {...drop}>
+      {dropping && (
+        <div className="drop-zone">
+          <div className="drop-card">
+            <Paperclip size={18} />
+            <strong>Drop to add to your message</strong>
+            <span>Images are attached; other files and folders are added as paths.</span>
+          </div>
+        </div>
+      )}
       <Header {...props} size={size} />
       {isDraft(threadId) ? (
         <DraftBody threadId={threadId} size={size} />

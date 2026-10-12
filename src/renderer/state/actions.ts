@@ -172,6 +172,12 @@ export async function loadModels() {
   } catch (err) {
     console.warn("model/list failed", err);
   }
+  try {
+    const res = (await rpc.request("collaborationMode/list", {})) as { data: ReturnType<typeof useConn.getState>["modes"] };
+    useConn.setState({ modes: res.data });
+  } catch {
+    /* an older codex without collaboration modes */
+  }
 }
 
 async function startLoginImpl(kind: "browser" | "device" = "browser") {
@@ -434,6 +440,24 @@ export interface TurnOverrides {
   access?: AccessPreset;
   /** Service tier id: "default" (standard), "priority" (Fast), "ultrafast". Undefined keeps the thread's. */
   speed?: string;
+  /** Collaboration mode: "plan" thinks it through, asks questions, and proposes a plan first. Undefined keeps the thread's. */
+  mode?: "plan" | "default";
+}
+
+/**
+ * The collaboration mode to send with a turn. A mode carries its own model and effort (and wins
+ * over the turn's), so it gets the ones you picked, or the mode's suggestions, or the thread's.
+ */
+function collaborationFor(threadId: string, prefs: TurnOverrides) {
+  if (!prefs.mode) return undefined;
+  const conn = useConn.getState();
+  const preset = conn.modes.find((m) => m.mode === prefs.mode);
+  const live = useThreads.getState().live[threadId]?.settings;
+  const model =
+    prefs.model ?? preset?.model ?? live?.model ?? useThreads.getState().threads[threadId]?.model ?? conn.defaults.model ?? conn.models.find((m) => m.isDefault)?.model;
+  if (!model) return undefined;
+  const effort = prefs.effort ?? preset?.reasoning_effort ?? live?.effort ?? null;
+  return { mode: prefs.mode, settings: { model, reasoning_effort: effort as never, developer_instructions: null } };
 }
 
 /** Sends a message to a thread (starting it first if `target` is a draft). Returns the real thread id. */
@@ -513,6 +537,7 @@ export async function sendMessage(
         model: prefs.model ?? null,
         effort: prefs.effort ?? null,
         ...(prefs.speed ? { serviceTier: prefs.speed } : {}),
+        ...(collaborationFor(threadId, prefs) ? { collaborationMode: collaborationFor(threadId, prefs) } : {}),
         approvalPolicy: access.approvalPolicy,
         sandboxPolicy: access.sandboxPolicy,
       });
@@ -544,6 +569,7 @@ function settingsFrom(res: {
   approvalPolicy: unknown;
   sandbox: unknown;
   cwd: string;
+  collaborationMode?: { mode: "plan" | "default" } | null;
 }): ThreadSettings {
   return {
     model: res.model,
@@ -552,6 +578,7 @@ function settingsFrom(res: {
     approvalPolicy: res.approvalPolicy,
     sandbox: res.sandbox,
     cwd: res.cwd,
+    mode: res.collaborationMode?.mode ?? null,
   };
 }
 
