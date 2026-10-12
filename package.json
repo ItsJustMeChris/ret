@@ -23,7 +23,7 @@
     "@vitejs/plugin-react": "^6.1.2",
     "dompurify": "^3.4.16",
     "electron": "^44.7.0",
-    "electron-builder": "^26.15.3",
+    "electron-builder": "^26.17.0",
     "electron-updater": "^6.8.9",
     "esbuild": "^0.28.2",
     "highlight.js": "^11.12.0",
