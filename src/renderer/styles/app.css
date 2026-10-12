@@ -286,7 +286,7 @@ body.resizing .transcript {
 .link:hover {
   color: var(--text);
 }
-.input {
+.input:not(.monaco-inputbox *) {
   width: 100%;
   height: 30px;
   padding: 0 10px;
@@ -295,7 +295,7 @@ body.resizing .transcript {
   background: var(--bg);
   outline: none;
 }
-.input:focus {
+.input:not(.monaco-inputbox *):focus {
   border-color: var(--accent);
 }
 .badge {
@@ -2079,6 +2079,177 @@ body.resizing .transcript {
   gap: 6px;
 }
 
+/* In the transcript, an open question points down to the dock where it's answered. */
+.ask-pointer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.ask-pointer:hover {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+/* Codex's question, docked on the composer: numbered picks (keys 1–9) over the box for "Other". */
+.composer.asking,
+.composer.asking.running,
+.composer.asking:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-2));
+  box-shadow: var(--shadow), 0 0 0 3px var(--accent-soft);
+}
+.ask-dock {
+  margin: -10px -10px 10px -14px;
+  padding: 10px 10px 10px 14px;
+  border-radius: 13px 13px 0 0;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  max-height: min(50vh, 440px);
+  overflow-y: auto;
+  animation: ask-in 0.22s var(--ease);
+}
+.ask-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 22px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.ask-step {
+  font-weight: 500;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.ask-tag {
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--line-2);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.ask-note {
+  font-weight: 400;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ask-head-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+.ask-head-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.ask-head-actions button:hover {
+  color: var(--text);
+  background: var(--bg-3);
+}
+.ask-q {
+  margin-bottom: 10px;
+  font-size: 13.5px;
+  color: var(--text);
+}
+.ask-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ask-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px 6px 8px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  text-align: left;
+  font-size: 13px;
+  color: var(--text);
+  transition: border-color 0.12s, background 0.12s;
+}
+.ask-opt kbd {
+  flex: none;
+  min-width: 20px;
+  text-align: center;
+  transition: border-color 0.12s, color 0.12s;
+}
+.ask-opt:hover,
+.ask-opt.hl {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-2));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-2));
+}
+.ask-opt:hover kbd,
+.ask-opt.hl kbd,
+.ask-opt.picked kbd {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  color: var(--accent);
+}
+.ask-opt.picked {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line-2));
+}
+.ask-opt-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ask-opt-label small {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.ask-opt.other .ask-opt-label {
+  color: var(--text-2);
+}
+.ask-opt.other.on {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-2));
+}
+.ask-opt.other.on .ask-opt-label {
+  color: var(--accent);
+}
+.ask-opt-enter {
+  flex: none;
+  color: var(--accent);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.ask-opt.hl .ask-opt-enter {
+  opacity: 1;
+}
+.ask-secret {
+  margin-top: 2px;
+}
+@keyframes ask-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
 /* Plan mode toggle in the composer (Shift+Tab). */
 .plan-toggle {
   display: inline-flex;
@@ -2381,6 +2552,9 @@ body.resizing .transcript {
     width: calc(100% - 16px);
     margin: 4px auto 8px;
     border-radius: 12px;
+  }
+  .ask-dock {
+    border-radius: 11px 11px 0 0;
   }
   .msg-user .bubble {
     max-width: 92%;
@@ -2809,7 +2983,8 @@ body.resizing .transcript {
   background: var(--accent);
 }
 
-.minimap {
+/* Not plain .minimap: that's also Monaco's class, and this would drag its minimap under the pane header. */
+.canvas-minimap {
   position: absolute;
   right: 14px;
   bottom: 14px;
@@ -3037,7 +3212,7 @@ body.resizing .transcript {
   background: var(--line);
 }
 
-.overlay {
+.overlay:not(.monaco-editor *) {
   position: fixed;
   inset: 0;
   z-index: 500;
@@ -4564,4 +4739,664 @@ body.resizing .sidebar-layer {
 }
 [data-theme="dark"] .cwin.focused .pane-header {
   background: color-mix(in srgb, var(--accent) 7%, var(--bg-2));
+}
+
+/* ==========================================================================
+   File views (Monaco): a tab or split side in Focus mode, a window on the canvas
+   ========================================================================== */
+.btn.sm {
+  height: 26px;
+  padding: 0 9px;
+  font-size: 12px;
+  border-radius: 7px;
+}
+.file-pane {
+  background: #0a0a0a;
+}
+:root[data-theme="light"] .file-pane {
+  background: #fff;
+}
+.file-pane-icon {
+  flex: none;
+  color: var(--accent);
+}
+.file-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.file-title > span:first-child {
+  flex: none;
+  font-weight: 600;
+}
+.file-dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+.cv-dirty {
+  flex: none;
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--amber);
+}
+.cv-meta {
+  flex: none;
+  margin-right: 6px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.file-pane .pane-header-actions .btn {
+  margin-right: 4px;
+}
+@container pane (width < 560px) {
+  .file-pane .cv-meta,
+  .file-pane .file-dir {
+    display: none;
+  }
+}
+.cv-confirm {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--amber-soft);
+  font-size: 12.5px;
+}
+.cv-confirm span {
+  margin-right: auto;
+}
+.cv-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.cv-editor {
+  position: absolute;
+  inset: 0;
+}
+.cv-editor.hidden {
+  visibility: hidden;
+}
+.cv-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.cv-state strong {
+  color: var(--text);
+}
+/* The referenced line. */
+.file-pane .cv-hit {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.file-pane .cv-hit-gutter {
+  background: var(--accent);
+  width: 3px !important;
+  margin-left: 4px;
+}
+/* A file's marker in a tab: its icon, and a dot while unsaved. */
+.tab-file {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--accent);
+}
+.tab-file .cv-dirty {
+  width: 6px;
+  height: 6px;
+}
+.file-tile .tcard-body {
+  font-size: 0.85em;
+  word-break: break-all;
+}
+
+/* File paths in threads open in the viewer. */
+.transcript [data-path]:not(.thread-img) {
+  cursor: pointer;
+}
+.transcript .path[data-path]:hover,
+.transcript .chip[data-path]:hover,
+.md code.code-path:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  text-underline-offset: 2px;
+}
+
+/* Title bar: how many things in the Inbox want you. */
+.seg-badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Lines that just changed on disk (Codex editing an open file): flash, then fade. */
+.file-pane .cv-changed {
+  animation: cv-changed 4s ease-out forwards;
+}
+.file-pane .cv-changed-gutter {
+  background: var(--green);
+  width: 3px !important;
+  margin-left: 4px;
+  animation: cv-changed-gutter 4s ease-out forwards;
+}
+@keyframes cv-changed {
+  0%,
+  25% {
+    background: color-mix(in srgb, var(--green) 20%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+@keyframes cv-changed-gutter {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ==========================================================================
+   Code mode: explorer | editor | chat
+   ========================================================================== */
+.code-view {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+}
+.code-gutter {
+  cursor: col-resize;
+  background: var(--line);
+  background-clip: content-box;
+  padding: 0 2.5px;
+  transition: background-color 0.15s;
+}
+.code-gutter:hover {
+  background-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.code-explorer,
+.code-chat,
+.code-editor {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.code-explorer {
+  background: var(--bg-1);
+}
+.code-explorer-head,
+.code-chat-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.code-explorer-head > *,
+.code-chat-head > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.code-chat {
+  background: var(--bg);
+}
+.code-chat > .thread-pane,
+.code-editor > .thread-pane {
+  flex: 1;
+  min-height: 0;
+}
+.code-editor {
+  background: #0a0a0a;
+}
+:root[data-theme="light"] .code-editor {
+  background: #fff;
+}
+.code-empty {
+  padding: 16px;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+.code-empty.big {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+}
+.code-empty.big strong {
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+/* Editor tabs */
+.code-tabs {
+  flex: none;
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+}
+.code-tab {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  max-width: 220px;
+  padding: 0 6px 0 12px;
+  border-right: 1px solid var(--line);
+  color: var(--text-3);
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.code-tab > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.code-tab svg {
+  flex: none;
+  color: var(--accent);
+}
+.code-tab:hover {
+  color: var(--text-2);
+}
+.code-tab.active {
+  color: var(--text);
+  background: #0a0a0a;
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+:root[data-theme="light"] .code-tab.active {
+  background: #fff;
+}
+.code-tab-close {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--text-3);
+  opacity: 0;
+}
+.code-tab:hover .code-tab-close,
+.code-tab.active .code-tab-close {
+  opacity: 1;
+}
+.code-tab-close:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+/* The tab already says which file; the header keeps its folder and actions. */
+.code-editor .file-title > span:first-child {
+  display: none;
+}
+
+/* Explorer tree */
+.code-tree {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tree-root {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 6px 0 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.tree-root-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-rows {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 12px;
+}
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding-right: 10px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.tree-row:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+.tree-row.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text);
+}
+.tree-row.quiet {
+  opacity: 0.55;
+}
+.tree-row.muted,
+.tree-row.err {
+  cursor: default;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.tree-row.err {
+  color: var(--red);
+}
+.tree-chev {
+  flex: none;
+  color: var(--text-3);
+  transition: transform 0.12s var(--ease);
+}
+.tree-chev.open {
+  transform: rotate(90deg);
+}
+.tree-icon {
+  flex: none;
+  color: var(--text-3);
+}
+.tree-row.dir .tree-icon {
+  color: color-mix(in srgb, var(--accent) 70%, var(--text-3));
+}
+.tree-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--amber);
+}
+.tree-change {
+  flex: none;
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: var(--mono);
+}
+.tree-row.changed-update .tree-name,
+.tree-row.changed-update .tree-change {
+  color: var(--amber);
+}
+.tree-row.changed-add .tree-name,
+.tree-row.changed-add .tree-change {
+  color: var(--green);
+}
+.tree-row.changed-delete .tree-name {
+  color: var(--red);
+  text-decoration: line-through;
+}
+.tree-row.changed-delete .tree-change {
+  color: var(--red);
+}
+
+/* ==========================================================================
+   Inbox mode: list | reading pane
+   ========================================================================== */
+.inbox-view {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+}
+.inbox-list {
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  background: var(--bg-1);
+}
+.inbox-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+  font-weight: 600;
+  font-size: 13px;
+}
+.inbox-keys {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+.inbox-keys kbd {
+  margin: 0 1px;
+}
+.inbox-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 14px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.inbox-count {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--bg-3);
+  font-size: 10.5px;
+  letter-spacing: 0;
+  color: var(--text-2);
+}
+.inbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 1px 6px;
+  padding: 9px 8px 9px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+.inbox-row > .status-dot {
+  margin-top: 5px;
+}
+.inbox-row:hover {
+  background: var(--bg-3);
+}
+.inbox-row.selected {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-2));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.inbox-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.inbox-row-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.inbox-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+.inbox-time {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.inbox-preview {
+  font-size: 12px;
+  color: var(--text-2);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.inbox-preview.ask {
+  color: var(--amber);
+}
+/* Read already, kept until cleared. */
+.inbox-row.seen .inbox-title {
+  font-weight: 500;
+  color: var(--text-2);
+}
+.inbox-row.seen .inbox-preview {
+  color: var(--text-3);
+}
+.inbox-project {
+  align-self: flex-start;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--bg-3);
+  font-size: 10.5px;
+  line-height: 17px;
+  color: var(--text-3);
+}
+.inbox-done {
+  flex: none;
+  opacity: 0;
+}
+.inbox-row:hover .inbox-done,
+.inbox-row.selected .inbox-done {
+  opacity: 1;
+}
+.inbox-read {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.inbox-read > .thread-pane {
+  flex: 1;
+}
+.inbox-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+.inbox-empty strong {
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+/* ==========================================================================
+   App windows: Inbox and Code as windows on the canvas desktop
+   ========================================================================== */
+.app-pane .app-icon {
+  flex: none;
+  color: var(--accent);
+}
+.app-pane .pane-header .seg-badge {
+  flex: none;
+  margin-left: 2px;
+}
+.app-win-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  border-bottom-left-radius: inherit;
+  border-bottom-right-radius: inherit;
+  overflow: hidden;
+}
+.app-win-body > .code-view,
+.app-win-body > .inbox-view {
+  flex: 1;
+  min-width: 0;
+}
+/* A narrow Inbox window: the list gets less room so the reading pane still fits. */
+@container pane (width < 760px) {
+  .app-inbox .inbox-view {
+    grid-template-columns: minmax(220px, 40%) minmax(0, 1fr);
+  }
+}
+.app-tile .tcard-head svg {
+  color: var(--accent);
+}
+.app-tile .tcard-body {
+  font-size: calc(13px * var(--s));
+  color: var(--text);
+}
+/* The window header already says Inbox (and carries the key hints while focused). */
+.app-inbox .inbox-head {
+  display: none;
+}
+.app-pane .pane-header .inbox-keys {
+  margin: 0 8px 0 auto;
+  white-space: nowrap;
+}
+@container pane (width < 560px) {
+  .app-pane .pane-header .inbox-keys {
+    display: none;
+  }
+}
+.app-pane .pane-header .inbox-keys + .pane-header-actions {
+  margin-left: 0;
 }

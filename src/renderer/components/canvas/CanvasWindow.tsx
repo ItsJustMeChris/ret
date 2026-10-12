@@ -1,6 +1,9 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { Maximize2, Minimize2, X, GitFork, FolderGit2 } from "lucide-react";
-import { activeBoard, updateBoard, useUI, isDraft, type CanvasWin } from "../../state/ui";
+import { Maximize2, Minimize2, X, GitFork, FolderGit2, Copy } from "lucide-react";
+import { activeBoard, updateBoard, useUI, isApp, isDraft, isFile, isThread, filePath, type CanvasWin } from "../../state/ui";
+import { FilePane, FileTile } from "../code/FilePane";
+import { AppPane, AppTile } from "./AppPane";
+import { copyText } from "../../lib/files";
 import { markAttended, useThreads } from "../../state/threads";
 import { closeWindow, focusWindow, forkThread, renameThread } from "../../state/actions";
 import { threadTitle } from "../../state/projects";
@@ -83,6 +86,11 @@ const NOT_BACKGROUND = [
   ".diff",
   ".glance-text",
   ".hook",
+  // a file window's editor: select and scroll code, don't drag the window
+  ".monaco-editor",
+  // an Inbox or Code window: its lists, tree and editor are for using, not dragging
+  ".app-win-body",
+  ".cv-state",
 ].join(",");
 
 function isWindowBackground(e: React.PointerEvent): boolean {
@@ -100,7 +108,7 @@ export const CanvasWindow = memo(function CanvasWindow({ win, card, focused }: {
 
   // On a canvas everything is on screen; only the window you've clicked counts as seen.
   useEffect(() => {
-    if (!focused || isDraft(win.threadId)) return;
+    if (!focused || !isThread(win.threadId)) return;
     markAttended(win.threadId, 1);
     return () => markAttended(win.threadId, -1);
   }, [focused, win.threadId]);
@@ -242,7 +250,11 @@ export const CanvasWindow = memo(function CanvasWindow({ win, card, focused }: {
     };
     const thread = useThreads.getState().threads[id];
     const items: MenuItem[] = [
-      ...(isDraft(id)
+      ...(isApp(id)
+        ? []
+        : isFile(id)
+        ? [{ label: "Copy path", icon: <Copy size={14} />, onClick: () => copyText(filePath(id), "Path copied") }, { separator: true as const }]
+        : isDraft(id)
         ? []
         : [
             ...threadMoreItems(id, rename),
@@ -293,8 +305,29 @@ export const CanvasWindow = memo(function CanvasWindow({ win, card, focused }: {
       data-win={win.id}
     >
       {menu && <Menu {...menu} onClose={() => setMenu(null)} />}
-      {card ? (
+      {card && isApp(win.threadId) ? (
+        <AppTile id={win.threadId} onPointerDown={(e) => startGesture(e, "move")} onDoubleClick={() => zoomToWindow(win.id)} />
+      ) : isApp(win.threadId) ? (
+        <AppPane
+          id={win.threadId}
+          focused={focused}
+          onHeaderPointerDown={(e) => startGesture(e, "move")}
+          onHeaderDoubleClick={() => toggleMaximize(win.id)}
+          windowControls={controls}
+        />
+      ) : card && isFile(win.threadId) ? (
+        <FileTile id={win.threadId} onPointerDown={(e) => startGesture(e, "move")} onDoubleClick={() => zoomToWindow(win.id)} />
+      ) : card ? (
         <ThreadCard threadId={win.threadId} onPointerDown={(e) => startGesture(e, "move")} winId={win.id} />
+      ) : isFile(win.threadId) ? (
+        <FilePane
+          id={win.threadId}
+          chrome="window"
+          focused={focused}
+          onHeaderPointerDown={(e) => startGesture(e, "move")}
+          onHeaderDoubleClick={() => toggleMaximize(win.id)}
+          windowControls={controls}
+        />
       ) : (
         <ThreadPane
           threadId={win.threadId}
@@ -310,6 +343,15 @@ export const CanvasWindow = memo(function CanvasWindow({ win, card, focused }: {
     </div>
   );
 });
+
+/** Fly to a window and fit it on screen (double-clicking a zoomed-out card). */
+function zoomToWindow(winId: string) {
+  const win = activeBoard().windows.find((w) => w.id === winId);
+  if (!win) return;
+  const { w, h } = viewportSize();
+  viewport.animateTo(viewport.fitRect(win, w, h, 40, 1));
+  useUI.setState({ focusedWindow: winId });
+}
 
 /** Zoomed-out representation: big, glanceable, cheap to render. */
 function ThreadCard({ threadId, winId, onPointerDown }: { threadId: string; winId: string; onPointerDown: (e: React.PointerEvent) => void }) {
@@ -328,13 +370,7 @@ function ThreadCard({ threadId, winId, onPointerDown }: { threadId: string; winI
     return null;
   });
   const title = isDraft(threadId) ? "New thread" : threadTitle(thread);
-  const zoomIn = () => {
-    const win = activeBoard().windows.find((w) => w.id === winId);
-    if (!win) return;
-    const { w, h } = viewportSize();
-    viewport.animateTo(viewport.fitRect(win, w, h, 40, 1));
-    useUI.setState({ focusedWindow: winId });
-  };
+  const zoomIn = () => zoomToWindow(winId);
   return (
     <div className={`tcard state-${state}`} onPointerDown={onPointerDown} onDoubleClick={zoomIn}>
       <div className="tcard-head">

@@ -1,6 +1,8 @@
 import { memo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Columns2, GitFork, Plus, X } from "lucide-react";
-import { useUI, isDraft, type FocusSplit } from "../state/ui";
+import { ArrowLeft, ArrowRight, Columns2, FileCode2, GitFork, Plus, X } from "lucide-react";
+import { useUI, isDraft, isFile, isThread, filePath, type FocusSplit } from "../state/ui";
+import { useFiles } from "../state/files";
+import { FilePane } from "./code/FilePane";
 import { useThreads } from "../state/threads";
 import { closePane, closeTab, newThreadNear, openThread, setSplitRatio } from "../state/actions";
 import { threadTitle } from "../state/projects";
@@ -13,7 +15,29 @@ const DRAG_THREAD = "application/x-ret-thread";
 const DRAG_TAB = "application/x-ret-tab";
 
 function titleOf(id: string, t: Thread | undefined) {
+  if (isFile(id)) return filePath(id).split(/[\\/]/).pop() ?? "File";
   return isDraft(id) ? "New thread" : threadTitle(t);
+}
+
+/** A thread's status, or a file's icon (with a dot while it has unsaved edits). */
+function Marker({ id }: { id: string }) {
+  const dirty = useFiles((s) => !!s.dirty[id]);
+  if (!isFile(id)) return <StatusDot threadId={id} />;
+  return (
+    <span className="tab-file">
+      <FileCode2 size={12} />
+      {dirty && <span className="cv-dirty" />}
+    </span>
+  );
+}
+
+/** What a tab or split side shows: a thread, a draft, or a file. */
+function Pane({ id, focused, windowControls }: { id: string; focused: boolean; windowControls?: React.ReactNode }) {
+  return isFile(id) ? (
+    <FilePane key={id} id={id} chrome="focus" focused={focused} windowControls={windowControls} />
+  ) : (
+    <ThreadPane key={id} threadId={id} chrome="focus" focused={focused} windowControls={windowControls} />
+  );
 }
 
 const Tab = memo(function Tab({ id, active, index }: { id: string; active: boolean; index: number }) {
@@ -31,7 +55,7 @@ const Tab = memo(function Tab({ id, active, index }: { id: string; active: boole
       title={`${title}${rightTitle ? `  ⇆  ${rightTitle}` : ""}${index < 9 ? `  (Ctrl+${index + 1})` : ""}`}
       draggable
       onDragStart={(e) => {
-        if (!isDraft(id)) e.dataTransfer.setData(DRAG_THREAD, id);
+        if (isThread(id)) e.dataTransfer.setData(DRAG_THREAD, id);
         e.dataTransfer.setData(DRAG_TAB, id);
       }}
       onDragOver={(e) => e.dataTransfer.types.includes(DRAG_TAB) && e.preventDefault()}
@@ -46,13 +70,13 @@ const Tab = memo(function Tab({ id, active, index }: { id: string; active: boole
         });
       }}
     >
-      <StatusDot threadId={id} />
+      <Marker id={id} />
       {!split && thread?.forkedFromId && <GitFork size={11} className="muted" />}
       <span className="tab-title">{title}</span>
       {split && (
         <>
           <span className={`tab-join ${related ? "fork" : ""}`}>{related ? <GitFork size={11} /> : <Columns2 size={11} />}</span>
-          <StatusDot threadId={split.right} />
+          <Marker id={split.right} />
           <span className="tab-title">{rightTitle}</span>
         </>
       )}
@@ -132,7 +156,7 @@ export function FocusView() {
           split ? (
             <SplitView left={active} split={split} focusedSide={focusedSide} />
           ) : (
-            <ThreadPane key={active} threadId={active} chrome="focus" focused />
+            <Pane id={active} focused />
           )
         ) : (
           <EmptyState />
@@ -212,7 +236,7 @@ function SplitView({ left, split, focusedSide }: { left: string; split: FocusSpl
   return (
     <div className="split" ref={box} style={{ gridTemplateColumns: `${split.ratio}fr 12px ${1 - split.ratio}fr` }}>
       <div className={`split-pane ${focusedSide === "left" ? "on" : ""}`} onPointerDownCapture={(e) => e.button === 0 && focusedSide !== "left" && useUI.setState({ focusedSide: "left" })}>
-        <ThreadPane key={left} threadId={left} chrome="focus" focused={focusedSide === "left"} windowControls={close("left")} />
+        <Pane id={left} focused={focusedSide === "left"} windowControls={close("left")} />
       </div>
       <div
         className={`split-gutter ${relation ? "related" : ""}`}
@@ -232,7 +256,7 @@ function SplitView({ left, split, focusedSide }: { left: string; split: FocusSpl
         )}
       </div>
       <div className={`split-pane ${focusedSide === "right" ? "on" : ""}`} onPointerDownCapture={(e) => e.button === 0 && focusedSide !== "right" && useUI.setState({ focusedSide: "right" })}>
-        <ThreadPane key={split.right} threadId={split.right} chrome="focus" focused={focusedSide === "right"} windowControls={close("right")} />
+        <Pane id={split.right} focused={focusedSide === "right"} windowControls={close("right")} />
       </div>
     </div>
   );

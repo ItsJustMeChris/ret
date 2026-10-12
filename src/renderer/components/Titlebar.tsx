@@ -1,8 +1,12 @@
-import { AppWindow, Command, PanelLeft, Rows3 } from "lucide-react";
+import { AppWindow, Code2, Command, Inbox, PanelLeft, Rows3 } from "lucide-react";
 import { useUI } from "../state/ui";
+import { useInboxCount } from "./inbox/InboxView";
 import { useConn } from "../state/conn";
 import { useThreads } from "../state/threads";
 import { bridge } from "../bridge";
+
+/** Dragging a mode button onto the canvas makes that view a window there. */
+export const DRAG_APP = "application/x-ret-app";
 
 function GlobalActivity() {
   const running = useThreads((s) => {
@@ -30,6 +34,7 @@ function GlobalActivity() {
 
 export function Titlebar() {
   const mode = useUI((s) => s.mode);
+  const inboxCount = useInboxCount();
   const sidebarOpen = useUI((s) => s.sidebarOpen);
   const codex = useConn((s) => s.codex);
   const isMac = bridge.platform === "darwin";
@@ -47,6 +52,31 @@ export function Titlebar() {
           </button>
           <button className={mode === "canvas" ? "on" : ""} onClick={() => useUI.setState({ mode: "canvas" })} title="Canvas mode — windows (Ctrl+\)">
             <AppWindow size={13} /> Canvas
+          </button>
+          <button
+            className={mode === "code" ? "on" : ""}
+            onClick={() => useUI.setState({ mode: "code" })}
+            title="Code mode — the project's files beside a thread (Alt+3). Drag onto the canvas to make it a window."
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData(DRAG_APP, "code");
+              e.dataTransfer.effectAllowed = "copy";
+            }}
+          >
+            <Code2 size={13} /> Code
+          </button>
+          <button
+            className={mode === "inbox" ? "on" : ""}
+            onClick={() => useUI.setState({ mode: "inbox" })}
+            title="Inbox — everything that needs you, across projects (Alt+4). Drag onto the canvas to make it a window."
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData(DRAG_APP, "inbox");
+              e.dataTransfer.effectAllowed = "copy";
+            }}
+          >
+            <Inbox size={13} /> Inbox
+            {inboxCount > 0 && <span className="seg-badge">{inboxCount}</span>}
           </button>
         </div>
       </div>

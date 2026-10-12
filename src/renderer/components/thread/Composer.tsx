@@ -10,6 +10,7 @@ import { Select, type SelectOption } from "../ui/Select";
 import { QueueTray } from "./QueueTray";
 import { composerDrafts as drafts, composerFocus, takeAttachments } from "../../state/composerDrafts";
 import { addFilesToThread } from "../../state/attach";
+import { QuestionDock, useQuestionFlow, type QuestionFlow } from "./QuestionDock";
 
 const ACCESS_OPTIONS: SelectOption<AccessPreset>[] = [
   { value: "config", label: "Config default", description: "Whatever your config.toml sets", icon: <Settings2 size={13} /> },
@@ -35,6 +36,14 @@ function focusAtEnd(el: HTMLTextAreaElement | null) {
   el.focus();
   el.setSelectionRange(el.value.length, el.value.length);
   el.scrollTop = el.scrollHeight;
+}
+
+/** What the box says while a question is open. */
+function askHint(ask: QuestionFlow): string {
+  if (ask.q.secret) return "Answer in the field above…";
+  if (!ask.rows || ask.other) return "Type your answer…";
+  const keys = ask.rows === 1 ? "1" : `1–${Math.min(ask.rows, 9)}`;
+  return ask.otherRow ? `Press ${keys} to pick, or type your own answer…` : `Press ${keys} to pick…`;
 }
 
 export function Composer({ threadId, autoFocus, compact }: { threadId: string; autoFocus?: boolean; compact?: boolean }) {
@@ -147,6 +156,33 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
   const planning = (over.mode ?? threadMode) === "plan";
   const togglePlan = () => setPrefs({ mode: planning ? "default" : "plan" });
 
+  // Codex's questions dock on top of the box: number keys pick, and what you type answers "Other".
+  // An answer steers the running turn (async questions leave it running), or starts the next one.
+  const ask = useQuestionFlow(threadId, {
+    send: (answer) =>
+      sendMessage(threadId, answer, [], effectiveOverrides(), "steer").catch((err) => {
+        toast(`Couldn't send: ${(err as Error).message}`, "error");
+        throw err;
+      }),
+    focusInput: () => requestAnimationFrame(() => focusAtEnd(ta.current)),
+  });
+  const askSource = ask?.ask.source;
+  useEffect(() => {
+    // A new question takes the keyboard in the pane you're in, unless you're typing somewhere else.
+    const idle = !document.activeElement || document.activeElement === document.body;
+    if (askSource && autoFocus && idle) ta.current?.focus();
+  }, [askSource]);
+
+  /** Send what's in the box, or, while a question takes a written answer, answer it. */
+  const send = (how: "auto" | "steer" | "queue") => {
+    if (ask?.takesText && how !== "queue" && text.trim() && !attachments.length) {
+      ask.answerText(text.trim());
+      setText("");
+      return;
+    }
+    void submit(how);
+  };
+
   // Answers to Codex's questions go out from here, with the settings picked in this composer.
   useEffect(() => {
     const onSend = (e: Event) => {
@@ -162,6 +198,27 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
   });
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // An open question: with the box empty, 1–9 pick (until you choose "Other"), arrows move, Enter takes.
+    if (ask && !e.ctrlKey && !e.metaKey && !e.altKey && !e.nativeEvent.isComposing && text === "" && !attachments.length) {
+      if (!ask.other && /^[1-9]$/.test(e.key) && ask.pick(Number(e.key) - 1)) {
+        e.preventDefault();
+        return;
+      }
+      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && ask.rows) {
+        e.preventDefault();
+        ask.move(e.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey && ask.hl != null) {
+        e.preventDefault();
+        ask.pick(ask.hl);
+        return;
+      }
+      if (e.key === "Escape" && ask.unpick()) {
+        e.preventDefault();
+        return;
+      }
+    }
     if (e.key === "Tab" && e.shiftKey && hasModes) {
       // Same as Codex: Shift+Tab switches Plan mode.
       e.preventDefault();
@@ -171,7 +228,7 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       // While a turn runs: Enter steers it, Ctrl+Enter queues the message for the next turn.
-      void submit(e.ctrlKey || e.metaKey ? "queue" : running ? "steer" : "auto");
+      send(e.ctrlKey || e.metaKey ? "queue" : running ? "steer" : "auto");
     } else if (e.key === "Escape" && running) {
       e.preventDefault();
       void interrupt(threadId);
@@ -232,8 +289,9 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     <>
     <QueueTray threadId={threadId} />
     <div
-      className={`composer ${running ? "running" : ""} ${elsewhere ? "elsewhere" : ""} ${compact ? "compact" : ""} ${planning ? "planning" : ""}`}
+      className={`composer ${running ? "running" : ""} ${elsewhere ? "elsewhere" : ""} ${compact ? "compact" : ""} ${planning ? "planning" : ""} ${ask ? "asking" : ""}`}
     >
+      {ask && <QuestionDock flow={ask} compact={compact} />}
       {elsewhere && (
         <div className="composer-elsewhere">
           <LoaderCircle size={12} className="spin" />
@@ -265,6 +323,8 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
         placeholder={
           elsewhere
             ? "Waiting for the other app to finish…"
+            : ask
+              ? askHint(ask)
             : finishing
               ? "Wrapping up — Enter sends right after this summary  (Esc stops)"
               : running
@@ -335,7 +395,7 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
             <Square size={12} fill="currentColor" />
           </button>
         ) : (
-          <button className="send" title={finishing ? "Send right after this summary (Enter)" : running ? "Steer the running turn (Enter) · Ctrl+Enter queues for after" : "Send (Enter)"} disabled={elsewhere || (!text.trim() && !attachments.length)} onClick={(e) => void submit(e.ctrlKey || e.metaKey ? "queue" : running ? "steer" : "auto")}>
+          <button className="send" title={finishing ? "Send right after this summary (Enter)" : running ? "Steer the running turn (Enter) · Ctrl+Enter queues for after" : "Send (Enter)"} disabled={elsewhere || (!text.trim() && !attachments.length)} onClick={(e) => send(e.ctrlKey || e.metaKey ? "queue" : running ? "steer" : "auto")}>
             <ArrowUp size={16} />
           </button>
         )}

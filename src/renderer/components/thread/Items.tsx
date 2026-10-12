@@ -105,7 +105,7 @@ function AgentMessage({ item, streaming, threadId }: { item: Extract<ThreadItem,
   return (
     <div className={`msg-agent ${item.phase === "commentary" ? "commentary" : ""} ${streaming ? "streaming" : ""}`}>
       <Markdown text={item.text} streaming={streaming} />
-      {!streaming && item.questions?.length ? <ReplyQuestions threadId={threadId} itemId={item.id} questions={item.questions} /> : null}
+      {!streaming && item.questions?.length ? <ReplyQuestions threadId={threadId} itemId={item.id} text={item.text} questions={item.questions} /> : null}
     </div>
   );
 }

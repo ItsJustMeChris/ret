@@ -359,9 +359,9 @@ function registerIpc() {
   ipcMain.handle(IPC.stat, async (_e, p: string) => {
     try {
       const st = await stat(p);
-      return { exists: true, isDir: st.isDirectory() };
+      return { exists: true, isDir: st.isDirectory(), size: st.size };
     } catch {
-      return { exists: false, isDir: false };
+      return { exists: false, isDir: false, size: 0 };
     }
   });
   ipcMain.handle(IPC.editorAvailable, () => vscodeInstalled());

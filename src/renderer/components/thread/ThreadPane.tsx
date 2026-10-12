@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { useThreads, markAttended, markVisible } from "../../state/threads";
 import { addFilesToThread } from "../../state/attach";
+import { viewFile } from "../../lib/viewFile";
+import { openFileRef, resolvePath } from "../../lib/files";
 import { useUI, isDraft } from "../../state/ui";
 import { addProject, archiveThread, compactThread, forkThread, hydrateThread, openThread, renameThread, retargetDraft } from "../../state/actions";
 import { baseName, buildProjects, threadTitle } from "../../state/projects";
@@ -97,8 +99,31 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
     },
   };
 
+  // A file path anywhere in the transcript (tool steps, edits, attachments, paths written as code)
+  // opens in Ret's viewer; Ctrl+click opens it in VS Code or its app, Alt+click reveals it. Runs
+  // before the path's row would fold or unfold. File links in replies handle themselves.
+  const onPathClick = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const el = (e.target as Element).closest<HTMLElement>(".transcript [data-path]");
+    if (!el?.dataset.path || el.closest("a.file-link, .thread-img")) return;
+    if (!window.getSelection()?.isCollapsed) return; // finishing a text selection, not a click
+    e.preventDefault();
+    e.stopPropagation();
+    const fileRef = { path: el.dataset.path, line: Number(el.dataset.line) || undefined, col: Number(el.dataset.col) || undefined };
+    if (e.altKey) void bridge.shell.reveal(resolvePath(fileRef.path, cwd));
+    else if (e.ctrlKey || e.metaKey) void openFileRef(fileRef, cwd);
+    else void viewFile(fileRef, cwd, threadId);
+  };
+
   return (
-    <div ref={ref} className={`thread-pane size-${size} chrome-${props.chrome} ${props.focused ? "focused" : ""}`} data-cwd={cwd} data-thread={threadId} {...drop}>
+    <div
+      ref={ref}
+      className={`thread-pane size-${size} chrome-${props.chrome} ${props.focused ? "focused" : ""}`}
+      data-cwd={cwd}
+      data-thread={threadId}
+      onClickCapture={onPathClick}
+      {...drop}
+    >
       {dropping && (
         <div className="drop-zone">
           <div className="drop-card">

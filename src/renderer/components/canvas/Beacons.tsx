@@ -68,7 +68,7 @@ export function Beacons({ board, viewportEl }: { board: Board; viewportEl: React
       }
       // Step out from under the toolbar and minimap: up off the bottom edge, left off the right one.
       const vr = el.getBoundingClientRect();
-      const blockers = [...el.parentElement!.querySelectorAll(".canvas-toolbar, .minimap")].map((b) => {
+      const blockers = [...el.parentElement!.querySelectorAll(".canvas-toolbar, .canvas-minimap")].map((b) => {
         const r = b.getBoundingClientRect();
         return { x0: r.left - vr.left - 16, y0: r.top - vr.top - 16, x1: r.right - vr.left + 16, y1: r.bottom - vr.top + 16 };
       });

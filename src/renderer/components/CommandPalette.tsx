@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AppWindow, FolderPlus, GitFork, LayoutGrid, MessageSquarePlus, PanelLeft, RefreshCw, Rows3, Scan, Settings, FolderGit2 } from "lucide-react";
-import { useUI, activeBoard, isDraft } from "../state/ui";
+import { AppWindow, FolderPlus, GitFork, LayoutGrid, MessageSquarePlus, PanelLeft, RefreshCw, Rows3, Scan, Settings, FolderGit2, Code2, Inbox } from "lucide-react";
+import { useUI, activeBoard, isThread } from "../state/ui";
 import { useThreads } from "../state/threads";
 import { buildProjects, flattenNode, threadTitle } from "../state/projects";
 import { addProject, forkThread, newThread, openThread } from "../state/actions";
@@ -38,6 +38,8 @@ function score(q: string, text: string): number {
 
 export function currentThreadId(): string | null {
   const ui = useUI.getState();
+  if (ui.mode === "code") return ui.code.chat;
+  if (ui.mode === "inbox") return ui.inbox.selected;
   if (ui.mode === "focus") {
     const split = ui.activeTab ? ui.splits[ui.activeTab] : undefined;
     return split && ui.focusedSide === "right" ? split.right : ui.activeTab;
@@ -62,7 +64,7 @@ function PaletteInner() {
 
   const entries = useMemo<Entry[]>(() => {
     const cur = currentThreadId();
-    const curReal = cur && !isDraft(cur) ? cur : null;
+    const curReal = cur && isThread(cur) ? cur : null;
     const tree = buildProjects(threads, projects, threadProject);
     const commands: Entry[] = [
       ...tree.slice(0, 30).map((p) => ({
@@ -84,6 +86,8 @@ function PaletteInner() {
         : []),
       { id: "focus", kind: "command", title: "Switch to Focus mode", icon: <Rows3 size={14} />, run: () => useUI.setState({ mode: "focus" }) },
       { id: "canvas", kind: "command", title: "Switch to Canvas mode", icon: <AppWindow size={14} />, run: () => useUI.setState({ mode: "canvas" }) },
+      { id: "code", kind: "command", title: "Switch to Code mode", icon: <Code2 size={14} />, run: () => useUI.setState({ mode: "code" }) },
+      { id: "inbox", kind: "command", title: "Open the Inbox", icon: <Inbox size={14} />, run: () => useUI.setState({ mode: "inbox" }) },
       { id: "fit", kind: "command", title: "Canvas: fit all windows", icon: <Scan size={14} />, run: () => { useUI.setState({ mode: "canvas" }); requestAnimationFrame(() => fitAll()); } },
       { id: "tidy", kind: "command", title: "Canvas: tidy windows", icon: <LayoutGrid size={14} />, run: () => { useUI.setState({ mode: "canvas" }); requestAnimationFrame(tidy); } },
       { id: "sidebar", kind: "command", title: "Toggle sidebar", icon: <PanelLeft size={14} />, run: () => useUI.setState((s) => ({ sidebarOpen: !s.sidebarOpen })) },

@@ -13,12 +13,14 @@ import {
   BookPlus,
   FileQuestion,
   GitFork,
+  Eye,
 } from "lucide-react";
 import { bridge } from "../bridge";
 import { copyText, looksLikePath, parseFileRef, resolvePath, revealLabel, type FileRef } from "../lib/files";
 import { forkThread } from "../state/actions";
+import { viewFile } from "../lib/viewFile";
 import { quoteText } from "../state/composerDrafts";
-import { isDraft } from "../state/ui";
+import { isThread } from "../state/ui";
 import { Menu, type MenuItem } from "./Menu";
 
 type Spell = { word: string; suggestions: string[]; at: number };
@@ -79,6 +81,12 @@ export function ContextMenuHost() {
           } else if (st.isDir) {
             items.push({ label: "Open folder", icon: <FolderOpen size={14} />, onClick: () => void bridge.shell.openPath(abs) });
           } else {
+            items.push({
+              label: file.line ? `View in Ret at line ${file.line}` : "View in Ret",
+              icon: <Eye size={14} />,
+              hint: "Click",
+              onClick: () => void viewFile(file!, cwd, target.closest("[data-thread]")?.getAttribute("data-thread")),
+            });
             if (editor) {
               items.push({
                 label: file.line ? `Open in VS Code at line ${file.line}` : "Open in VS Code",
@@ -119,7 +127,7 @@ export function ContextMenuHost() {
           // Text selected in a turn can seed a fork: branch at that turn, quote it in the new prompt.
           const turn = target.closest<HTMLElement>("section.turn[data-turn]");
           const threadId = turn?.closest<HTMLElement>("[data-thread]")?.dataset.thread;
-          if (turn && threadId && !isDraft(threadId) && window.getSelection()?.containsNode(turn, true)) {
+          if (turn && threadId && isThread(threadId) && window.getSelection()?.containsNode(turn, true)) {
             let next = turn.nextElementSibling;
             while (next && !next.matches("section.turn")) next = next.nextElementSibling;
             // A turn still running (or not yet confirmed) can't be a fork point; fork everything so far.

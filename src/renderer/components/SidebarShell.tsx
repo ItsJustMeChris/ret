@@ -8,7 +8,7 @@ const REOPEN_COOLDOWN_MS = 400; // after closing, only a clear signal reopens it
 /** Popups that belong to the sidebar (its context menus and dropdowns): it stays out while they're open. */
 const MENUS = ".menu, .sel-menu";
 /** Modals (settings, palette, dialogs) take over the screen: a peeked sidebar gets out of their way. */
-const MODAL = ".overlay";
+const MODAL = ".overlay:not(.monaco-editor *)"; // (Monaco's colour picker has an .overlay too)
 /** Typing in one of these (the filter, a rename) holds the sidebar out while the pointer stays near. */
 const FIELDS = "input, textarea, select, [contenteditable]";
 /** Things near the edge you might rest the pointer on for their own sake (not lingering for the sidebar). */
@@ -127,9 +127,14 @@ export function SidebarShell() {
 
       if (peekRef.current) {
         // Open: close on a decisive move away, give drifting some grace.
-        if (hovering.current) return;
         const r = layer.current?.getBoundingClientRect();
         const beyond = r ? e.clientX - r.right : 0;
+        if (hovering.current) {
+          // Normally pointerleave ends hovering; but if it was only inferred (the pointer was never
+          // really over it), no leave comes, so a pointer well clear of the panel lets go too.
+          if (beyond <= GRACE_BAND) return;
+          hovering.current = false;
+        }
         if (beyond > 0 && m.vx > 0.9) scheduleHide(90);
         else if (beyond > GRACE_BAND) scheduleHide(160);
         return;

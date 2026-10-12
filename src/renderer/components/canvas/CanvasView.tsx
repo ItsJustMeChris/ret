@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Command, Copy, Folder, GitFork, LayoutGrid, MessageSquarePlus, Minus, Pencil, Plus, Scan, SquareDashed, Trash2, X } from "lucide-react";
-import { activeBoard, newId, updateBoard, useUI, type Board } from "../../state/ui";
-import { closeWindow, newThread, openThread } from "../../state/actions";
+import { Check, ChevronDown, Command, Copy, Folder, GitFork, LayoutGrid, MessageSquarePlus, Minus, Pencil, Plus, Scan, SquareDashed, Trash2, X, Code2, Inbox } from "lucide-react";
+import { activeBoard, appId, newId, updateBoard, useUI, type AppKind, type Board } from "../../state/ui";
+import { DRAG_APP } from "../Titlebar";
+import { closeWindow, focusWindow, newThread, openThread } from "../../state/actions";
 import { useThreads } from "../../state/threads";
 import { buildProjects, explicitKeys, projectKeyFor, type ProjectNode } from "../../state/projects";
 import { Links } from "./Links";
@@ -107,7 +108,7 @@ export function CanvasView() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || isTyping() || !useUI.getState().selectedWindows.length) return;
-      if (document.querySelector(".menu, .overlay, .dialog")) return;
+      if (document.querySelector(".menu, .overlay:not(.monaco-editor *), .dialog")) return;
       useUI.setState({ selectedWindows: [] });
     };
     window.addEventListener("keydown", onKey);
@@ -183,7 +184,9 @@ export function CanvasView() {
   };
 
   const onDrop = (e: React.DragEvent) => {
-    const id = e.dataTransfer.getData("application/x-ret-thread");
+    // A thread from the sidebar, or a mode (Inbox, Code) from the title bar to have as a window.
+    const app = e.dataTransfer.getData(DRAG_APP) as AppKind | "";
+    const id = app ? appId(app) : e.dataTransfer.getData("application/x-ret-thread");
     if (!id) return;
     e.preventDefault();
     const rect = vpRef.current!.getBoundingClientRect();
@@ -191,6 +194,7 @@ export function CanvasView() {
     const existing = activeBoard().windows.find((w) => w.threadId === id);
     if (existing) {
       updateBoard((b) => ({ ...b, windows: b.windows.map((w) => (w.id === existing.id ? { ...w, x: p.x - 40, y: p.y - 16 } : w)) }));
+      focusWindow(existing.id);
       return;
     }
     openThread(id, { mode: "canvas" });
@@ -217,7 +221,7 @@ export function CanvasView() {
         ref={vpRef}
         className="canvas-viewport"
         onPointerDown={onPointerDown}
-        onDragOver={(e) => e.dataTransfer.types.includes("application/x-ret-thread") && e.preventDefault()}
+        onDragOver={(e) => (e.dataTransfer.types.includes("application/x-ret-thread") || e.dataTransfer.types.includes(DRAG_APP)) && e.preventDefault()}
         onDrop={onDrop}
         onContextMenu={(e) => {
           const t = e.target as Element;
@@ -298,6 +302,15 @@ function contextProject(projects: ProjectNode[]): ProjectNode | undefined {
   return projects.find((p) => p.key === key) ?? projects[0];
 }
 
+/** Inbox or Code as a window at `at`. There's one of each: if it's open already, it moves there. */
+function placeApp(kind: AppKind, at: { x: number; y: number }) {
+  const id = appId(kind);
+  const existing = activeBoard().windows.find((w) => w.threadId === id);
+  if (!existing) return openThread(id, { mode: "canvas", at });
+  updateBoard((b) => ({ ...b, windows: b.windows.map((w) => (w.id === existing.id ? { ...w, x: at.x, y: at.y } : w)) }));
+  focusWindow(existing.id);
+}
+
 function canvasMenu(at: { x: number; y: number }, x: number, y: number, setMenu: SetMenu): MenuItem[] {
   const ui = useUI.getState();
   const projects = buildProjects(useThreads.getState().threads, ui.projects, ui.threadProject);
@@ -322,6 +335,12 @@ function canvasMenu(at: { x: number; y: number }, x: number, y: number, setMenu:
         ),
     },
     { label: "Open a thread…", icon: <Command size={14} />, hint: "Ctrl+K", onClick: () => useUI.setState({ paletteOpen: true }) },
+    ...(["inbox", "code"] as const).map((kind) => ({
+      label: kind === "inbox" ? "Inbox window" : "Code window",
+      icon: kind === "inbox" ? <Inbox size={14} /> : <Code2 size={14} />,
+      hint: board.windows.some((w) => w.threadId === appId(kind)) ? "move here" : "here",
+      onClick: () => placeApp(kind, at),
+    })),
     { separator: true },
     { label: "Fit all windows", icon: <Scan size={14} />, hint: "Ctrl+0", disabled: !board.windows.length, onClick: () => fitAll() },
     { label: "Tidy windows", icon: <LayoutGrid size={14} />, disabled: !board.windows.length, onClick: tidy },

@@ -124,7 +124,7 @@ export interface RetBridge {
   };
   files: {
     saveImage(data: ArrayBuffer, ext: string): Promise<string>;
-    stat(path: string): Promise<{ exists: boolean; isDir: boolean }>;
+    stat(path: string): Promise<{ exists: boolean; isDir: boolean; size?: number }>;
     /** Where a dropped/pasted File lives on disk; null when it has no path (e.g. dragged from a web page). */
     pathFor(file: File): string | null;
   };

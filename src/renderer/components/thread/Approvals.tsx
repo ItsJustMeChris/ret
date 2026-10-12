@@ -9,7 +9,10 @@ import { Checkbox } from "../ui/Toggle";
 import { unwrapCommand } from "../../lib/format";
 
 export function Approvals({ threadId }: { threadId: string }) {
-  const reqs = useThreads(useShallow((s) => Object.values(s.requests).filter((r) => r.threadId === threadId)));
+  // Questions (request_user_input) are answered in the dock on top of the composer instead.
+  const reqs = useThreads(
+    useShallow((s) => Object.values(s.requests).filter((r) => r.threadId === threadId && r.method !== "item/tool/requestUserInput")),
+  );
   if (!reqs.length) return null;
   return (
     <div className="approvals">
@@ -150,6 +153,7 @@ export function RequestCard({ req, compact }: { req: PendingRequest; compact?: b
 /**
  * Codex stopped to ask (the request_user_input tool, in Plan mode): one or more questions, each
  * with suggested answers and/or room to write your own. Skipping tells it you'd rather not say.
+ * Shown where there's no composer (glance windows); thread panes answer in the QuestionDock.
  */
 function UserInputCard({ req }: { req: PendingRequest }) {
   const questions: { id: string; header: string; question: string; isOther: boolean; isSecret: boolean; options: { label: string; description: string }[] | null }[] =

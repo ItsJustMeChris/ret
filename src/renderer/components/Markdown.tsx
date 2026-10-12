@@ -2,6 +2,7 @@ import { memo, useCallback, useLayoutEffect, useRef } from "react";
 import { bridge } from "../bridge";
 import { renderMarkdown } from "../lib/markdown";
 import { imageUrl, openFileRef, resolvePath } from "../lib/files";
+import { viewFile } from "../lib/viewFile";
 import { openImage } from "./ImageViewer";
 
 /** Sanitized markdown: copy buttons on code blocks, web links open in the browser, file links open locally. */
@@ -56,9 +57,10 @@ export const Markdown = memo(function Markdown({ text, className, streaming }: {
       e.preventDefault();
       const ref = { path: file.dataset.path, line: Number(file.dataset.line) || undefined, col: Number(file.dataset.col) || undefined };
       const cwd = file.closest("[data-cwd]")?.getAttribute("data-cwd");
-      // Alt+click reveals instead of opening.
+      // Click views it in Ret; Ctrl+click opens it in VS Code (or its app); Alt+click reveals it.
       if (e.altKey) void bridge.shell.reveal(resolvePath(ref.path, cwd));
-      else void openFileRef(ref, cwd);
+      else if (e.ctrlKey || e.metaKey) void openFileRef(ref, cwd);
+      else void viewFile(ref, cwd, file.closest("[data-thread]")?.getAttribute("data-thread"));
       return;
     }
     const a = target.closest("a");

@@ -86,5 +86,8 @@
       "owner": "ItsJustMeChris",
       "repo": "ret"
     }
+  },
+  "dependencies": {
+    "monaco-editor": "0.57.0"
   }
 }

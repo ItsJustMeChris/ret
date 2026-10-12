@@ -6,12 +6,14 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Strict CSP for packaged builds only; the dev server needs inline HMR preambles.
+// ret-img: is the main process's local-image protocol (images in threads); the code viewer's
+// Monaco runs its worker from a bundled file.
 const csp: Plugin = {
   name: "ret-csp",
   apply: "build",
   transformIndexHtml(html) {
     const policy =
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file:; connect-src 'self'; font-src 'self' data:";
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: ret-img:; connect-src 'self'; font-src 'self' data:; worker-src 'self'";
     return html.replace("<head>", `<head>\n    <meta http-equiv="Content-Security-Policy" content="${policy}" />`);
   },
 };
@@ -30,6 +32,7 @@ export default defineConfig({
     target: "chrome140",
     sourcemap: false,
     reportCompressedSize: false,
-    chunkSizeWarningLimit: 1500,
+    // The code viewer's Monaco is one ~4 MB chunk, loaded only when a file is first opened.
+    chunkSizeWarningLimit: 4500,
   },
 });

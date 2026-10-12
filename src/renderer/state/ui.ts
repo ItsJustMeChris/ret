@@ -1,7 +1,27 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type ViewMode = "focus" | "canvas";
+export type ViewMode = "focus" | "canvas" | "code" | "inbox";
+
+/** Code mode: a project's files in an editor, with one of its threads to talk to alongside. */
+export interface CodeLayout {
+  /** Project whose folder the explorer shows; null follows the chat thread's project. */
+  project: string | null;
+  /** Open files (file:… view ids), in tab order, and the one showing. */
+  tabs: string[];
+  active: string | null;
+  /** Thread (or draft) in the chat column. */
+  chat: string | null;
+  /** Explorer folders that are open (absolute paths). */
+  expanded: Record<string, true>;
+  explorerWidth: number;
+  chatWidth: number;
+}
+
+/** Inbox mode: threads that want something from you, across every project. */
+export interface InboxState {
+  selected: string | null;
+}
 export type AccessPreset = "config" | "read-only" | "auto" | "full";
 export type Theme = "dark" | "light" | "system";
 
@@ -86,6 +106,8 @@ export interface UIState {
   /** Canvas windows picked with Shift+click (or a Shift+drag marquee); dragging one moves them all. */
   selectedWindows: string[];
   composer: { model: string | null; effort: string | null; access: AccessPreset; speed?: string };
+  code: CodeLayout;
+  inbox: InboxState;
   paletteOpen: boolean;
   settingsOpen: boolean;
 }
@@ -120,6 +142,8 @@ export const useUI = create<UIState>()(
       focusedWindow: null,
       selectedWindows: [],
       composer: { model: null, effort: null, access: "config" },
+      code: { project: null, tabs: [], active: null, chat: null, expanded: {}, explorerWidth: 260, chatWidth: 420 },
+      inbox: { selected: null },
       paletteOpen: false,
       settingsOpen: false,
     }),
@@ -135,6 +159,17 @@ export const useUI = create<UIState>()(
 );
 
 export const isDraft = (id: string) => id.startsWith("draft:");
+/** A file open as its own view (a tab, split side or canvas window) rather than a thread. */
+export const isFile = (id: string) => id.startsWith("file:");
+export const fileId = (path: string) => `file:${path}`;
+export const filePath = (id: string) => id.slice(5);
+/** One of Ret's own views (Inbox, Code) living as a window on the canvas desktop. */
+export type AppKind = "inbox" | "code";
+export const isApp = (id: string) => id.startsWith("app:");
+export const appId = (kind: AppKind) => `app:${kind}`;
+export const appKind = (id: string) => id.slice(4) as AppKind;
+/** A real Codex thread (not a draft, a file view, or an app window). */
+export const isThread = (id: string) => !isDraft(id) && !isFile(id) && !isApp(id);
 export const newId = uid;
 
 export function activeBoard(s: UIState = useUI.getState()): Board {

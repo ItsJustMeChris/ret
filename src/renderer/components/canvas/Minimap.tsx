@@ -63,7 +63,7 @@ export function Minimap({ board, viewportEl }: { board: Board; viewportEl: React
   };
 
   return (
-    <div className="minimap" style={{ width: W, height: H }} onPointerDown={navigate}>
+    <div className="canvas-minimap" style={{ width: W, height: H }} onPointerDown={navigate}>
       {board.windows.map((w, i) => (
         <div
           key={w.id}

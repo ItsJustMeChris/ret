@@ -24,7 +24,8 @@ import {
   type QueuedMessage,
   type ThreadSettings,
 } from "./threads";
-import { activeBoard, isDraft, newId, updateBoard, useUI, type AccessPreset, type CanvasWin, type FocusSplit, type UIState } from "./ui";
+import { activeBoard, appId, appKind, fileId, isApp, isDraft, isFile, isThread, newId, updateBoard, useUI, type AccessPreset, type CanvasWin, type FocusSplit, type UIState, type ViewMode } from "./ui";
+import { onFsChanged, useFiles } from "./files";
 
 // ---------------------------------------------------------------------------
 // Boot: wire the transport into the stores.
@@ -59,6 +60,9 @@ export function bootstrap() {
         useConn.setState((s) => ({
           rateLimits: s.rateLimits ? { ...s.rateLimits, rateLimits: params.rateLimits ?? s.rateLimits.rateLimits } : s.rateLimits,
         }));
+        return;
+      case "fs/changed":
+        onFsChanged(params);
         return;
       case "item/started":
       case "item/completed":
@@ -249,7 +253,7 @@ export function loadThreadList(): Promise<void> {
 const HISTORY_PAGE = 12;
 
 export async function hydrateThread(threadId: string) {
-  if (isDraft(threadId)) return;
+  if (!isThread(threadId)) return;
   const lt = useThreads.getState().live[threadId];
   if (lt?.hydrated || lt?.hydrating) return;
   patchLive(threadId, { hydrating: true, error: null });
@@ -582,11 +586,14 @@ function settingsFrom(res: {
   };
 }
 
-/** True once the running turn has started streaming its final answer (a steer then goes unanswered). */
+/**
+ * True once the running turn has started streaming its final answer (a steer then goes unanswered).
+ * An async question is phased as a final answer too, but the turn carries on after it.
+ */
 export function isWritingFinalAnswer(lt: LiveThread): boolean {
   const turn = lt.activeTurnId ? lt.turns[lt.activeTurnId] : undefined;
   const last = turn ? lt.items[turn.itemIds[turn.itemIds.length - 1]] : undefined;
-  return last?.type === "agentMessage" && last.phase === "final_answer";
+  return last?.type === "agentMessage" && last.phase === "final_answer" && last.delivery !== "async";
 }
 
 function enqueueMessage(threadId: string, msg: QueuedMessage) {
@@ -774,17 +781,71 @@ const MAX_TABS = 14;
 export interface OpenOptions {
   /** Canvas: place next to this thread's window. Focus: insert the tab after it / pair with it. */
   besideThread?: string;
-  mode?: "focus" | "canvas";
+  mode?: ViewMode;
   /** Focus: show beside the active tab (or besideThread) in a split instead of a new tab. */
   side?: boolean;
   /** Canvas: world position for the new window's top-left. */
   at?: { x: number; y: number };
 }
 
+/**
+ * Open a file as its own view next to the thread it came from: the other side of a split in
+ * Focus mode, a window beside the thread's on the canvas. Already open: brought forward and
+ * taken to `line`.
+ */
+export function openFile(path: string, opts: { line?: number; col?: number; from?: string | null } = {}) {
+  // One view per file, however the path was written (C:/a/b vs C:\a\b).
+  const norm = bridge.platform === "win32" ? path.replace(/\//g, "\\") : path;
+  const id = fileId(norm);
+  useFiles.setState((s) => ({ targets: { ...s.targets, [id]: { line: opts.line, col: opts.col, n: (s.targets[id]?.n ?? 0) + 1 } } }));
+  const ui = useUI.getState();
+  const from = opts.from && !isFile(opts.from) ? opts.from : undefined;
+  // Code mode is where files live; opening one from the inbox goes there too.
+  if (ui.mode === "code" || ui.mode === "inbox") {
+    useUI.setState((st) => ({
+      mode: "code",
+      code: { ...st.code, tabs: st.code.tabs.includes(id) ? st.code.tabs : [...st.code.tabs, id], active: id, chat: from ?? st.code.chat },
+    }));
+    return;
+  }
+  if (ui.mode === "canvas") {
+    const codeWin = activeBoard().windows.find((w) => w.threadId === appId("code"));
+    if (codeWin) {
+      useUI.setState((st) => ({ code: { ...st.code, tabs: st.code.tabs.includes(id) ? st.code.tabs : [...st.code.tabs, id], active: id, chat: from ?? st.code.chat } }));
+      focusWindow(codeWin.id, true);
+      return;
+    }
+    openThread(id, { besideThread: from });
+    return;
+  }
+  // Already showing (as a tab or beside something): go to it rather than rearranging the view.
+  const shownBeside = Object.entries(ui.splits).find(([left, sp]) => sp.right === id && ui.tabs.includes(left))?.[0];
+  if (ui.tabs.includes(id) || shownBeside) {
+    openThread(id);
+    return;
+  }
+  openThread(id, { side: true, besideThread: from ?? (ui.activeTab && !isFile(ui.activeTab) ? ui.activeTab : undefined) });
+}
+
 export function openThread(threadId: string, opts: OpenOptions = {}) {
   const ui = useUI.getState();
   const mode = opts.mode ?? ui.mode;
-  if (!isDraft(threadId)) void hydrateThread(threadId);
+  void hydrateThread(threadId);
+
+  // Code mode: a thread goes in the chat column (a file goes in an editor tab).
+  if (mode === "code") {
+    if (isFile(threadId)) {
+      useUI.setState((s) => ({ code: { ...s.code, tabs: s.code.tabs.includes(threadId) ? s.code.tabs : [...s.code.tabs, threadId], active: threadId } }));
+    } else {
+      useUI.setState((s) => ({ code: { ...s.code, chat: threadId, project: null } }));
+    }
+    return;
+  }
+  // Inbox mode: show it in the reading pane.
+  if (mode === "inbox" && !isFile(threadId)) {
+    useUI.setState((s) => ({ inbox: { ...s.inbox, selected: threadId } }));
+    return;
+  }
 
   if (mode === "focus") {
     useUI.setState((s) => focusOpen(s, threadId, opts));
@@ -799,9 +860,9 @@ export function openThread(threadId: string, opts: OpenOptions = {}) {
   }
   const z = Math.max(0, ...board.windows.map((w) => w.z)) + 1;
   const besideWin = opts.besideThread ? board.windows.find((w) => w.threadId === opts.besideThread) : undefined;
-  const size = { w: 560, h: 640 };
+  const size = isApp(threadId) ? (appKind(threadId) === "code" ? { w: 1240, h: 760 } : { w: 980, h: 680 }) : { w: 560, h: 640 };
   const pos = opts.at
-    ? clampToView(opts.at, besideWin?.w ?? size.w, besideWin?.h ?? size.h, board.viewport)
+    ? clampToView(opts.at, isApp(threadId) ? size.w : (besideWin?.w ?? size.w), isApp(threadId) ? size.h : (besideWin?.h ?? size.h), board.viewport)
     : besideWin
       ? freeSpot(board.windows, besideWin.x + besideWin.w + 24, besideWin.y, besideWin.w, besideWin.h)
       : freeSpotInView(board.windows, board.viewport, size.w, size.h);
@@ -810,13 +871,24 @@ export function openThread(threadId: string, opts: OpenOptions = {}) {
     threadId,
     x: pos.x,
     y: pos.y,
-    w: besideWin?.w ?? size.w,
-    h: besideWin?.h ?? size.h,
+    w: isApp(threadId) ? size.w : (besideWin?.w ?? size.w),
+    h: isApp(threadId) ? size.h : (besideWin?.h ?? size.h),
     z,
   };
   updateBoard((b) => ({ ...b, windows: [...b.windows, win] }));
   useUI.setState({ focusedWindow: win.id });
   window.dispatchEvent(new CustomEvent("ret:reveal-window", { detail: win.id }));
+}
+
+/** Close a file tab in Code mode (its unsaved edits are kept for when it's reopened). */
+export function closeCodeTab(id: string) {
+  useUI.setState((s) => {
+    const i = s.code.tabs.indexOf(id);
+    if (i < 0) return s;
+    const tabs = s.code.tabs.filter((t) => t !== id);
+    const active = s.code.active === id ? (tabs[Math.min(i, tabs.length - 1)] ?? null) : s.code.active;
+    return { code: { ...s.code, tabs, active } };
+  });
 }
 
 /** Focus-mode tab/split bookkeeping for opening `id`. */
@@ -828,8 +900,10 @@ function focusOpen(s: UIState, id: string, opts: OpenOptions): Partial<UIState> 
       if (!tabs.includes(left)) tabs.splice(s.activeTab ? tabs.indexOf(s.activeTab) + 1 : tabs.length, 0, left);
       const splits = { ...s.splits };
       const prev = splits[left];
-      // Whatever was beside it keeps a tab of its own rather than vanishing.
-      if (prev && prev.right !== id && !tabs.includes(prev.right)) tabs.splice(tabs.indexOf(left) + 1, 0, prev.right);
+      // Whatever was beside it keeps a tab of its own rather than vanishing; except a file being
+      // swapped for another file, which just takes its place (like a preview tab).
+      const swappingFiles = prev && isFile(prev.right) && isFile(id);
+      if (prev && prev.right !== id && !swappingFiles && !tabs.includes(prev.right)) tabs.splice(tabs.indexOf(left) + 1, 0, prev.right);
       splits[left] = { right: id, ratio: prev?.ratio ?? 0.5 };
       const capped = capTabs(tabs, left);
       return { tabs: capped, splits: pruneSplits(capped, splits), activeTab: left, focusedSide: "right" };

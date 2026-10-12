@@ -195,6 +195,7 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
       stick.current = false;
     };
     ro.observe(inner);
+    ro.observe(el); // the composer growing (a question docking on it) shrinks the view from below
     el.addEventListener("scroll", onScroll, { passive: true });
     el.addEventListener("ret:unstick", unstick);
     el.scrollTop = el.scrollHeight;

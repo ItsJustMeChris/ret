@@ -1,12 +1,14 @@
 import { useEffect } from "react";
-import { useUI, activeBoard, isDraft } from "./state/ui";
+import { useUI, activeBoard, isThread } from "./state/ui";
 import { useConn } from "./state/conn";
 import { useThreads } from "./state/threads";
-import { closePane, closeTab, closeWindow, focusWindow, forkThread, newThreadNear } from "./state/actions";
+import { closeCodeTab, closePane, closeTab, closeWindow, focusWindow, forkThread, newThreadNear } from "./state/actions";
 import { Titlebar } from "./components/Titlebar";
 import { SidebarShell } from "./components/SidebarShell";
 import { FocusView } from "./components/FocusView";
 import { CanvasView } from "./components/canvas/CanvasView";
+import { CodeView } from "./components/code/CodeView";
+import { InboxView } from "./components/inbox/InboxView";
 import { CommandPalette, currentThreadId } from "./components/CommandPalette";
 import { SettingsModal } from "./components/Settings";
 import { LoginGate } from "./components/LoginGate";
@@ -47,6 +49,14 @@ function useAutoApplyUpdates() {
 
 function cycle(dir: 1 | -1) {
   const ui = useUI.getState();
+  if (ui.mode === "code") {
+    const tabs = ui.code.tabs;
+    if (!tabs.length) return;
+    const i = ui.code.active ? tabs.indexOf(ui.code.active) : -1;
+    useUI.setState((s) => ({ code: { ...s.code, active: tabs[(i + dir + tabs.length) % tabs.length] } }));
+    return;
+  }
+  if (ui.mode === "inbox") return;
   if (ui.mode === "focus") {
     if (!ui.tabs.length) return;
     const i = ui.activeTab ? ui.tabs.indexOf(ui.activeTab) : -1;
@@ -64,6 +74,12 @@ function useShortcuts() {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       const ui = useUI.getState();
+      // Alt+1…4: Focus, Canvas, Code, Inbox.
+      if (e.altKey && !mod && !e.shiftKey && /^[1-4]$/.test(e.key)) {
+        e.preventDefault();
+        useUI.setState({ mode: (["focus", "canvas", "code", "inbox"] as const)[Number(e.key) - 1] });
+        return;
+      }
       if (!mod) return;
       const k = e.key.toLowerCase();
       if (k === "k") {
@@ -81,7 +97,7 @@ function useShortcuts() {
       } else if (k === "f" && e.shiftKey) {
         e.preventDefault();
         const id = currentThreadId();
-        if (id && !isDraft(id)) void forkThread(id);
+        if (id && isThread(id)) void forkThread(id);
       } else if (k === "w") {
         e.preventDefault();
         if (ui.mode === "focus" && ui.activeTab) {
@@ -90,6 +106,7 @@ function useShortcuts() {
           else closeTab(ui.activeTab);
         }
         else if (ui.mode === "canvas" && ui.focusedWindow) closeWindow(ui.focusedWindow);
+        else if (ui.mode === "code" && ui.code.active) closeCodeTab(ui.code.active);
       } else if (k === "tab") {
         e.preventDefault();
         cycle(e.shiftKey ? -1 : 1);
@@ -99,7 +116,10 @@ function useShortcuts() {
         if (ui.mode === "focus") {
           const id = ui.tabs[n];
           if (id) useUI.setState({ activeTab: id });
-        } else {
+        } else if (ui.mode === "code") {
+          const id = ui.code.tabs[n];
+          if (id) useUI.setState((s) => ({ code: { ...s.code, active: id } }));
+        } else if (ui.mode === "canvas") {
           const wins = activeBoard(ui).windows.slice().sort((a, b) => a.y - b.y || a.x - b.x);
           if (wins[n]) focusWindow(wins[n].id, true);
         }
@@ -132,7 +152,9 @@ export function App() {
       <Titlebar />
       <div className="app-body">
         <SidebarShell />
-        <main className="main">{mode === "focus" ? <FocusView /> : <CanvasView />}</main>
+        <main className="main">
+          {mode === "focus" ? <FocusView /> : mode === "canvas" ? <CanvasView /> : mode === "code" ? <CodeView /> : <InboxView />}
+        </main>
       </div>
       <CommandPalette />
       <SettingsModal />

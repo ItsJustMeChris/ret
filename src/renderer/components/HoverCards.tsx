@@ -32,7 +32,7 @@ function classify(el: HTMLElement): Card | null {
   const cwd = el.closest("[data-cwd]")?.getAttribute("data-cwd") ?? null;
   if (el.dataset.path) {
     const n = (v?: string) => Number(v) || undefined;
-    return { kind: "file", path: el.dataset.path, line: n(el.dataset.line), col: n(el.dataset.col), cwd, clickable: el.matches("a.file-link") };
+    return { kind: "file", path: el.dataset.path, line: n(el.dataset.line), col: n(el.dataset.col), cwd, clickable: el.matches("a.file-link") || (!!el.closest(".transcript") && !el.closest(".thread-img")) };
   }
   const href = el.getAttribute("href");
   if (el.tagName === "A" && href && /^(https?:|mailto:)/i.test(href)) {
@@ -262,13 +262,15 @@ function FileCard({ path, line, col, cwd, clickable }: { path: string; line?: nu
   const Icon = missing ? FileQuestion : isDir ? Folder : NOT_TEXT.test(name) ? FileIcon : FileCode2;
 
   const reveal = revealLabel.charAt(0).toLowerCase() + revealLabel.slice(1); // "reveal in File Explorer"
+  // Mirrors viewFile: text and code open in Ret's viewer, images in the image viewer, the rest
+  // with their app (programs are only ever revealed).
+  const external = info?.editor && !NOT_TEXT.test(name) ? "VS Code" : "its app";
   let action: string;
-  if (!clickable) action = `Right-click to open, ${reveal} or copy`;
+  if (!clickable) action = `Right-click to view, open, ${reveal} or copy`;
   else if (isDir) action = `Click to open the folder · Alt+click to ${reveal}`;
-  // Same order as openFileRef: text goes to the editor; programs are only ever revealed.
-  else if (info?.editor && !NOT_TEXT.test(name)) action = `Click to open in VS Code${line ? ` at line ${line}` : ""} · Alt+click to ${reveal}`;
-  else if (RUNNABLE.test(name)) action = `Click to ${reveal} (programs are never run)`;
-  else action = `Click to open · Alt+click to ${reveal}`;
+  else if (RUNNABLE.test(name) && NOT_TEXT.test(name)) action = `Click to ${reveal} (programs are never run)`;
+  else if (NOT_TEXT.test(name)) action = `Click to open · Alt+click to ${reveal}`;
+  else action = `Click to view${line ? ` at line ${line}` : ""} · Ctrl+click for ${external} · Alt+click to ${reveal}`;
 
   return (
     <div className="hc-link">

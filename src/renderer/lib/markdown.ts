@@ -1,5 +1,5 @@
 import { Marked } from "marked";
-import { parseFileRef } from "./files";
+import { looksLikePath, parseFileRef } from "./files";
 import DOMPurify from "dompurify";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
@@ -61,6 +61,13 @@ const marked = new Marked({
       const language = (lang ?? "").trim().split(/\s+/)[0];
       const label = language ? `<span class="code-lang">${escapeHtml(language)}</span>` : "";
       return `<div class="code-block">${label}<button class="code-copy" data-copy>Copy</button><pre><code class="hljs">${highlight(text, language)}</code></pre></div>`;
+    },
+    codespan({ text }) {
+      // `src/app.ts:12` in a reply is a file you can click (text arrives already escaped).
+      const raw = text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+      const ref = looksLikePath(raw) ? parseFileRef(raw) : null;
+      if (!ref) return `<code>${text}</code>`;
+      return `<code class="code-path" data-path="${escapeHtml(ref.path)}"${ref.line ? ` data-line="${ref.line}"` : ""}${ref.col ? ` data-col="${ref.col}"` : ""}>${text}</code>`;
     },
     image({ href, text }) {
       const alt = escapeHtml(text || "");
