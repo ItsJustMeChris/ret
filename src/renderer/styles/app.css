@@ -3080,6 +3080,18 @@ body.resizing .transcript {
   overflow: hidden;
   z-index: 10;
   cursor: pointer;
+  /* Hidden until the view moves (.awake, from JS); still hoverable, so pointing at the corner shows it. */
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.canvas-minimap.awake,
+.canvas-minimap:hover {
+  opacity: 1;
+  transition-duration: 0.15s;
+}
+/* Don't keep animating pulses and sweeps nobody can see. */
+.canvas-minimap:not(.awake, :hover) .mm-win {
+  animation-play-state: paused;
 }
 .mm-win {
   position: absolute;

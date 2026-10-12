@@ -94,7 +94,7 @@ Four ways to look at the same work; switch with the title bar or Alt+1…4.
 - **Canvas mode.** An infinite canvas of thread windows.
   - Drag a window by its title bar or any empty background; text shows an I-beam so it stays easy to select and copy.
   - Shift+click or Shift+drag a box to select several windows, then drag them together.
-  - Resize with edge snapping, maximize, tidy into rows, fit to screen, and keep several named boards. There's a minimap, and you can drag threads in from the sidebar.
+  - Resize with edge snapping, maximize, tidy into rows, fit to screen, and keep several named boards. There's a minimap, which shows while you pan or zoom and fades out once the view has been still a few seconds (point at the corner to bring it back), and you can drag threads in from the sidebar.
   - **Fork links** connect each thread to its forks. Click a link's badge to frame both windows; right-click it to compare them side by side in Focus.
   - **Right-click empty canvas** to start a thread right there (in the current project or any other), open a thread, fit/tidy/zoom, toggle links, or manage boards.
   - Windows off screen that need input, finished without you seeing them, failed, or are still working get a marker on the edge of the view pointing at them. Click it to jump there. The minimap shows the same states.

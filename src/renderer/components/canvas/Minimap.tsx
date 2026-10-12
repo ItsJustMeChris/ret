@@ -3,12 +3,15 @@ import { useShallow } from "zustand/react/shallow";
 import { useThreads } from "../../state/threads";
 import { useUI, type Board } from "../../state/ui";
 import { threadStateOf } from "../StatusDot";
-import { boundsOf, viewport } from "./viewport";
+import { boundsOf, viewport, type Viewport } from "./viewport";
 
 const W = 168;
 const H = 110;
+/** How long the view has to sit still before the minimap fades out. */
+const IDLE_MS = 2500;
 
 export function Minimap({ board, viewportEl }: { board: Board; viewportEl: React.RefObject<HTMLDivElement | null> }) {
+  const root = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLDivElement>(null);
   // needs input · working · failed · finished and not looked at yet (shimmers until clicked)
   const states = useThreads(useShallow((s) => board.windows.map((w) => threadStateOf(s, w.threadId))));
@@ -39,7 +42,27 @@ export function Minimap({ board, viewportEl }: { board: Board; viewportEl: React
     });
   }, [world, scale]);
 
-  if (board.windows.length < 2) return null;
+  // Shown while the view pans or zooms (or jumps to another board), faded out once it has sat still
+  // for a while. Hovering its corner brings it back (CSS). Toggled on the DOM, so panning doesn't re-render.
+  const shown = board.windows.length >= 2;
+  useLayoutEffect(() => {
+    if (!shown) return;
+    let last: Viewport | null = null;
+    let timer = 0;
+    const off = viewport.subscribe((vp) => {
+      if (last && vp.x === last.x && vp.y === last.y && vp.zoom === last.zoom) return;
+      last = vp;
+      root.current?.classList.add("awake");
+      clearTimeout(timer);
+      timer = window.setTimeout(() => root.current?.classList.remove("awake"), IDLE_MS);
+    });
+    return () => {
+      off();
+      clearTimeout(timer);
+    };
+  }, [shown]);
+
+  if (!shown) return null;
 
   const navigate = (e: React.PointerEvent) => {
     const el = viewportEl.current;
@@ -64,7 +87,7 @@ export function Minimap({ board, viewportEl }: { board: Board; viewportEl: React
   };
 
   return (
-    <div className="canvas-minimap" style={{ width: W, height: H }} onPointerDown={navigate}>
+    <div ref={root} className="canvas-minimap" style={{ width: W, height: H }} onPointerDown={navigate}>
       {board.windows.map((w, i) => (
         <div
           key={w.id}
