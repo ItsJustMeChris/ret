@@ -2,3 +2,13 @@ node_modules/
 dist/
 release/
 *.log
+
+# Code-signing material lives outside the repo (CI reads it from secrets); never commit it.
+.ret-signing/
+*.p12
+*.pfx
+*.key
+*.pem
+*.cer
+*.csr
+CSC_*.txt

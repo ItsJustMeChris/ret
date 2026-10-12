@@ -5,8 +5,12 @@ import { EDGE, EDGE_DWELL_MS, GRACE_BAND, NEAR, NEAR_DWELL_MS, STILL_SPEED, crea
 
 const REOPEN_COOLDOWN_MS = 400; // after closing, only a clear signal reopens it
 
-/** Anything that, while open, should keep a peeked sidebar from sliding away (and not open it). */
-const BUSY = ".menu, .sel-menu, .overlay, .dialog";
+/** Popups that belong to the sidebar (its context menus and dropdowns): it stays out while they're open. */
+const MENUS = ".menu, .sel-menu";
+/** Modals (settings, palette, dialogs) take over the screen: a peeked sidebar gets out of their way. */
+const MODAL = ".overlay";
+/** Typing in one of these (the filter, a rename) holds the sidebar out while the pointer stays near. */
+const FIELDS = "input, textarea, select, [contenteditable]";
 /** Things near the edge you might rest the pointer on for their own sake (not lingering for the sidebar). */
 const TARGETS = "button, a, input, textarea, select, [role=button], [role=tab], [contenteditable], .turn-rail";
 
@@ -37,18 +41,35 @@ export function SidebarShell() {
   const close = () => {
     if (!peekRef.current) return;
     peekRef.current = false;
+    // However it closed (Escape, a modal, a click elsewhere), the pointer isn't on it any more;
+    // a stale "hovering" would keep the next peek from ever sliding away.
+    hovering.current = false;
     closedAt.current = performance.now();
+    // Don't leave keystrokes going into a panel that's off screen.
+    const a = document.activeElement as HTMLElement | null;
+    if (a && layer.current?.contains(a)) a.blur();
     setPeek(false);
   };
 
   useEffect(() => {
     if (docked) {
       peekRef.current = false;
+      hovering.current = false;
       setPeek(false);
     }
   }, [docked]);
 
-  const busy = () => !!document.querySelector(BUSY) || !!layer.current?.contains(document.activeElement);
+  /**
+   * Something in the sidebar is in use: one of its menus is open, or you're typing in it with the
+   * pointer still nearby. A button that merely kept focus after a click doesn't count.
+   */
+  const busy = () => {
+    if (document.querySelector(MENUS)) return true;
+    const a = document.activeElement;
+    const el = layer.current;
+    if (!a || !el?.contains(a) || !a.matches(FIELDS)) return false;
+    return lastPointer.current.x <= el.getBoundingClientRect().right + GRACE_BAND;
+  };
 
   /** Close after `delay`, unless the pointer comes back or something inside is in use. */
   const scheduleHide = (delay: number) => {
@@ -90,7 +111,7 @@ export function SidebarShell() {
       const cooling = now - closedAt.current < REOPEN_COOLDOWN_MS;
       const { score, open: go } = edgeIntent(m, edgeSince ? now - edgeSince : 0, nearSince ? now - nearSince : 0, cooling);
       paintHandle(go ? 0 : score);
-      if (go && !document.querySelector(BUSY)) open();
+      if (go && !document.querySelector(MENUS) && !document.querySelector(MODAL)) open();
     };
 
     const onMove = (e: PointerEvent) => {
@@ -134,9 +155,32 @@ export function SidebarShell() {
       }
     };
 
-    // Dragging a thread (HTML drag and drop) toward the edge opens it as a drop target.
+    // Pointer events go quiet during HTML drag and drop, so drags report position here instead.
+    const inPanel = (x: number, y: number) => {
+      const r = layer.current?.getBoundingClientRect();
+      return !!r && x <= r.right && y >= r.top && y <= r.bottom;
+    };
     const onDragOver = (e: DragEvent) => {
-      if (!peekRef.current && e.clientX < 24) open();
+      lastPointer.current = { x: e.clientX, y: e.clientY };
+      // Dragging a thread toward the edge opens it as a drop target.
+      if (!peekRef.current) {
+        if (e.clientX < 24) open();
+        return;
+      }
+      if (inPanel(e.clientX, e.clientY)) {
+        hovering.current = true;
+        clearTimeout(hideTimer.current);
+      } else if (hovering.current) {
+        // Dragging out of it (say, a thread onto the canvas): get out of the way.
+        hovering.current = false;
+        scheduleHide(400);
+      }
+    };
+    // After a drop no pointerenter/leave fires; settle where the pointer ended up.
+    const onDragEnd = () => {
+      if (!peekRef.current) return;
+      hovering.current = inPanel(lastPointer.current.x, lastPointer.current.y);
+      if (!hovering.current) scheduleHide(300);
     };
     const onLeaveWindow = () => {
       tracker.reset();
@@ -146,19 +190,27 @@ export function SidebarShell() {
 
     window.addEventListener("pointermove", onMove, { passive: true });
     window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragend", onDragEnd);
+    window.addEventListener("drop", onDragEnd);
     document.documentElement.addEventListener("pointerleave", onLeaveWindow);
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragend", onDragEnd);
+      window.removeEventListener("drop", onDragEnd);
       document.documentElement.removeEventListener("pointerleave", onLeaveWindow);
       clearTimeout(dwellTimer);
       cancelAnimationFrame(frame);
     };
   }, [docked]);
 
-  // While peeking: Escape and clicks elsewhere put it away; a pointer that never arrives does too.
+  // While peeking: Escape, clicks elsewhere and modals put it away; so does a pointer that never arrives.
   useEffect(() => {
     if (!peek) return;
+    const modal = () => document.querySelector(MODAL) && close();
+    modal();
+    const watch = new MutationObserver(modal);
+    watch.observe(document.body, { childList: true, subtree: true });
     const arrive = window.setTimeout(() => {
       if (hovering.current) return;
       // A pointer that stopped right as the panel slid under it never fires pointerenter.
@@ -168,15 +220,16 @@ export function SidebarShell() {
       else scheduleHide(0);
     }, 1100);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !document.querySelector(BUSY)) close();
+      if (e.key === "Escape" && !document.querySelector(MENUS)) close();
     };
     const onDown = (e: PointerEvent) => {
       const t = e.target as Element;
-      if (!layer.current?.contains(t) && !t.closest(BUSY)) close();
+      if (!layer.current?.contains(t) && !t.closest(MENUS)) close();
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("pointerdown", onDown, true);
     return () => {
+      watch.disconnect();
       clearTimeout(arrive);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pointerdown", onDown, true);

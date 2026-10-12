@@ -189,6 +189,16 @@ function loadWindowState() {
   }
 }
 
+/**
+ * Packaged builds carry their icon in the executable / app bundle (electron-builder, from
+ * build/). Unpackaged (dev) runs would show Electron's own, so point at build/ directly.
+ */
+function devIcon(file: string): string | undefined {
+  if (app.isPackaged) return undefined;
+  const p = join(app.getAppPath(), "build", file);
+  return existsSync(p) ? p : undefined;
+}
+
 function createWindow() {
   const saved = loadWindowState();
   win = new BrowserWindow({
@@ -199,6 +209,7 @@ function createWindow() {
     minWidth: 720,
     minHeight: 480,
     show: false,
+    icon: process.platform === "darwin" ? undefined : devIcon(process.platform === "win32" ? "icon.ico" : "icon.png"),
     backgroundColor: "#000000",
     titleBarStyle: "hidden",
     titleBarOverlay: process.platform === "darwin" ? undefined : { color: "#00000000", symbolColor: "#a1a1aa", height: 38 },
@@ -401,6 +412,8 @@ function installMenu() {
 
 app.whenReady().then(() => {
   if (!primaryInstance) return;
+  const dock = process.platform === "darwin" ? devIcon("icon.png") : undefined;
+  if (dock) app.dock?.setIcon(dock);
   installMenu();
   registerIpc();
   createWindow();

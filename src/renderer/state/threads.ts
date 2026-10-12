@@ -67,9 +67,15 @@ export interface ThreadsState {
   listLoaded: boolean;
   live: Record<string, LiveThread>;
   requests: Record<string, PendingRequest>;
+  /** Threads that finished (or changed) while nobody was attending to them; cleared by attending. */
   unread: Record<string, true>;
-  /** Thread ids currently visible in a pane or canvas window. */
+  /** Thread ids currently mounted in a pane or canvas window (keeps them subscribed and fresh). */
   visible: Record<string, number>;
+  /**
+   * Thread ids the user is actually looking at: the open focus-mode pane(s), or the clicked
+   * canvas window. A canvas full of windows is all "visible", but only these count as seen.
+   */
+  attended: Record<string, number>;
   /** Threads whose latest turn is running in a different Codex process (VS Code, CLI, another app-server). */
   external: Record<string, ExternalRun>;
   /** Follow-ups typed while a turn runs; each is sent as its own turn when the current one ends. */
@@ -112,6 +118,7 @@ export const useThreads = create<ThreadsState>(() => ({
   requests: {},
   unread: {},
   visible: {},
+  attended: {},
   external: {},
   queued: {},
 }));
@@ -317,7 +324,7 @@ function apply(d: Draft, method: string, p: any, hooks: Hooks) {
       if (lt.activeTurnId === turn.id) lt.activeTurnId = null;
       lt.notice = null;
       setThread(d, p.threadId, { updatedAt: Math.floor(Date.now() / 1000), recencyAt: Math.floor(Date.now() / 1000) });
-      if (!d.visible[p.threadId]) {
+      if (!d.attended[p.threadId]) {
         d.unread = own(d.unread);
         d.unread[p.threadId] = true;
       }
@@ -491,17 +498,27 @@ export function upsertThreads(list: Thread[]) {
   });
 }
 
+const bump = (counts: Record<string, number>, id: string, delta: 1 | -1) => {
+  const next = { ...counts };
+  const n = (next[id] ?? 0) + delta;
+  if (n <= 0) delete next[id];
+  else next[id] = n;
+  return next;
+};
+
 export function markVisible(threadId: string, delta: 1 | -1) {
+  useThreads.setState((s) => ({ visible: bump(s.visible, threadId, delta) }));
+}
+
+/** The user started (+1) or stopped (-1) looking at a thread; looking at it marks it seen. */
+export function markAttended(threadId: string, delta: 1 | -1) {
   useThreads.setState((s) => {
-    const visible = { ...s.visible };
-    const n = (visible[threadId] ?? 0) + delta;
-    if (n <= 0) delete visible[threadId];
-    else visible[threadId] = n;
+    const attended = bump(s.attended, threadId, delta);
     if (delta === 1 && s.unread[threadId]) {
       const unread = { ...s.unread };
       delete unread[threadId];
-      return { visible, unread };
+      return { attended, unread };
     }
-    return { visible };
+    return { attended };
   });
 }

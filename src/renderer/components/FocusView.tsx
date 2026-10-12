@@ -211,7 +211,7 @@ function SplitView({ left, split, focusedSide }: { left: string; split: FocusSpl
 
   return (
     <div className="split" ref={box} style={{ gridTemplateColumns: `${split.ratio}fr 12px ${1 - split.ratio}fr` }}>
-      <div className={`split-pane ${focusedSide === "left" ? "on" : ""}`} onPointerDownCapture={() => focusedSide !== "left" && useUI.setState({ focusedSide: "left" })}>
+      <div className={`split-pane ${focusedSide === "left" ? "on" : ""}`} onPointerDownCapture={(e) => e.button === 0 && focusedSide !== "left" && useUI.setState({ focusedSide: "left" })}>
         <ThreadPane key={left} threadId={left} chrome="focus" focused={focusedSide === "left"} windowControls={close("left")} />
       </div>
       <div
@@ -231,7 +231,7 @@ function SplitView({ left, split, focusedSide }: { left: string; split: FocusSpl
           </span>
         )}
       </div>
-      <div className={`split-pane ${focusedSide === "right" ? "on" : ""}`} onPointerDownCapture={() => focusedSide !== "right" && useUI.setState({ focusedSide: "right" })}>
+      <div className={`split-pane ${focusedSide === "right" ? "on" : ""}`} onPointerDownCapture={(e) => e.button === 0 && focusedSide !== "right" && useUI.setState({ focusedSide: "right" })}>
         <ThreadPane key={split.right} threadId={split.right} chrome="focus" focused={focusedSide === "right"} windowControls={close("right")} />
       </div>
     </div>

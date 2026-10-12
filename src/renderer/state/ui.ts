@@ -83,6 +83,8 @@ export interface UIState {
   boards: Board[];
   activeBoard: string;
   focusedWindow: string | null;
+  /** Canvas windows picked with Shift+click (or a Shift+drag marquee); dragging one moves them all. */
+  selectedWindows: string[];
   composer: { model: string | null; effort: string | null; access: AccessPreset; speed?: string };
   paletteOpen: boolean;
   settingsOpen: boolean;
@@ -116,6 +118,7 @@ export const useUI = create<UIState>()(
       boards: [initialBoard],
       activeBoard: initialBoard.id,
       focusedWindow: null,
+      selectedWindows: [],
       composer: { model: null, effort: null, access: "config" },
       paletteOpen: false,
       settingsOpen: false,
@@ -124,7 +127,7 @@ export const useUI = create<UIState>()(
       name: "ret-ui",
       version: 1,
       partialize: (s) => {
-        const { paletteOpen: _p, settingsOpen: _s, ...rest } = s;
+        const { paletteOpen: _p, settingsOpen: _s, selectedWindows: _w, ...rest } = s;
         return rest;
       },
     },

@@ -13,6 +13,8 @@ npm run dist       # Windows installer in release/
 npm run dist:mac   # macOS dmg + zip in release/ (on a Mac)
 ```
 
+App icons live in `build/` (`icon.ico` for Windows, `icon.icns` for macOS, `icon.png` for Linux), generated from `build/icon-source.png` by `python scripts/make-icons.py` (needs Pillow). Re-run it after changing the source art.
+
 ## Release
 
 Installed copies of Ret update themselves from this repo's GitHub Releases. To ship a version:

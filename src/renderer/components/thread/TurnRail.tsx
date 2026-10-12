@@ -6,11 +6,42 @@ import { useUI } from "../../state/ui";
 import type { ThreadItem } from "../../protocol";
 import { duration, plainText } from "../../lib/format";
 
+const PAD = 8; // the rail's vertical padding (matches the CSS)
+const FOCUS_SLOT = 16; // px the turn under the pointer grows to on a crowded rail
+const MAX_FISHEYE = 24;
+
+/**
+ * Tick layout along a rail of height `H`: even slots, or with `focus` (pointer y) a fisheye
+ * (Sarkar–Brown) that grows the slots near the pointer and squeezes the rest. The transform
+ * is monotonic and leaves the focus point fixed, so the turn under the pointer is the one
+ * whose even slot contains it: picking never depends on the magnified layout, and can't flicker.
+ */
+function layoutTicks(n: number, H: number, focus: number | null): { top: number[]; size: number[] } {
+  const s0 = H / n;
+  const d = focus == null ? 0 : Math.min(MAX_FISHEYE, Math.max(0, FOCUS_SLOT / s0 - 1));
+  const g = (x: number) => ((d + 1) * x) / (d * x + 1);
+  const T = (u: number) => {
+    if (!d || focus == null) return u;
+    if (u >= focus) return focus + (H - focus) * g(H - focus > 0 ? (u - focus) / (H - focus) : 0);
+    return focus - focus * g(focus > 0 ? (focus - u) / focus : 0);
+  };
+  const top: number[] = [], size: number[] = [];
+  let prev = T(0);
+  for (let i = 0; i < n; i++) {
+    const next = T((i + 1) * s0);
+    top.push(prev);
+    size.push(next - prev);
+    prev = next;
+  }
+  return { top, size };
+}
+
 /**
  * Jump rail on the left of a transcript, just outside the text column: one tick per turn.
- * It stays invisible until the pointer reaches it, then fades in as a small frosted pill. Ticks for turns in view are
- * lit, the tick under the pointer and its neighbours magnify (dock-style), hovering shows the
- * turn's opening message, and clicking smooth-scrolls there.
+ * It stays invisible until the pointer reaches it, then fades in as a small frosted pill.
+ * Ticks for turns in view are lit; under the pointer the rail fisheyes so every turn is easy
+ * to hit however long the thread is; hovering shows the turn's opening message, and clicking
+ * smooth-scrolls there.
  */
 export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadId: string; scroller: React.RefObject<HTMLDivElement | null> }) {
   const turns = useThreads(
@@ -45,19 +76,41 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
     return () => io.disconnect();
   }, [scroller, turns]);
 
-  // Dock-style magnification, written straight to the DOM on pointer move.
-  const magnify = (clientY: number | null) => {
-    const el = rail.current;
-    if (!el) return;
-    for (const tick of el.querySelectorAll<HTMLElement>(".rail-tick")) {
-      if (clientY == null) {
-        tick.style.setProperty("--mag", "0");
-        continue;
-      }
-      const r = tick.getBoundingClientRect();
-      const d = (r.top + r.height / 2 - clientY) / 26;
-      tick.style.setProperty("--mag", String(Math.exp(-d * d)));
-    }
+  // Lay the ticks out (evenly, or fisheyed around the pointer), written straight to the DOM.
+  // Everything is computed, nothing measured per tick, so it stays cheap on long threads.
+  const height = useRef(0);
+  const frame = useRef(0);
+  const arrange = (focus: number | null) => {
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => {
+      const el = rail.current;
+      if (!el) return;
+      const ticks = el.querySelectorAll<HTMLElement>(".rail-tick");
+      if (!ticks.length || !height.current) return;
+      const { top, size } = layoutTicks(ticks.length, height.current, focus);
+      ticks.forEach((tick, i) => {
+        const centre = top[i] + size[i] / 2;
+        const d = focus == null ? Infinity : (centre - focus) / 26;
+        tick.style.transform = `translateY(${top[i]}px)`;
+        tick.style.height = `${size[i]}px`;
+        tick.style.setProperty("--h", String(size[i]));
+        tick.style.setProperty("--mag", focus == null ? "0" : String(Math.exp(-d * d)));
+      });
+    });
+  };
+
+  /** The turn under a pointer at `clientY`, from its even slot (see layoutTicks), and its focus y. */
+  const pick = (clientY: number) => {
+    const el = rail.current!;
+    const n = turns.length;
+    const H = height.current;
+    // Screen px → layout px: a canvas window may be zoomed.
+    const r = el.getBoundingClientRect();
+    const scale = r.height / el.offsetHeight || 1;
+    const y = Math.max(0, Math.min(H - 0.001, (clientY - r.top) / scale - PAD));
+    const i = Math.min(n - 1, Math.floor((y / H) * n));
+    const { top, size } = layoutTicks(n, H, y);
+    return { i, y, centre: PAD + top[i] + size[i] / 2 };
   };
 
   const jump = (id: string) => {
@@ -72,7 +125,23 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
     target.classList.add("flash");
   };
 
-  useLayoutEffect(() => magnify(null), [turns.length]);
+  // Track the rail's usable height; re-lay the ticks evenly when it or the turn count changes.
+  useLayoutEffect(() => {
+    const el = rail.current;
+    if (!el) return;
+    const measure = () => {
+      height.current = Math.max(1, el.clientHeight - PAD * 2);
+      arrange(null);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(frame.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turns.length >= 2, turns.length]);
 
   // Sit just left of the text column, and clear of the floating sidebar when it's pinned over us.
   const sidebar = useUI((s) => (s.sidebarOpen ? s.sidebarWidth : 0));
@@ -104,27 +173,33 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
       className="turn-rail"
       style={{ "--n": turns.length } as React.CSSProperties}
       onPointerMove={(e) => {
-        magnify(e.clientY);
-        const tick = (e.target as HTMLElement).closest<HTMLElement>(".rail-tick");
-        if (tick?.dataset.turn) {
-          const r = tick.getBoundingClientRect();
-          const box = rail.current!.getBoundingClientRect();
-          if (hover?.id !== tick.dataset.turn) setHover({ id: tick.dataset.turn, y: r.top + r.height / 2 - box.top });
-        }
+        const { i, y, centre } = pick(e.clientY);
+        arrange(y);
+        const id = turns[i];
+        if (hover?.id !== id || Math.abs(hover.y - centre) > 1) setHover({ id, y: centre });
       }}
       onPointerLeave={() => {
-        magnify(null);
+        arrange(null);
         setHover(null);
+      }}
+      // The pointer, not the hit-tested element, says which turn: clicks between ticks still land.
+      onClick={(e) => {
+        if (e.detail === 0) return; // keyboard activation goes to the focused tick's own onClick
+        e.preventDefault();
+        jump(turns[pick(e.clientY).i]);
       }}
     >
       {turns.map((id, i) => (
         <button
           key={id}
-          className={`rail-tick ${lit.has(id) ? "lit" : ""} ${id === running ? "running" : ""}`}
+          className={`rail-tick ${lit.has(id) ? "lit" : ""} ${id === running ? "running" : ""} ${hover?.id === id ? "hot" : ""}`}
           data-turn={id}
           style={{ "--i": i } as React.CSSProperties}
           aria-label={`Jump to turn ${i + 1}`}
-          onClick={() => jump(id)}
+          onClick={(e) => {
+            if (e.detail !== 0) return; // pointer clicks are handled by the rail
+            jump(id);
+          }}
         >
           <span />
         </button>

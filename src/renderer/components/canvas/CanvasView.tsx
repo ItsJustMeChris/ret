@@ -7,6 +7,7 @@ import { buildProjects, explicitKeys, projectKeyFor, type ProjectNode } from "..
 import { Links } from "./Links";
 import { CanvasWindow } from "./CanvasWindow";
 import { Minimap } from "./Minimap";
+import { Beacons } from "./Beacons";
 import { CARD_ZOOM, fitAll, revealWindow, tidy, viewport } from "./viewport";
 import { Menu, type MenuItem } from "../Menu";
 import { promptText } from "../ui/Dialog";
@@ -21,6 +22,7 @@ export function CanvasView() {
   const spaceDown = useRef(false);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const showLinks = useUI((s) => s.showLinks);
+  const selectedCount = useUI((s) => s.selectedWindows.length);
 
   // Load this board's saved viewport when switching boards.
   useLayoutEffect(() => {
@@ -101,12 +103,69 @@ export function CanvasView() {
     };
   }, []);
 
+  // Escape lets go of a multi-selection.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || isTyping() || !useUI.getState().selectedWindows.length) return;
+      if (document.querySelector(".menu, .overlay, .dialog")) return;
+      useUI.setState({ selectedWindows: [] });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Selections belong to a board.
+  useEffect(() => {
+    useUI.setState({ selectedWindows: [] });
+  }, [board.id]);
+
+  /** Shift+drag on empty canvas: rubber-band select, adding to what's already selected. */
+  const marquee = useRef<HTMLDivElement>(null);
+  const startMarquee = (e: React.PointerEvent) => {
+    const el = vpRef.current!;
+    const box = marquee.current!;
+    const origin = el.getBoundingClientRect();
+    const base = useUI.getState().selectedWindows;
+    const sx = e.clientX - origin.left, sy = e.clientY - origin.top;
+    try {
+      el.setPointerCapture(e.pointerId);
+    } catch {
+      /* capture is a nicety (keeps the band tracking outside the canvas) */
+    }
+    const move = (ev: PointerEvent) => {
+      const x0 = Math.min(sx, ev.clientX - origin.left), y0 = Math.min(sy, ev.clientY - origin.top);
+      const x1 = Math.max(sx, ev.clientX - origin.left), y1 = Math.max(sy, ev.clientY - origin.top);
+      Object.assign(box.style, { display: "block", transform: `translate(${x0}px, ${y0}px)`, width: `${x1 - x0}px`, height: `${y1 - y0}px` });
+      const a = viewport.toWorld(x0, y0), b = viewport.toWorld(x1, y1);
+      const hits = activeBoard()
+        .windows.filter((w) => w.x < b.x && w.x + w.w > a.x && w.y < b.y && w.y + w.h > a.y)
+        .map((w) => w.id);
+      const next = [...new Set([...base, ...hits])];
+      const cur = useUI.getState().selectedWindows;
+      if (next.length !== cur.length || next.some((id, i) => id !== cur[i])) useUI.setState({ selectedWindows: next });
+    };
+    const up = () => {
+      box.style.display = "none";
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  };
+
   // Drag-to-pan on empty canvas, middle mouse anywhere, or space+drag.
   const onPointerDown = (e: React.PointerEvent) => {
     const onBackground = e.target === vpRef.current || e.target === worldRef.current;
+    if (onBackground && e.button === 0 && e.shiftKey && !spaceDown.current) {
+      e.preventDefault();
+      startMarquee(e);
+      return;
+    }
     if (!(e.button === 1 || (e.button === 0 && (onBackground || spaceDown.current)))) return;
     e.preventDefault();
-    if (onBackground && e.button === 0) useUI.setState({ focusedWindow: null });
+    if (onBackground && e.button === 0 && !spaceDown.current) useUI.setState({ focusedWindow: null, selectedWindows: [] });
     const el = vpRef.current!;
     el.setPointerCapture(e.pointerId);
     el.classList.add("panning");
@@ -175,6 +234,7 @@ export function CanvasView() {
             <CanvasWindow key={w.id} win={w} card={card} focused={focused === w.id} />
           ))}
         </div>
+        <div ref={marquee} className="marquee" />
         {board.windows.length === 0 && (
           <div className="canvas-empty">
             <p>Drag threads here from the sidebar, or open them with <kbd>Ctrl K</kbd>.</p>
@@ -184,6 +244,15 @@ export function CanvasView() {
       </div>
       <div className="canvas-toolbar">
         <BoardSwitcher />
+        {selectedCount > 1 && (
+          <>
+            <span className="tb-sep" />
+            <button className="sel-chip" title="Drag any of them to move them together · Esc to clear" onClick={() => useUI.setState({ selectedWindows: [] })}>
+              {selectedCount} selected
+              <X size={12} />
+            </button>
+          </>
+        )}
         <span className="tb-sep" />
         <button className="icon-btn" title="Zoom out (Ctrl -)" onClick={() => zoomBy(1 / 1.25)}>
           <Minus size={14} />
@@ -209,6 +278,7 @@ export function CanvasView() {
           <GitFork size={14} />
         </button>
       </div>
+      <Beacons board={board} viewportEl={vpRef} />
       {menu && <Menu {...menu} onClose={() => setMenu(null)} />}
       <Minimap board={board} viewportEl={vpRef} />
     </div>

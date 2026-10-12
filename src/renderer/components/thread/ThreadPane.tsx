@@ -14,7 +14,7 @@ import {
   Pencil,
   PanelRight,
 } from "lucide-react";
-import { useThreads, markVisible } from "../../state/threads";
+import { useThreads, markAttended, markVisible } from "../../state/threads";
 import { useUI, isDraft } from "../../state/ui";
 import { addProject, archiveThread, compactThread, forkThread, hydrateThread, openThread, renameThread, retargetDraft } from "../../state/actions";
 import { baseName, buildProjects, threadTitle } from "../../state/projects";
@@ -54,6 +54,14 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
     return () => markVisible(threadId, -1);
   }, [threadId]);
 
+  // A focus-mode pane is what you're reading; canvas windows count once clicked (CanvasWindow).
+  const attends = props.chrome === "focus" && !isDraft(threadId);
+  useEffect(() => {
+    if (!attends) return;
+    markAttended(threadId, 1);
+    return () => markAttended(threadId, -1);
+  }, [threadId, attends]);
+
   return (
     <div ref={ref} className={`thread-pane size-${size} chrome-${props.chrome} ${props.focused ? "focused" : ""}`} data-cwd={cwd} data-thread={threadId}>
       <Header {...props} size={size} />
@@ -73,6 +81,23 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
     </div>
   );
 });
+
+/** The thread's "…" menu; canvas windows show the same on right-click. */
+export function threadMoreItems(threadId: string, rename: () => void): MenuItem[] {
+  const cwd = useThreads.getState().threads[threadId]?.cwd ?? "";
+  return [
+    { label: "Rename", icon: <Pencil size={14} />, onClick: rename },
+    { label: "Compact context", icon: <Layers size={14} />, onClick: () => void compactThread(threadId) },
+    {
+      label: useUI.getState().showDetails ? "Hide details panel" : "Show details panel",
+      icon: <PanelRight size={14} />,
+      hint: "wide panes",
+      onClick: () => useUI.setState((s) => ({ showDetails: !s.showDetails })),
+    },
+    ...(isDesktop && cwd ? [{ label: "Open folder", icon: <FolderOpen size={14} />, onClick: () => void bridge.shell.openPath(cwd) }] : []),
+    { label: "Archive", icon: <Archive size={14} />, onClick: () => void archiveThread(threadId), danger: true },
+  ];
+}
 
 function TranscriptFor({ threadId }: { threadId: string }) {
   const cwd = useThreads((s) => s.threads[threadId]?.cwd ?? null);
@@ -112,24 +137,16 @@ function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, wi
     });
   };
 
+  // A canvas window's right-click menu asks its header to start the inline rename.
+  useEffect(() => {
+    const onRename = (e: Event) => (e as CustomEvent<string>).detail === threadId && startRename();
+    window.addEventListener("ret:rename-thread", onRename);
+    return () => window.removeEventListener("ret:rename-thread", onRename);
+  });
+
   const moreMenu = (e: React.MouseEvent) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setMenu({
-      x: r.right - 200,
-      y: r.bottom + 4,
-      items: [
-        { label: "Rename", icon: <Pencil size={14} />, onClick: startRename },
-        { label: "Compact context", icon: <Layers size={14} />, onClick: () => void compactThread(threadId) },
-        {
-          label: useUI.getState().showDetails ? "Hide details panel" : "Show details panel",
-          icon: <PanelRight size={14} />,
-          hint: "wide panes",
-          onClick: () => useUI.setState((s) => ({ showDetails: !s.showDetails })),
-        },
-        ...(isDesktop ? [{ label: "Open folder", icon: <FolderOpen size={14} />, onClick: () => void bridge.shell.openPath(cwd) }] : []),
-        { label: "Archive", icon: <Archive size={14} />, onClick: () => void archiveThread(threadId), danger: true },
-      ],
-    });
+    setMenu({ x: r.right - 200, y: r.bottom + 4, items: threadMoreItems(threadId, startRename) });
   };
 
   const ctxPct =

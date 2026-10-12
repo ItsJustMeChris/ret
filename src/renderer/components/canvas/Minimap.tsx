@@ -1,7 +1,8 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useThreads } from "../../state/threads";
-import type { Board } from "../../state/ui";
+import { useUI, type Board } from "../../state/ui";
+import { threadStateOf } from "../StatusDot";
 import { boundsOf, viewport } from "./viewport";
 
 const W = 168;
@@ -9,12 +10,9 @@ const H = 110;
 
 export function Minimap({ board, viewportEl }: { board: Board; viewportEl: React.RefObject<HTMLDivElement | null> }) {
   const frame = useRef<HTMLDivElement>(null);
-  const states = useThreads(
-    useShallow((s) => {
-      const waiting = new Set(Object.values(s.requests).map((r) => r.threadId));
-      return board.windows.map((w) => (waiting.has(w.threadId) ? "attention" : s.live[w.threadId]?.activeTurnId || s.external[w.threadId] ? "running" : ""));
-    }),
-  );
+  // needs input · working · failed · finished and not looked at yet (shimmers until clicked)
+  const states = useThreads(useShallow((s) => board.windows.map((w) => threadStateOf(s, w.threadId))));
+  const focused = useUI((s) => s.focusedWindow);
 
   const world = useMemo(() => {
     const b = boundsOf(board.windows) ?? { x: 0, y: 0, w: 1000, h: 800 };
@@ -69,7 +67,7 @@ export function Minimap({ board, viewportEl }: { board: Board; viewportEl: React
       {board.windows.map((w, i) => (
         <div
           key={w.id}
-          className={`mm-win ${states[i] ?? ""}`}
+          className={`mm-win ${states[i] ?? ""} ${w.id === focused ? "focused" : ""}`}
           style={{
             transform: `translate(${(w.x - world.x) * scale}px, ${(w.y - world.y) * scale}px)`,
             width: Math.max(2, w.w * scale),

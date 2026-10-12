@@ -3,19 +3,22 @@ import { useThreads } from "../state/threads";
 
 export type ThreadState = "attention" | "running" | "error" | "unread" | "idle";
 
+/** What a thread wants from you right now, most urgent first. */
+export function threadStateOf(s: ReturnType<typeof useThreads.getState>, threadId: string): ThreadState {
+  for (const r of Object.values(s.requests)) if (r.threadId === threadId) return "attention";
+  const t = s.threads[threadId];
+  if (s.external[threadId]) return "running";
+  if (s.live[threadId]?.activeTurnId || t?.status.type === "active") {
+    const flags = t?.status.type === "active" ? t.status.activeFlags : [];
+    return flags.length ? "attention" : "running";
+  }
+  if (t?.status.type === "systemError") return "error";
+  if (s.unread[threadId]) return "unread";
+  return "idle";
+}
+
 export function useThreadState(threadId: string): ThreadState {
-  return useThreads((s) => {
-    for (const r of Object.values(s.requests)) if (r.threadId === threadId) return "attention";
-    const t = s.threads[threadId];
-    if (s.external[threadId]) return "running";
-    if (s.live[threadId]?.activeTurnId || t?.status.type === "active") {
-      const flags = t?.status.type === "active" ? t.status.activeFlags : [];
-      return flags.length ? "attention" : "running";
-    }
-    if (t?.status.type === "systemError") return "error";
-    if (s.unread[threadId]) return "unread";
-    return "idle";
-  });
+  return useThreads((s) => threadStateOf(s, threadId));
 }
 
 export const STATE_LABEL: Record<ThreadState, string> = {

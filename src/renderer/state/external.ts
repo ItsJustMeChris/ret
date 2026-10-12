@@ -116,7 +116,7 @@ async function check(t: Thread, moved: boolean) {
     setExternal(t.id, null);
     refresh(t.id);
     const visible = !!useThreads.getState().visible[t.id];
-    if (!visible) {
+    if (!useThreads.getState().attended[t.id]) {
       useThreads.setState((s) => ({ unread: { ...s.unread, [t.id]: true } }));
     }
     if (!visible || !document.hasFocus()) {
