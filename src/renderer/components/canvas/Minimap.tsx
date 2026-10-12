@@ -21,22 +21,23 @@ export function Minimap({ board, viewportEl }: { board: Board; viewportEl: React
   }, [board.windows]);
   const scale = Math.min(W / world.w, H / world.h);
 
-  useLayoutEffect(
-    () =>
-      viewport.subscribe((vp) => {
-        const el = viewportEl.current;
-        const f = frame.current;
-        if (!el || !f) return;
-        const vx = -vp.x / vp.zoom;
-        const vy = -vp.y / vp.zoom;
-        const vw = el.clientWidth / vp.zoom;
-        const vh = el.clientHeight / vp.zoom;
-        f.style.transform = `translate(${(vx - world.x) * scale}px, ${(vy - world.y) * scale}px)`;
-        f.style.width = `${vw * scale}px`;
-        f.style.height = `${vh * scale}px`;
-      }),
-    [world, scale, viewportEl],
-  );
+  useLayoutEffect(() => {
+    let size = "";
+    return viewport.subscribe((vp) => {
+      const f = frame.current;
+      if (!f) return;
+      const vx = -vp.x / vp.zoom;
+      const vy = -vp.y / vp.zoom;
+      f.style.transform = `translate3d(${(vx - world.x) * scale}px, ${(vy - world.y) * scale}px, 0)`;
+      // Resizing it is a relayout and repaint; panning only moves it (on the compositor).
+      const next = `${(viewport.size.w / vp.zoom) * scale}|${(viewport.size.h / vp.zoom) * scale}`;
+      if (next === size) return;
+      size = next;
+      const [w, h] = next.split("|");
+      f.style.width = `${w}px`;
+      f.style.height = `${h}px`;
+    });
+  }, [world, scale]);
 
   if (board.windows.length < 2) return null;
 

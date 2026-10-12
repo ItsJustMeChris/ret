@@ -78,7 +78,7 @@ export function Sidebar() {
         )}
       </div>
       <div className="sidebar-scroll">
-        {!listLoaded && tree.length === 0 && <div className="sidebar-empty shimmer">Loading threads…</div>}
+        {!listLoaded && tree.length === 0 && <div className="sidebar-empty loading-pulse">Loading threads…</div>}
         {listLoaded && tree.length === 0 && (
           <div className="sidebar-empty">
             No threads yet.

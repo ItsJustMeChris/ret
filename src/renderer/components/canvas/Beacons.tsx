@@ -28,11 +28,16 @@ export function Beacons({ board, viewportEl }: { board: Board; viewportEl: React
 
   const key = flagged.map((f) => `${f.win.id}:${f.state}:${f.win.x},${f.win.y},${f.win.w},${f.win.h}`).join("|");
   useLayoutEffect(() => {
+    // Placing runs every pan and zoom frame, so it doesn't read layout then (that would force one
+    // right after the canvas has moved): the view's size is kept by CanvasView, and the toolbar
+    // and minimap are measured at most a couple of times a second.
+    let blockers: { x0: number; y0: number; x1: number; y1: number }[] = [];
+    let measuredAt = -Infinity;
     const place = (vp: Viewport) => {
       const el = viewportEl.current;
-      if (!el) return;
+      if (!el || !flagged.length) return;
       const left = coveredLeft();
-      const W = el.clientWidth, H = el.clientHeight;
+      const { w: W, h: H } = viewport.size;
       const box = { x0: left + INSET, y0: INSET, x1: W - INSET, y1: H - INSET };
       const ox = (left + W) / 2, oy = H / 2;
       const placed: { el: HTMLButtonElement; edge: string; x: number; y: number }[] = [];
@@ -66,12 +71,18 @@ export function Beacons({ board, viewportEl }: { board: Board; viewportEl: React
         const row = placed.filter((p) => p.edge === edge).sort((a, b) => a[along] - b[along]);
         for (let i = 1; i < row.length; i++) row[i][along] = Math.max(row[i][along], row[i - 1][along] + SPACING);
       }
+      if (!placed.length) return;
       // Step out from under the toolbar and minimap: up off the bottom edge, left off the right one.
-      const vr = el.getBoundingClientRect();
-      const blockers = [...el.parentElement!.querySelectorAll(".canvas-toolbar, .canvas-minimap")].map((b) => {
-        const r = b.getBoundingClientRect();
-        return { x0: r.left - vr.left - 16, y0: r.top - vr.top - 16, x1: r.right - vr.left + 16, y1: r.bottom - vr.top + 16 };
-      });
+      // (They're the viewport's siblings: searching the canvas for them would walk every window's DOM.)
+      if (performance.now() - measuredAt > 500) {
+        measuredAt = performance.now();
+        const vr = el.getBoundingClientRect();
+        const siblings = [...el.parentElement!.children].filter((c) => c.matches(".canvas-toolbar, .canvas-minimap"));
+        blockers = siblings.map((b) => {
+          const r = b.getBoundingClientRect();
+          return { x0: r.left - vr.left - 16, y0: r.top - vr.top - 16, x1: r.right - vr.left + 16, y1: r.bottom - vr.top + 16 };
+        });
+      }
       for (const p of placed) {
         for (const b of blockers) {
           if (p.x < b.x0 || p.x > b.x1 || p.y < b.y0 || p.y > b.y1) continue;

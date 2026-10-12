@@ -9,6 +9,7 @@ import { ThreadImage } from "./ThreadImage";
 import { diffStats, duration } from "../../lib/format";
 import { Approvals } from "./Approvals";
 import { TurnRail } from "./TurnRail";
+import { Shimmer } from "../ui/Shimmer";
 
 type Ctx = { threadId: string; cwd: string | null };
 
@@ -162,7 +163,7 @@ function Working({ since, elsewhere }: { since: number | null; elsewhere?: boole
   return (
     <div className="working">
       <span className="pulse" />
-      <span className="shimmer">{elsewhere ? "Working in another Codex app" : "Working"}</span>
+      <Shimmer text={elsewhere ? "Working in another Codex app" : "Working"} />
       <span className="muted">{secs >= 1 ? duration(secs * 1000) : ""}</span>
     </div>
   );

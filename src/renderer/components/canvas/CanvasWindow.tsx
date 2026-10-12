@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, Minimize2, X, GitFork, FolderGit2, Copy } from "lucide-react";
 import { activeBoard, updateBoard, useUI, isApp, isDraft, isFile, isThread, filePath, type CanvasWin } from "../../state/ui";
 import { FilePane, FileTile } from "../code/FilePane";
@@ -105,6 +105,22 @@ export const CanvasWindow = memo(function CanvasWindow({ win, card, focused }: {
   const ref = useRef<HTMLDivElement>(null);
   const state = useThreadState(win.threadId);
   const selected = useUI((s) => s.selectedWindows.includes(win.id));
+
+  // Zoomed out, a window shows a summary card. Its full view stays mounted underneath (unrendered:
+  // see .cwin.card in app.css) once it's been shown, and is built in the background otherwise, so
+  // zooming back in never has to build every window's transcript in one frame.
+  const [warm, setWarm] = useState(!card);
+  useEffect(() => {
+    if (warm) return;
+    if (!card) return void setWarm(true);
+    const idle = requestIdleCallback(() => startTransition(() => setWarm(true)), { timeout: 5000 });
+    return () => cancelIdleCallback(idle);
+  }, [card, warm]);
+  // The hidden view mustn't keep taking keystrokes.
+  useEffect(() => {
+    const active = document.activeElement;
+    if (card && active instanceof HTMLElement && ref.current?.querySelector(":scope > .thread-pane")?.contains(active)) active.blur();
+  }, [card]);
 
   // On a canvas everything is on screen; only the window you've clicked counts as seen.
   useEffect(() => {
@@ -271,16 +287,27 @@ export const CanvasWindow = memo(function CanvasWindow({ win, card, focused }: {
     setMenu({ x: e.clientX, y: e.clientY, items });
   };
 
-  const controls = (
-    <>
-      <button className="icon-btn" title={win.prev ? "Restore" : "Maximize (double-click title)"} onClick={() => toggleMaximize(win.id)}>
-        {win.prev ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-      </button>
-      <button className="icon-btn" title="Close window (Ctrl+W)" onClick={() => closeWindow(win.id)}>
-        <X size={14} />
-      </button>
-    </>
+  // Stable props for the (memoized) full view, so a window re-rendering for its card, selection or
+  // state doesn't re-render a whole transcript.
+  const gesture = useRef(startGesture);
+  gesture.current = startGesture;
+  const onHeaderPointerDown = useCallback((e: React.PointerEvent) => gesture.current(e, "move"), []);
+  const onHeaderDoubleClick = useCallback(() => toggleMaximize(win.id), [win.id]);
+  const maximized = !!win.prev;
+  const controls = useMemo(
+    () => (
+      <>
+        <button className="icon-btn" title={maximized ? "Restore" : "Maximize (double-click title)"} onClick={() => toggleMaximize(win.id)}>
+          {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+        </button>
+        <button className="icon-btn" title="Close window (Ctrl+W)" onClick={() => closeWindow(win.id)}>
+          <X size={14} />
+        </button>
+      </>
+    ),
+    [win.id, maximized],
   );
+  const paneProps = { focused: focused && !card, onHeaderPointerDown, onHeaderDoubleClick, windowControls: controls };
 
   return (
     <div
@@ -305,39 +332,22 @@ export const CanvasWindow = memo(function CanvasWindow({ win, card, focused }: {
       data-win={win.id}
     >
       {menu && <Menu {...menu} onClose={() => setMenu(null)} />}
-      {card && isApp(win.threadId) ? (
-        <AppTile id={win.threadId} onPointerDown={(e) => startGesture(e, "move")} onDoubleClick={() => zoomToWindow(win.id)} />
-      ) : isApp(win.threadId) ? (
-        <AppPane
-          id={win.threadId}
-          focused={focused}
-          onHeaderPointerDown={(e) => startGesture(e, "move")}
-          onHeaderDoubleClick={() => toggleMaximize(win.id)}
-          windowControls={controls}
-        />
-      ) : card && isFile(win.threadId) ? (
-        <FileTile id={win.threadId} onPointerDown={(e) => startGesture(e, "move")} onDoubleClick={() => zoomToWindow(win.id)} />
-      ) : card ? (
-        <ThreadCard threadId={win.threadId} onPointerDown={(e) => startGesture(e, "move")} winId={win.id} />
-      ) : isFile(win.threadId) ? (
-        <FilePane
-          id={win.threadId}
-          chrome="window"
-          focused={focused}
-          onHeaderPointerDown={(e) => startGesture(e, "move")}
-          onHeaderDoubleClick={() => toggleMaximize(win.id)}
-          windowControls={controls}
-        />
-      ) : (
-        <ThreadPane
-          threadId={win.threadId}
-          chrome="window"
-          focused={focused}
-          onHeaderPointerDown={(e) => startGesture(e, "move")}
-          onHeaderDoubleClick={() => toggleMaximize(win.id)}
-          windowControls={controls}
-        />
-      )}
+      {card &&
+        (isApp(win.threadId) ? (
+          <AppTile id={win.threadId} onPointerDown={(e) => startGesture(e, "move")} onDoubleClick={() => zoomToWindow(win.id)} />
+        ) : isFile(win.threadId) ? (
+          <FileTile id={win.threadId} onPointerDown={(e) => startGesture(e, "move")} onDoubleClick={() => zoomToWindow(win.id)} />
+        ) : (
+          <ThreadCard threadId={win.threadId} onPointerDown={(e) => startGesture(e, "move")} winId={win.id} />
+        ))}
+      {(warm || !card) &&
+        (isApp(win.threadId) ? (
+          <AppPane id={win.threadId} {...paneProps} />
+        ) : isFile(win.threadId) ? (
+          <FilePane id={win.threadId} chrome="window" {...paneProps} />
+        ) : (
+          <ThreadPane threadId={win.threadId} chrome="window" {...paneProps} />
+        ))}
       {!card &&
         HANDLES.map((h) => <div key={h} className={`rz rz-${h}`} onPointerDown={(e) => startGesture(e, h)} />)}
     </div>

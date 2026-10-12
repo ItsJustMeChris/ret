@@ -25,6 +25,7 @@ import { highlight } from "../../lib/markdown";
 import { Markdown } from "../Markdown";
 import { ThreadImage } from "./ThreadImage";
 import { PlanActions, ReplyQuestions } from "./Questions";
+import { Shimmer } from "../ui/Shimmer";
 
 type Ctx = { threadId: string; cwd: string | null };
 
@@ -117,7 +118,7 @@ function Reasoning({ item, live }: { item: Extract<ThreadItem, { type: "reasonin
   return (
     <Disclosure
       icon={<Brain size={13} />}
-      label={live ? <span className="shimmer">{heading ?? "Thinking"}</span> : (heading ?? "Thought")}
+      label={live ? <Shimmer text={heading ?? "Thinking"} /> : (heading ?? "Thought")}
       tone="muted"
     >
       <Markdown text={text} className="md-muted" />

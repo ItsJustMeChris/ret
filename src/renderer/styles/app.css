@@ -192,20 +192,54 @@ body.resizing .transcript {
 .del {
   color: var(--red);
 }
+/* A light sweeping across text (the Shimmer component). Transforms only, so it runs on the compositor. */
 .shimmer {
-  background: linear-gradient(90deg, var(--text-3) 0%, var(--text) 45%, var(--text-3) 90%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: shimmer 2.2s linear infinite;
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-3);
 }
-@keyframes shimmer {
+.shimmer-light {
+  position: absolute;
+  inset: 0;
+  mask-image: linear-gradient(90deg, transparent 20%, #000 50%, transparent 80%);
+  animation: shimmer-sweep 2.2s linear infinite;
+}
+.shimmer-light > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+  animation: shimmer-hold 2.2s linear infinite;
+}
+@keyframes shimmer-sweep {
   from {
-    background-position: 100% 0;
+    transform: translateX(-100%);
   }
   to {
-    background-position: -100% 0;
+    transform: translateX(100%);
+  }
+}
+/* Undoes the sweep for the text inside, so the copy stays over the original. */
+@keyframes shimmer-hold {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+/* Something loading: a gentle fade, also compositor-only. */
+.loading-pulse {
+  animation: loading-pulse 1.1s ease-in-out infinite alternate;
+}
+@keyframes loading-pulse {
+  to {
+    opacity: 0.45;
   }
 }
 
@@ -2607,12 +2641,26 @@ body.resizing .transcript {
   inset: 0;
   overflow: hidden;
   background-color: var(--bg);
-  background-image: radial-gradient(circle at 1px 1px, var(--grid-dot) 1px, transparent 1.2px);
   cursor: default;
   touch-action: none;
 }
-.canvas-viewport.grid-faint {
-  background-image: none;
+/* The dots: a layer one spacing bigger than the view that slides (mod one spacing) as you pan,
+   so panning moves pixels on the GPU instead of repainting the whole background. */
+.canvas-grid {
+  position: absolute;
+  inset: -48px; /* GRID_PAD in CanvasView */
+  background-image: radial-gradient(circle at 1px 1px, var(--grid-dot) 1px, transparent 1.2px);
+  will-change: transform;
+  pointer-events: none;
+}
+/* The compositor moves and scales the windows as last drawn, instead of redrawing them every zoom
+   frame and re-layering the page every pan frame. CanvasView drops this for a frame (.redraw) to
+   draw them sharp at a new zoom once it settles. */
+.canvas-world {
+  will-change: transform;
+}
+.canvas-world.redraw {
+  will-change: auto;
 }
 .canvas-viewport.panning,
 .canvas-viewport.space-pan {
@@ -2631,6 +2679,11 @@ body.resizing .transcript {
   width: 0;
   height: 0;
   transform-origin: 0 0;
+}
+.canvas-items {
+  position: absolute;
+  left: 0;
+  top: 0;
 }
 .canvas-empty {
   position: absolute;
@@ -2701,9 +2754,29 @@ body.resizing .transcript {
   pointer-events: none;
 }
 
-/* Window callouts, kept the same size on screen at any zoom (--px is one screen pixel in world units). */
+/* Window callouts, kept the same size on screen at any zoom (--px is one screen pixel in world units).
+   --inv-zoom changes every zoom frame, so it doesn't inherit: only the elements that use it opt in
+   with an explicit `inherit`, and a zoom restyles a few dozen elements instead of every transcript. */
+@property --inv-zoom {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+@property --px {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 1px;
+}
+.canvas-items > *,
+.cwin > .tcard {
+  --inv-zoom: inherit;
+}
 .cwin {
-  --px: calc(1px * max(1, var(--inv-zoom, 1)));
+  --px: calc(1px * max(1, var(--inv-zoom)));
+}
+.cwin::before,
+.cwin::after {
+  --px: inherit;
 }
 /* Unseen finish: a highlight travels around the border until you click in. */
 .cwin.state-unread::after {
@@ -2848,6 +2921,17 @@ body.resizing .transcript {
 /* Semantic zoom: summary cards. Text is counter-scaled to stay legible. */
 .cwin.card {
   background: var(--bg-1);
+}
+/* The card covers the window. A full view that's been shown stays mounted underneath, its contents
+   skipped by style, layout and paint, so zooming back in is a repaint instead of a rebuild. */
+.cwin.card > .tcard {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: inherit;
+}
+.cwin.card > .thread-pane {
+  content-visibility: hidden;
 }
 .tcard {
   --s: min(var(--inv-zoom, 1), 4);
@@ -3077,6 +3161,8 @@ body.resizing .transcript {
     scale 0.15s var(--ease),
     opacity 0.2s;
   animation: beacon-in 0.25s var(--ease);
+  /* Moved and aimed every pan frame: as compositor layers, that doesn't re-layer the page. */
+  will-change: translate;
 }
 .beacon[hidden] {
   display: none;
@@ -3095,6 +3181,7 @@ body.resizing .transcript {
   inset: 0;
   rotate: var(--a, 0rad);
   pointer-events: none;
+  will-change: rotate;
 }
 .beacon-arrow::after {
   content: "";
@@ -3149,6 +3236,7 @@ body.resizing .transcript {
   border-radius: 3px;
   background: var(--accent-soft);
   pointer-events: none;
+  will-change: transform; /* follows every pan frame */
 }
 
 /* ==========================================================================
@@ -4187,6 +4275,13 @@ textarea::placeholder {
   opacity: 0;
   box-shadow: none;
   pointer-events: none;
+}
+/* Out of sight, its spinners and status pings can't run on the compositor, so the browser would
+   tick them on the main thread and re-layer the whole page every frame. */
+.sidebar-layer.hidden *,
+.sidebar-layer.hidden *::before,
+.sidebar-layer.hidden *::after {
+  animation-play-state: paused;
 }
 /* Bridge the gap to the window edge so the pointer can't fall between panel and edge. */
 .sidebar-layer.peek::before {

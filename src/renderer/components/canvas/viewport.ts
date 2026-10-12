@@ -17,17 +17,27 @@ type Listener = (vp: Viewport) => void;
  * Live viewport shared between the canvas, windows and minimap. Gestures write
  * here and paint straight to the DOM; the persisted store is updated lazily so
  * panning and zooming never trigger React renders.
+ *
+ * Listeners run at most once per frame, however many wheel or pointer events
+ * arrive in it, so their DOM writes (and any layout reads) happen once.
  */
 class ViewportController {
   vp: Viewport = { x: 0, y: 0, zoom: 1 };
+  /** The canvas element's size, kept by CanvasView: listeners read this instead of forcing a layout every frame. */
+  size = { w: 0, h: 0 };
   private listeners = new Set<Listener>();
   private commitTimer = 0;
   private anim = 0;
+  private frame = 0;
+  /** True while painting a jump to another board's view rather than a pan or zoom. */
+  jumping = false;
 
   load(vp: Viewport) {
     cancelAnimationFrame(this.anim);
     this.vp = { ...vp };
-    this.emit();
+    this.jumping = true;
+    this.flush();
+    this.jumping = false;
   }
 
   subscribe(fn: Listener) {
@@ -38,13 +48,16 @@ class ViewportController {
     };
   }
 
-  private emit() {
+  /** Paint now rather than on the next frame. */
+  flush() {
+    cancelAnimationFrame(this.frame);
+    this.frame = 0;
     for (const l of this.listeners) l(this.vp);
   }
 
   set(vp: Viewport, commit = true) {
     this.vp = { x: vp.x, y: vp.y, zoom: clamp(vp.zoom, MIN_ZOOM, MAX_ZOOM) };
-    this.emit();
+    if (!this.frame) this.frame = requestAnimationFrame(() => this.flush());
     if (commit) {
       clearTimeout(this.commitTimer);
       this.commitTimer = window.setTimeout(() => this.commit(), 180);
@@ -78,6 +91,7 @@ class ViewportController {
         },
         t === 1,
       );
+      this.flush(); // already inside a frame
       if (t < 1) this.anim = requestAnimationFrame(step);
     };
     this.anim = requestAnimationFrame(step);

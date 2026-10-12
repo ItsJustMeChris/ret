@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Command, Copy, Folder, GitFork, LayoutGrid, MessageSquarePlus, Minus, Pencil, Plus, Scan, SquareDashed, Trash2, X, Code2, Inbox } from "lucide-react";
 import { activeBoard, appId, newId, updateBoard, useUI, type AppKind, type Board } from "../../state/ui";
 import { DRAG_APP } from "../Titlebar";
@@ -9,17 +9,25 @@ import { Links } from "./Links";
 import { CanvasWindow } from "./CanvasWindow";
 import { Minimap } from "./Minimap";
 import { Beacons } from "./Beacons";
-import { CARD_ZOOM, fitAll, revealWindow, tidy, viewport } from "./viewport";
+import { CARD_ZOOM, MAX_ZOOM, fitAll, revealWindow, tidy, viewport, type Viewport } from "./viewport";
 import { Menu, type MenuItem } from "../Menu";
 import { promptText } from "../ui/Dialog";
+
+/** Dot spacing at 100%. */
+const GRID = 24;
+/** The dot layer overhangs the view by one spacing at the largest zoom, so sliding it never shows an edge. */
+const GRID_PAD = GRID * MAX_ZOOM;
+const mod = (v: number, m: number) => ((v % m) + m) % m;
 
 export function CanvasView() {
   const board = useUI((s) => activeBoard(s));
   const focused = useUI((s) => s.focusedWindow);
   const vpRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
+  const itemsRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const zoomLabelRef = useRef<HTMLButtonElement>(null);
   const [card, setCard] = useState(board.viewport.zoom < CARD_ZOOM);
-  const [zoomLabel, setZoomLabel] = useState(Math.round(board.viewport.zoom * 100));
   const spaceDown = useRef(false);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const showLinks = useUI((s) => s.showLinks);
@@ -31,24 +39,89 @@ export function CanvasView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [board.id]);
 
-  // Paint viewport changes straight to the DOM.
-  useLayoutEffect(
-    () =>
-      viewport.subscribe((vp) => {
-        const world = worldRef.current;
-        const el = vpRef.current;
-        if (!world || !el) return;
-        world.style.transform = `translate3d(${vp.x}px, ${vp.y}px, 0) scale(${vp.zoom})`;
-        world.style.setProperty("--inv-zoom", String(1 / vp.zoom));
-        const grid = 24 * vp.zoom;
-        el.style.backgroundSize = `${grid}px ${grid}px`;
-        el.style.backgroundPosition = `${vp.x}px ${vp.y}px`;
-        el.classList.toggle("grid-faint", vp.zoom < 0.45);
-        setCard(vp.zoom < CARD_ZOOM);
-        setZoomLabel(Math.round(vp.zoom * 100));
-      }),
-    [],
-  );
+  // Paint viewport changes straight to the DOM. Everything here is compositor work (a transform)
+  // except when the zoom changes, and even then the windows' contents aren't restyled or redrawn.
+  useLayoutEffect(() => {
+    const world = worldRef.current!;
+    const items = itemsRef.current!;
+    const grid = gridRef.current!;
+    let last: Viewport | null = null;
+    let settle = 0;
+    let undo = 0;
+    /**
+     * Zoom the windows' contents were last drawn at. The world is will-change: transform, so the
+     * compositor scales that drawing to the current zoom instead of redrawing every window each
+     * frame (and pans don't re-layer the page).
+     */
+    let drawnAt = 0;
+    const counterScale = (zoom: number) => items.style.setProperty("--inv-zoom", String(1 / zoom));
+    /** Draw the windows afresh at the current zoom: will-change off for a frame (two, from a timer). */
+    const redraw = () => {
+      drawnAt = viewport.vp.zoom;
+      world.classList.add("redraw");
+      cancelAnimationFrame(undo);
+      undo = requestAnimationFrame(() => (undo = requestAnimationFrame(() => world.classList.remove("redraw"))));
+    };
+    const settled = () => {
+      counterScale(viewport.vp.zoom);
+      if (viewport.vp.zoom !== drawnAt) redraw();
+    };
+    const off = viewport.subscribe((vp) => {
+      // Whole device pixels: a fractional offset makes the browser redraw every glyph to re-align it.
+      const r = window.devicePixelRatio || 1;
+      const x = Math.round(vp.x * r) / r;
+      const y = Math.round(vp.y * r) / r;
+      world.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${vp.zoom})`;
+      const g = GRID * vp.zoom;
+      grid.style.transform = `translate3d(${mod(x, g)}px, ${mod(y, g)}px, 0)`;
+      if (vp.zoom === last?.zoom) return;
+
+      grid.style.backgroundSize = `${g}px ${g}px`;
+      grid.style.backgroundPosition = `${GRID_PAD % g}px ${GRID_PAD % g}px`;
+      grid.hidden = vp.zoom < 0.45;
+      zoomLabelRef.current!.textContent = `${Math.round(vp.zoom * 100)}%`;
+      const nextCard = vp.zoom < CARD_ZOOM;
+      if (!last || nextCard !== last.zoom < CARD_ZOOM) {
+        // Back to full windows: render them without holding up the zoom (they're usually ready already).
+        if (nextCard) setCard(true);
+        else startTransition(() => setCard(false));
+      }
+      const gesture = !!last && !viewport.jumping;
+      // Things kept the same size on screen (window outlines and glows, link badges, card text)
+      // follow a zoom live only on cards. Full windows catch up when it settles: restyling every
+      // window each frame costs more than a moment of slightly-off outline shows.
+      if (nextCard || !gesture) counterScale(vp.zoom);
+      // Redraw sharp once a zoom settles, along the way when it has drifted far enough to look
+      // soft (in) or cost memory (out), and straight away on a jump to another board.
+      if (!last) drawnAt = vp.zoom;
+      else if (!gesture || vp.zoom > drawnAt * 2 || vp.zoom < drawnAt / 1.6) redraw();
+      if (gesture) {
+        clearTimeout(settle);
+        settle = window.setTimeout(settled, 150);
+      }
+      last = vp;
+    });
+    return () => {
+      off();
+      clearTimeout(settle);
+      cancelAnimationFrame(undo);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = vpRef.current!;
+    const measure = () => {
+      viewport.size = { w: el.clientWidth, h: el.clientHeight };
+    };
+    measure();
+    viewport.flush(); // the minimap and beacons subscribed (as children) before the size was known
+    const ro = new ResizeObserver(() => {
+      measure();
+      viewport.flush();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const onReveal = (e: Event) => requestAnimationFrame(() => revealWindow((e as CustomEvent<string>).detail));
@@ -232,11 +305,16 @@ export function CanvasView() {
           setMenu({ x: e.clientX, y: e.clientY, items: canvasMenu(at, e.clientX, e.clientY, setMenu) });
         }}
       >
+        <div ref={gridRef} className="canvas-grid" />
         <div ref={worldRef} className={`canvas-world ${card ? "lod-card" : ""}`}>
-          <Links board={board} />
-          {board.windows.map((w) => (
-            <CanvasWindow key={w.id} win={w} card={card} focused={focused === w.id} />
-          ))}
+          {/* Carries --inv-zoom. Not on the world itself: its transform changes every pan frame, and
+              the windows opt in to inheriting --inv-zoom, so they'd be restyled every frame too. */}
+          <div ref={itemsRef} className="canvas-items">
+            <Links board={board} />
+            {board.windows.map((w) => (
+              <CanvasWindow key={w.id} win={w} card={card} focused={focused === w.id} />
+            ))}
+          </div>
         </div>
         <div ref={marquee} className="marquee" />
         {board.windows.length === 0 && (
@@ -261,9 +339,8 @@ export function CanvasView() {
         <button className="icon-btn" title="Zoom out (Ctrl -)" onClick={() => zoomBy(1 / 1.25)}>
           <Minus size={14} />
         </button>
-        <button className="zoom-label" title="Reset to 100%" onClick={() => zoomBy(1 / viewport.vp.zoom)}>
-          {zoomLabel}%
-        </button>
+        {/* Text written by the viewport listener: zooming doesn't re-render the canvas. */}
+        <button ref={zoomLabelRef} className="zoom-label" title="Reset to 100%" onClick={() => zoomBy(1 / viewport.vp.zoom)} />
         <button className="icon-btn" title="Zoom in (Ctrl +)" onClick={() => zoomBy(1.25)}>
           <Plus size={14} />
         </button>
