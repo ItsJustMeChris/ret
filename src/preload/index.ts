@@ -26,6 +26,12 @@ const bridge: RetBridge = {
     apply: () => ipcRenderer.invoke(IPC.updaterApply),
     setSettings: (patch) => ipcRenderer.invoke(IPC.updaterSettings, patch),
   },
+  appUpdate: {
+    getState: () => ipcRenderer.invoke(IPC.appUpdateGet),
+    onState: (cb) => subscribe(IPC.appUpdateState, cb),
+    check: () => ipcRenderer.invoke(IPC.appUpdateCheck),
+    install: () => ipcRenderer.invoke(IPC.appUpdateInstall),
+  },
   dialog: {
     pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
     pickFile: (filters) => ipcRenderer.invoke(IPC.pickFile, filters),

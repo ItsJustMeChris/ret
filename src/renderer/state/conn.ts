@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CodexStatus, UpdaterState } from "@shared/bridge";
+import type { AppUpdateState, CodexStatus, UpdaterState } from "@shared/bridge";
 import type { GetAccountRateLimitsResponse, GetAccountResponse, InitializeResponse, Model } from "../protocol";
 
 export interface LoginFlow {
@@ -14,6 +14,8 @@ export interface LoginFlow {
 export interface ConnState {
   codex: CodexStatus | null;
   updater: UpdaterState | null;
+  /** Ret's own updates (the `updater` above is codex's). */
+  appUpdate: AppUpdateState | null;
   info: InitializeResponse | null;
   account: GetAccountResponse | null;
   accountLoaded: boolean;
@@ -27,6 +29,7 @@ export interface ConnState {
 export const useConn = create<ConnState>(() => ({
   codex: null,
   updater: null,
+  appUpdate: null,
   info: null,
   account: null,
   accountLoaded: false,

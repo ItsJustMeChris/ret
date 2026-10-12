@@ -300,7 +300,9 @@ const ForkGroup = memo(function ForkGroup({
         onClick={toggle}
         onDoubleClick={() => openThread(id)}
         onContextMenu={(e) => showMenu(e, threadMenu(id, () => setRenaming(true)))}
-        title={`${threadTitle(node.thread)} — ${node.forkCount} ${node.forkCount === 1 ? "fork" : "forks"}`}
+        data-card="thread"
+        data-id={id}
+        data-forks={node.forkCount}
       >
         <ChevronRight className="chev" size={12} />
         <FolderGit2 size={13} className="fork-folder" />
@@ -392,7 +394,8 @@ const ThreadRow = memo(function ThreadRow({
         e.dataTransfer.setData("application/x-ret-thread", t.id);
         e.dataTransfer.effectAllowed = "copy";
       }}
-      title={t.preview || threadTitle(t)}
+      data-card="thread"
+      data-id={t.id}
     >
       <StatusDot threadId={t.id} />
       {fork != null && <GitFork size={11} className="fork-glyph" />}

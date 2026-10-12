@@ -6,11 +6,14 @@ import { useConn } from "./conn";
 import { guarded, toast } from "./toasts";
 import { coveredLeft } from "../components/canvas/viewport";
 import { explicitKeys, normPath, projectKeyFor, threadTitle } from "./projects";
+import { fillComposer } from "./composerDrafts";
+import { backfillLineage, lineageKnown } from "./lineage";
 import {
   addPendingRequest,
   emptyLive,
   enqueueNotification,
   flushNow,
+  mergeThread,
   patchLive,
   removePendingRequest,
   setThreadHooks,
@@ -38,6 +41,8 @@ export function bootstrap() {
   void bridge.codex.getStatus().then((codex) => useConn.setState({ codex }));
   bridge.updater.onState((updater) => useConn.setState({ updater }));
   void bridge.updater.getState().then((updater) => useConn.setState({ updater }));
+  bridge.appUpdate.onState((appUpdate) => useConn.setState({ appUpdate }));
+  void bridge.appUpdate.getState().then((appUpdate) => useConn.setState({ appUpdate }));
 
   rpc.onNotification((method, params) => {
     switch (method) {
@@ -219,10 +224,12 @@ export function loadThreadList(): Promise<void> {
       // Replace rather than merge so archived/deleted threads disappear.
       const live = useThreads.getState().threads;
       const next: Record<string, Thread> = {};
-      for (const t of all) next[t.id] = { ...t, turns: [] };
+      for (const t of all) next[t.id] = mergeThread(live[t.id], { ...t, turns: [] });
       // Keep threads we know about that the list doesn't return (ephemeral forks, brand-new threads).
       for (const [id, t] of Object.entries(live)) if (!next[id] && (t.ephemeral || Date.now() / 1000 - t.createdAt < 120)) next[id] = t;
       useThreads.setState({ threads: next, listLoaded: true });
+      // The list leaves out fork lineage; fill it in so forks nest and link to their parents.
+      void backfillLineage(all.map((t) => t.id));
     } catch (err) {
       console.error("thread/list failed", err);
       useThreads.setState({ listLoaded: true });
@@ -599,7 +606,7 @@ export function discardQueued(threadId: string, id: string) {
 
 export function editQueued(threadId: string, id: string) {
   const msg = takeQueued(threadId, id);
-  if (msg) window.dispatchEvent(new CustomEvent("ret:composer-fill", { detail: { threadId, text: msg.text } }));
+  if (msg) fillComposer(threadId, msg.text, { focus: true });
 }
 
 /** Re-send a message that reached a turn too late to be answered, as a fresh turn. */
@@ -653,6 +660,8 @@ export interface ForkOptions {
   atTurnId?: string;
   /** Give the fork its own git worktree so its file edits are isolated. */
   worktree?: boolean;
+  /** Start the fork's composer with this text (focused, ready to keep typing). */
+  prompt?: string;
 }
 
 async function forkThreadImpl(threadId: string, opts: ForkOptions = {}): Promise<string> {
@@ -672,6 +681,7 @@ async function forkThreadImpl(threadId: string, opts: ForkOptions = {}): Promise
     excludeTurns: true,
   });
   const fork = res.thread;
+  lineageKnown(fork.id);
   upsertThreads([fork]);
   useThreads.setState((s) => ({
     live: { ...s.live, [fork.id]: { ...emptyLive(), subscribed: true, settings: settingsFrom(res) } },
@@ -682,6 +692,7 @@ async function forkThreadImpl(threadId: string, opts: ForkOptions = {}): Promise
     expanded: { ...s.expanded, [rootOf(threadId)]: true, [threadId]: true },
   }));
   void hydrateThread(fork.id);
+  if (opts.prompt) fillComposer(fork.id, opts.prompt, { focus: true });
   openThread(fork.id, { besideThread: threadId, side: true });
   return fork.id;
 }

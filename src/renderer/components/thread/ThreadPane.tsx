@@ -55,7 +55,7 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
   }, [threadId]);
 
   return (
-    <div ref={ref} className={`thread-pane size-${size} chrome-${props.chrome} ${props.focused ? "focused" : ""}`} data-cwd={cwd}>
+    <div ref={ref} className={`thread-pane size-${size} chrome-${props.chrome} ${props.focused ? "focused" : ""}`} data-cwd={cwd} data-thread={threadId}>
       <Header {...props} size={size} />
       {isDraft(threadId) ? (
         <DraftBody threadId={threadId} size={size} />

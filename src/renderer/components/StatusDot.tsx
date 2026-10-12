@@ -18,7 +18,7 @@ export function useThreadState(threadId: string): ThreadState {
   });
 }
 
-const LABEL: Record<ThreadState, string> = {
+export const STATE_LABEL: Record<ThreadState, string> = {
   attention: "Needs your input",
   running: "Working",
   error: "Error",
@@ -37,7 +37,7 @@ export const StatusDot = memo(function StatusDot({ threadId }: { threadId: strin
   return (
     <span
       className={`status-dot ${state} ${elsewhere ? "elsewhere" : ""}`}
-      title={elsewhere ? "Running in another Codex app (VS Code, CLI…)" : LABEL[state]}
+      title={elsewhere ? "Running in another Codex app (VS Code, CLI…)" : STATE_LABEL[state]}
     />
   );
 });

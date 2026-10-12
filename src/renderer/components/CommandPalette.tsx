@@ -88,6 +88,9 @@ function PaletteInner() {
       { id: "tidy", kind: "command", title: "Canvas: tidy windows", icon: <LayoutGrid size={14} />, run: () => { useUI.setState({ mode: "canvas" }); requestAnimationFrame(tidy); } },
       { id: "sidebar", kind: "command", title: "Toggle sidebar", icon: <PanelLeft size={14} />, run: () => useUI.setState((s) => ({ sidebarOpen: !s.sidebarOpen })) },
       { id: "update", kind: "command", title: "Check for codex updates", icon: <RefreshCw size={14} />, run: () => void bridge.updater.check() },
+      ...(isDesktop
+        ? [{ id: "appupdate", kind: "command" as const, title: "Check for Ret updates", icon: <RefreshCw size={14} />, run: () => void bridge.appUpdate.check() }]
+        : []),
       { id: "settings", kind: "command", title: "Settings", icon: <Settings size={14} />, run: () => useUI.setState({ settingsOpen: true }) },
     ];
     const projectName = new Map<string, string>();

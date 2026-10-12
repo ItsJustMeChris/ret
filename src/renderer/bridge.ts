@@ -1,4 +1,4 @@
-import type { CodexStatus, RetBridge, UpdaterState } from "@shared/bridge";
+import type { AppUpdateState, CodexStatus, RetBridge, UpdaterState } from "@shared/bridge";
 
 declare global {
   interface Window {
@@ -61,6 +61,7 @@ function createWebBridge(url: string): RetBridge {
     lastCheckedAt: null,
     error: "Updater is only available in the desktop app",
   };
+  const appUpdate: AppUpdateState = { phase: "unsupported", version: null, progress: null, lastCheckedAt: null, error: null };
 
   return {
     platform: navigator.platform.toLowerCase().includes("win") ? "win32" : "web",
@@ -87,6 +88,12 @@ function createWebBridge(url: string): RetBridge {
       check: async () => updater,
       apply: async () => {},
       setSettings: async () => updater,
+    },
+    appUpdate: {
+      getState: async () => appUpdate,
+      onState: () => () => {},
+      check: async () => appUpdate,
+      install: async () => {},
     },
     dialog: {
       pickFolder: async () => (await import("./components/ui/Dialog")).promptText({ title: "Add project", label: "Folder path", placeholder: "C:\path\to\project", confirmLabel: "Add" }),

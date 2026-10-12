@@ -8,6 +8,7 @@ import { bridge, isDesktop } from "../../bridge";
 import { toast } from "../../state/toasts";
 import { Select, type SelectOption } from "../ui/Select";
 import { QueueTray } from "./QueueTray";
+import { composerDrafts as drafts, composerFocus } from "../../state/composerDrafts";
 
 const ACCESS_OPTIONS: SelectOption<AccessPreset>[] = [
   { value: "config", label: "Config default", description: "Whatever your config.toml sets", icon: <Settings2 size={13} /> },
@@ -24,9 +25,16 @@ const SPEED_ICON: Record<string, React.ReactNode> = {
 
 const titleCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-/** Per-thread unsent text and setting overrides survive switching tabs/windows. */
-const drafts = new Map<string, string>();
+/** Per-thread setting overrides survive switching tabs/windows (as does unsent text, in composerDrafts). */
 const overrides = new Map<string, TurnOverrides>();
+
+/** Focus a textarea with the caret after its text, ready to keep typing. */
+function focusAtEnd(el: HTMLTextAreaElement | null) {
+  if (!el) return;
+  el.focus();
+  el.setSelectionRange(el.value.length, el.value.length);
+  el.scrollTop = el.scrollHeight;
+}
 
 export function Composer({ threadId, autoFocus, compact }: { threadId: string; autoFocus?: boolean; compact?: boolean }) {
   const [text, setText] = useState(() => drafts.get(threadId) ?? "");
@@ -68,20 +76,22 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     drafts.set(threadId, text);
   }, [threadId, text]);
 
-  // "Edit" on a queued follow-up hands its text back to this composer.
+  // Text handed to this composer from elsewhere (editing a queued follow-up, forking with a quote).
   useEffect(() => {
     const onFill = (e: Event) => {
       const d = (e as CustomEvent<{ threadId: string; text: string }>).detail;
       if (d.threadId !== threadId) return;
+      composerFocus.delete(threadId);
       setText((cur) => (cur.trim() ? `${cur}\n${d.text}` : d.text));
-      ta.current?.focus();
+      requestAnimationFrame(() => focusAtEnd(ta.current));
     };
     window.addEventListener("ret:composer-fill", onFill);
     return () => window.removeEventListener("ret:composer-fill", onFill);
   }, [threadId]);
 
   useEffect(() => {
-    if (autoFocus) ta.current?.focus();
+    if (composerFocus.delete(threadId)) focusAtEnd(ta.current);
+    else if (autoFocus) ta.current?.focus();
   }, [threadId]); // on appear only, never when the pane merely regains focus
 
   // Auto-size the textarea.

@@ -12,9 +12,13 @@ import {
   Undo2,
   BookPlus,
   FileQuestion,
+  GitFork,
 } from "lucide-react";
 import { bridge } from "../bridge";
 import { copyText, looksLikePath, parseFileRef, resolvePath, revealLabel, type FileRef } from "../lib/files";
+import { forkThread } from "../state/actions";
+import { quoteText } from "../state/composerDrafts";
+import { isDraft } from "../state/ui";
 import { Menu, type MenuItem } from "./Menu";
 
 type Spell = { word: string; suggestions: string[]; at: number };
@@ -112,6 +116,22 @@ export function ContextMenuHost() {
         } else if (selection.trim()) {
           if (items.length) items.push({ separator: true });
           items.push({ label: "Copy", icon: <Copy size={14} />, hint: "Ctrl+C", onClick: () => copyText(selection) });
+          // Text selected in a turn can seed a fork: branch at that turn, quote it in the new prompt.
+          const turn = target.closest<HTMLElement>("section.turn[data-turn]");
+          const threadId = turn?.closest<HTMLElement>("[data-thread]")?.dataset.thread;
+          if (turn && threadId && !isDraft(threadId) && window.getSelection()?.containsNode(turn, true)) {
+            let next = turn.nextElementSibling;
+            while (next && !next.matches("section.turn")) next = next.nextElementSibling;
+            // A turn still running (or not yet confirmed) can't be a fork point; fork everything so far.
+            const id = turn.dataset.turn!;
+            const atTurnId = turn.classList.contains("live") || id.startsWith("pending:") ? undefined : id;
+            items.push({
+              label: "Fork with selection",
+              icon: <GitFork size={14} />,
+              hint: next && atTurnId ? "from this turn" : undefined,
+              onClick: () => void forkThread(threadId, { atTurnId, prompt: quoteText(selection) }),
+            });
+          }
         }
 
         setMenu({ x, y, items });

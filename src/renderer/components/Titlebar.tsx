@@ -58,7 +58,7 @@ export function Titlebar() {
       <div className="tb-right">
         <GlobalActivity />
         {codex && codex.state !== "running" && (
-          <span className={`conn conn-${codex.state}`} title={codex.error ?? ""}>
+          <span className={`conn conn-${codex.state}`} data-card="codex">
             {codex.state === "starting" ? "Starting codex…" : codex.state === "missing" ? "Installing codex…" : "codex offline"}
           </span>
         )}

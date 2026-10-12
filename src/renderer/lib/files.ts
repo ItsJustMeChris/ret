@@ -59,7 +59,7 @@ export function looksLikePath(text: string): boolean {
 }
 
 /** Files that open as text in an editor (anything else goes to its default app). */
-const NOT_TEXT = /\.(png|jpe?g|gif|webp|bmp|ico|svgz|pdf|zip|7z|rar|gz|tgz|tar|exe|dll|so|dylib|bin|msi|iso|dmg|mp3|mp4|mov|wav|ogg|webm|woff2?|ttf|otf|sqlite|db|lnk)$/i;
+export const NOT_TEXT =/\.(png|jpe?g|gif|webp|bmp|ico|svgz|pdf|zip|7z|rar|gz|tgz|tar|exe|dll|so|dylib|bin|msi|iso|dmg|mp3|mp4|mov|wav|ogg|webm|woff2?|ttf|otf|sqlite|db|lnk)$/i;
 
 export const revealLabel =
   bridge.platform === "darwin" ? "Reveal in Finder" : bridge.platform === "win32" ? "Reveal in File Explorer" : "Show in folder";

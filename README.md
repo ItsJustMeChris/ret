@@ -12,6 +12,17 @@ npm run dev:web    # renderer in a browser tab, talking to a local app-server ov
 npm run dist       # Windows installer in release/
 ```
 
+## Release
+
+Installed copies of Ret update themselves from this repo's GitHub Releases. To ship a version:
+
+```bash
+npm version patch          # bumps package.json, commits, tags v<version>
+git push --follow-tags     # CI builds the installer into a draft release
+```
+
+Then publish the draft on GitHub. Running copies check every 4 hours (or on demand in Settings → Ret), download the update in the background, and ask before restarting into it. If you say *Later*, it installs the next time you quit.
+
 ## What you get
 
 **Your ChatGPT subscription.** Ret uses Codex's own login (`~/.codex/auth.json`), so if the Codex CLI is already signed in, so is Ret. If not, you can sign in with ChatGPT in the browser or with a device code. Plan usage (for example the 7-day limit) shows in the sidebar.

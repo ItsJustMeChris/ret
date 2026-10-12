@@ -3,7 +3,8 @@ import { rpc } from "../rpc/client";
 import type { Thread } from "../protocol";
 import { mergeTurns } from "./actions";
 import { threadTitle } from "./projects";
-import { stripTurns, useThreads, type ExternalRun } from "./threads";
+import { mergeThread, useThreads, type ExternalRun } from "./threads";
+import { backfillLineage } from "./lineage";
 
 /**
  * Cross-client activity: the VS Code extension and the CLI each run a private
@@ -71,9 +72,12 @@ async function pass() {
   if (changed.length) {
     useThreads.setState((s) => {
       const threads = { ...s.threads };
-      for (const t of changed) threads[t.id] = { ...(threads[t.id] ?? {}), ...stripTurns(t) };
+      for (const t of changed) threads[t.id] = mergeThread(threads[t.id], t);
       return { threads };
     });
+    // The list doesn't say which of the new ones are forks; look that up.
+    const fresh = changed.filter((t) => !st.threads[t.id]).map((t) => t.id);
+    if (fresh.length) void backfillLineage(fresh);
   }
 
   const checks: { thread: Thread; moved: boolean }[] = [];

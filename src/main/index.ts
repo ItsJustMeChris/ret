@@ -6,15 +6,15 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { IPC, type EditCommand, type UpdaterSettings } from "../shared/bridge";
+import { RUNNABLE } from "../shared/files";
 import { AppServer, type LaunchTarget } from "./codex/appServer";
 import { CodexUpdater } from "./codex/updater";
+import { AppUpdater } from "./appUpdate";
 import { findSystemCodex, probeVersion } from "./codex/platform";
 import { createWorktree, gitInfo } from "./git";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 
-/** File types that would run code if "opened"; links to these are revealed, never launched. */
-const RUNNABLE = /\.(exe|dll|sys|drv|ocx|so|dylib|com|bat|cmd|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|msi|msp|scr|pif|lnk|reg|hta|cpl|jar|sh|bash|zsh|command|app|appimage|run|bin|py|pyw)$/i;
 
 let vscodeCache: Promise<boolean> | null = null;
 /** VS Code registers the vscode:// URL handler; look for its install rather than shelling out. */
@@ -69,6 +69,8 @@ const updater = new CodexUpdater(join(userData, "codex"), join(userData, "codex-
     void applyStaged().finally(() => (autoApplying = false));
   }
 });
+
+const appUpdate = new AppUpdater((state) => send(IPC.appUpdateState, state));
 
 async function resolveTarget(): Promise<LaunchTarget | null> {
   const target = await resolveBinary();
@@ -283,6 +285,12 @@ function registerIpc() {
     return updater.snapshot();
   });
   ipcMain.handle(IPC.updaterApply, () => applyStaged());
+  ipcMain.handle(IPC.appUpdateGet, () => appUpdate.state);
+  ipcMain.handle(IPC.appUpdateCheck, async () => {
+    await appUpdate.check();
+    return appUpdate.state;
+  });
+  ipcMain.handle(IPC.appUpdateInstall, () => appUpdate.install());
   ipcMain.handle(IPC.updaterSettings, async (_e, patch: Partial<UpdaterSettings>) => {
     const sourceChanged =
       (patch.source !== undefined && patch.source !== updater.settings.source) ||
@@ -397,6 +405,7 @@ app.whenReady().then(() => {
   registerIpc();
   createWindow();
   void boot();
+  appUpdate.schedule();
 });
 
 app.on("window-all-closed", () => {

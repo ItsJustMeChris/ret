@@ -119,6 +119,22 @@ export const useThreads = create<ThreadsState>(() => ({
 export const stripTurns = (t: Thread): Thread => (t.turns?.length ? { ...t, turns: [] } : t);
 
 /**
+ * Merge a server copy of a thread into the one we have. `thread/list` never reports fork
+ * lineage (only fork/read/resume/started do), so a copy without it must not erase what we
+ * already know, or forks fall out of their folders and lose their canvas links.
+ */
+export function mergeThread(prev: Thread | undefined, next: Thread): Thread {
+  const t = stripTurns(next);
+  if (!prev) return t;
+  return {
+    ...prev,
+    ...t,
+    forkedFromId: t.forkedFromId ?? prev.forkedFromId ?? null,
+    parentThreadId: t.parentThreadId ?? prev.parentThreadId ?? null,
+  };
+}
+
+/**
  * Item order for a turn. Only a "full" item list is authoritative; `turn/completed` (and
  * other notifications) carry a *summary* — often just the final message — which must be
  * merged into what we've already shown, never replace it.
@@ -232,7 +248,7 @@ function apply(d: Draft, method: string, p: any, hooks: Hooks) {
     case "thread/started": {
       const t: Thread = p.thread;
       d.threads = own(d.threads);
-      d.threads[t.id] = { ...(d.threads[t.id] ?? {}), ...stripTurns(t) };
+      d.threads[t.id] = mergeThread(d.threads[t.id], t);
       break;
     }
     case "thread/status/changed": {
@@ -470,7 +486,7 @@ export function patchLive(threadId: string, patch: Partial<LiveThread> | ((lt: L
 export function upsertThreads(list: Thread[]) {
   useThreads.setState((s) => {
     const threads = { ...s.threads };
-    for (const t of list) threads[t.id] = { ...(threads[t.id] ?? {}), ...stripTurns(t) };
+    for (const t of list) threads[t.id] = mergeThread(threads[t.id], t);
     return { threads };
   });
 }

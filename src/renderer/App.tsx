@@ -13,6 +13,7 @@ import { LoginGate } from "./components/LoginGate";
 import { Toasts } from "./components/Toasts";
 import { DialogHost } from "./components/ui/Dialog";
 import { TooltipHost } from "./components/ui/Tooltip";
+import { HoverCardHost } from "./components/HoverCards";
 import { ContextMenuHost } from "./components/ContextMenuHost";
 import { fitAll, toggleMaximize, viewport } from "./components/canvas/viewport";
 import { bridge } from "./bridge";
@@ -138,6 +139,7 @@ export function App() {
       <Toasts />
       <DialogHost />
       <TooltipHost />
+      <HoverCardHost />
       <ContextMenuHost />
     </div>
   );

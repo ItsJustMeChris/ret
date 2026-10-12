@@ -52,6 +52,19 @@ export interface UpdaterState {
   error: string | null;
 }
 
+/** Ret's own updates, published as GitHub Releases. `unsupported` = dev/unpackaged build. */
+export type AppUpdatePhase = "unsupported" | "idle" | "checking" | "downloading" | "ready" | "upToDate" | "error";
+
+export interface AppUpdateState {
+  phase: AppUpdatePhase;
+  /** Newest release found; once `ready`, the version a restart installs. */
+  version: string | null;
+  /** 0..1 while downloading. */
+  progress: number | null;
+  lastCheckedAt: number | null;
+  error: string | null;
+}
+
 export interface WorktreeResult {
   path: string;
   branch: string;
@@ -81,6 +94,13 @@ export interface RetBridge {
     /** Restart the app-server on the staged version. */
     apply(): Promise<void>;
     setSettings(patch: Partial<UpdaterSettings>): Promise<UpdaterState>;
+  };
+  appUpdate: {
+    getState(): Promise<AppUpdateState>;
+    onState(cb: (state: AppUpdateState) => void): () => void;
+    check(): Promise<AppUpdateState>;
+    /** Quits, installs the downloaded update and relaunches. */
+    install(): Promise<void>;
   };
   dialog: {
     pickFolder(): Promise<string | null>;
@@ -129,6 +149,10 @@ export const IPC = {
   updaterCheck: "updater:check",
   updaterApply: "updater:apply",
   updaterSettings: "updater:settings",
+  appUpdateGet: "appUpdate:get",
+  appUpdateState: "appUpdate:state",
+  appUpdateCheck: "appUpdate:check",
+  appUpdateInstall: "appUpdate:install",
   pickFolder: "dialog:pickFolder",
   pickFile: "dialog:pickFile",
   openExternal: "shell:openExternal",

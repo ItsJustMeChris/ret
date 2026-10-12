@@ -18,6 +18,7 @@ function SettingsInner() {
   const close = () => useUI.setState({ settingsOpen: false });
   const codex = useConn((s) => s.codex);
   const up = useConn((s) => s.updater);
+  const ret = useConn((s) => s.appUpdate);
   const account = useConn((s) => s.account?.account);
   const theme = useUI((s) => s.theme);
   const projects = useUI((s) => s.projects);
@@ -211,6 +212,39 @@ function SettingsInner() {
               </div>
             </div>
           </section>
+
+          {isDesktop && ret && (
+            <section>
+              <h4>Ret</h4>
+              <div className="setting-row">
+                <div>
+                  <div>
+                    Ret {bridge.appVersion}{" "}
+                    {ret.phase === "downloading" && <span className="badge">{Math.round((ret.progress ?? 0) * 100)}%</span>}
+                    {ret.phase === "upToDate" && <span className="badge ok">up to date</span>}
+                    {ret.phase === "ready" && <span className="badge">{ret.version} ready</span>}
+                  </div>
+                  <div className="muted small">
+                    {ret.phase === "unsupported"
+                      ? "Updates are only checked in installed builds."
+                      : `Checks GitHub Releases every 4h and downloads updates in the background${ret.lastCheckedAt ? ` · checked ${new Date(ret.lastCheckedAt).toLocaleTimeString()}` : ""}`}
+                  </div>
+                  {ret.error && <div className="setting-error small">{ret.error}</div>}
+                </div>
+                {ret.phase === "ready" ? (
+                  <button className="btn primary" onClick={() => void bridge.appUpdate.install()}>
+                    <Download size={13} /> Restart into {ret.version}
+                  </button>
+                ) : (
+                  ret.phase !== "unsupported" && (
+                    <button className="btn" disabled={ret.phase === "checking" || ret.phase === "downloading"} onClick={() => void bridge.appUpdate.check()}>
+                      {ret.phase === "checking" || ret.phase === "downloading" ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />} Check now
+                    </button>
+                  )
+                )}
+              </div>
+            </section>
+          )}
 
           {hidden.length > 0 && (
             <section>

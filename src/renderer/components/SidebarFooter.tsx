@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Download, LoaderCircle, RefreshCw, Settings, CircleAlert, Check } from "lucide-react";
+import { Download, LoaderCircle, RefreshCw, Settings, CircleAlert, Check, ArrowUpCircle } from "lucide-react";
 import { useConn } from "../state/conn";
 import { useUI } from "../state/ui";
+import { codexStatus } from "./HoverCards";
 
 type Window = { usedPercent: number; windowDurationMins: number | null; resetsAt: number | null };
 
@@ -75,24 +76,27 @@ export function CodexBadge() {
   const codex = useConn((s) => s.codex);
   const up = useConn((s) => s.updater);
   if (!codex) return null;
-  let icon = <Check size={11} className="st-ok" />;
-  let text = codex.version ? `codex ${codex.version}` : "codex";
-  if (codex.state === "starting") icon = <LoaderCircle size={11} className="spin" />;
-  if (codex.state === "error" || codex.state === "missing") icon = <CircleAlert size={11} className="st-err" />;
-  if (up?.phase === "downloading") {
-    icon = <Download size={11} className="st-run" />;
-    text = `Downloading ${up.latest ?? ""} ${up.progress != null ? Math.round(up.progress * 100) + "%" : ""}`;
-  } else if (up?.phase === "verifying" || up?.phase === "extracting") {
-    icon = <LoaderCircle size={11} className="spin" />;
-    text = `Installing ${up.latest ?? ""}`;
-  } else if (up?.staged) {
-    icon = <RefreshCw size={11} className="st-run" />;
-    text = `${up.staged} ready · applies when idle`;
-  }
+  // Always "Codex <version>"; the state rides along as a small chip. Details live in the hover card.
+  const st = codexStatus(codex, up);
+  const busy = codex.state === "starting" || up?.phase === "verifying" || up?.phase === "extracting";
+  const icon = busy ? (
+    <LoaderCircle size={11} className="spin" />
+  ) : st.tone === "bad" ? (
+    <CircleAlert size={11} className="st-err" />
+  ) : up?.phase === "downloading" ? (
+    <Download size={11} className="st-run" />
+  ) : up?.staged ? (
+    <RefreshCw size={11} className="st-run" />
+  ) : st.tone === "warn" ? (
+    <ArrowUpCircle size={11} className="st-warn" />
+  ) : (
+    <Check size={11} className="st-ok" />
+  );
   return (
-    <button className="codex-badge" title={codex.error ?? codex.binaryPath ?? ""} onClick={() => useUI.setState({ settingsOpen: true })}>
+    <button className="codex-badge" data-card="codex" aria-label="Codex status" onClick={() => useUI.setState({ settingsOpen: true })}>
       {icon}
-      <span>{text}</span>
+      <span className="codex-badge-text">Codex{codex.version ? ` ${codex.version}` : ""}</span>
+      {st.short && <span className={`codex-chip ${st.tone}`}>{st.short}</span>}
     </button>
   );
 }
