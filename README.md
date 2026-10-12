@@ -18,10 +18,10 @@ Installed copies of Ret update themselves from this repo's GitHub Releases. To s
 
 ```bash
 npm version patch          # bumps package.json, commits, tags v<version>
-git push --follow-tags     # CI builds the installer into a draft release
+git push --follow-tags     # CI builds the installer and publishes the release
 ```
 
-Then publish the draft on GitHub. Running copies check every 4 hours (or on demand in Settings → Ret), download the update in the background, and ask before restarting into it. If you say *Later*, it installs the next time you quit.
+Running copies check every 4 hours (or on demand in Settings → Ret), download the update in the background, and ask before restarting into it. If you say *Later*, it installs the next time you quit.
 
 ## What you get
 

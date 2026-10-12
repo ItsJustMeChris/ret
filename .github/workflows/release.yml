@@ -1,5 +1,5 @@
-# Builds the installer and uploads it, with the latest.yml feed electron-updater reads,
-# to a draft GitHub Release. Installed copies see the update once the draft is published.
+# Builds the installer and publishes it, with the latest.yml feed electron-updater reads,
+# as a GitHub Release. Installed copies pick it up on their next update check.
 #
 #   npm version patch   # bumps package.json and tags v<version>
 #   git push --follow-tags
@@ -31,6 +31,16 @@ jobs:
           fi
       - run: npm ci
       - run: npm run typecheck
-      - run: npm run dist -- --publish always
+      # electron-builder only builds: its own publisher uploads artifacts in parallel and can
+      # race itself into several releases for one tag, splitting the files between them.
+      - run: npm run dist -- --publish never
+      - name: Publish release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$version" --generate-notes \
+            "release/Ret-Setup-$version.exe" \
+            "release/Ret-Setup-$version.exe.blockmap" \
+            release/latest.yml
