@@ -1,5 +1,6 @@
-# Builds the installer and publishes it, with the latest.yml feed electron-updater reads,
-# as a GitHub Release. Installed copies pick it up on their next update check.
+# Builds the Windows and macOS installers, then publishes them, with the latest*.yml feeds
+# electron-updater reads, as one GitHub Release. Installed copies pick it up on their next
+# update check. Nothing is published unless every build succeeds.
 #
 #   npm version patch   # bumps package.json and tags v<version>
 #   git push --follow-tags
@@ -13,8 +14,10 @@ permissions:
   contents: write
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -22,7 +25,6 @@ jobs:
           node-version: 24
           cache: npm
       - name: Check tag matches package.json
-        shell: bash
         run: |
           version="v$(node -p "require('./package.json').version")"
           if [ "$version" != "$GITHUB_REF_NAME" ]; then
@@ -31,16 +33,79 @@ jobs:
           fi
       - run: npm ci
       - run: npm run typecheck
-      # electron-builder only builds: its own publisher uploads artifacts in parallel and can
-      # race itself into several releases for one tag, splitting the files between them.
+
+  # electron-builder only builds in these jobs: its own publisher uploads artifacts in parallel
+  # and can race itself into several releases for one tag, splitting the files between them.
+  windows:
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
       - run: npm run dist -- --publish never
+      - uses: actions/upload-artifact@v5
+        with:
+          name: windows
+          if-no-files-found: error
+          path: |
+            release/Ret-Setup-*.exe
+            release/Ret-Setup-*.exe.blockmap
+            release/latest.yml
+
+  mac:
+    needs: verify
+    runs-on: macos-latest
+    env:
+      # Developer ID Application certificate (base64 .p12) and its password.
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      # Notarization.
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      # Without these electron-builder quietly ships an unsigned app, which macOS won't update.
+      - name: Check signing secrets
+        run: |
+          for v in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!v}" ]; then
+              echo "::error::Missing repository secret $v"
+              exit 1
+            fi
+          done
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run dist:mac -- --publish never
+      - uses: actions/upload-artifact@v5
+        with:
+          name: mac
+          if-no-files-found: error
+          path: |
+            release/Ret-*.dmg
+            release/Ret-*.zip
+            release/Ret-*.blockmap
+            release/latest-mac.yml
+
+  publish:
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: assets
+          merge-multiple: true
       - name: Publish release
-        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$version" --generate-notes \
-            "release/Ret-Setup-$version.exe" \
-            "release/Ret-Setup-$version.exe.blockmap" \
-            release/latest.yml
+          ls -la assets
+          gh release create "$GITHUB_REF_NAME" assets/* \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --title "${GITHUB_REF_NAME#v}" --generate-notes

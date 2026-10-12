@@ -10,6 +10,7 @@ npm start          # build + launch the desktop app
 npm run dev        # Electron with hot reload (renderer HMR, main/preload auto-restart)
 npm run dev:web    # renderer in a browser tab, talking to a local app-server over WebSocket
 npm run dist       # Windows installer in release/
+npm run dist:mac   # macOS dmg + zip in release/ (on a Mac)
 ```
 
 ## Release
@@ -18,8 +19,10 @@ Installed copies of Ret update themselves from this repo's GitHub Releases. To s
 
 ```bash
 npm version patch          # bumps package.json, commits, tags v<version>
-git push --follow-tags     # CI builds the installer and publishes the release
+git push --follow-tags     # CI builds Windows + macOS and publishes the release
 ```
+
+The macOS build is signed and notarized, which needs these repository secrets: `CSC_LINK` (base64 Developer ID Application `.p12`), `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`.
 
 Running copies check every 4 hours (or on demand in Settings → Ret), download the update in the background, and ask before restarting into it. If you say *Later*, it installs the next time you quit.
 
