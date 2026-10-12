@@ -3,7 +3,7 @@ import { rpc } from "../rpc/client";
 import type { SandboxMode, SandboxPolicy, ServerRequest, Thread, ThreadItem, UserInput } from "../protocol";
 import type { AskForApproval } from "../protocol/generated/v2";
 import { useConn } from "./conn";
-import { guarded } from "./toasts";
+import { guarded, toast } from "./toasts";
 import { coveredLeft } from "../components/canvas/viewport";
 import { explicitKeys, normPath, projectKeyFor, threadTitle } from "./projects";
 import {
@@ -18,6 +18,7 @@ import {
   upsertThreads,
   useThreads,
   type LiveThread,
+  type QueuedMessage,
   type ThreadSettings,
 } from "./threads";
 import { activeBoard, isDraft, newId, updateBoard, useUI, type AccessPreset, type CanvasWin, type FocusSplit, type UIState } from "./ui";
@@ -76,6 +77,8 @@ export function bootstrap() {
 
   setThreadHooks({
     onTurnCompleted: (threadId, turn) => {
+      // Send the next queued follow-up (outside the reducer flush that called us).
+      if (turn.status !== "failed") setTimeout(() => void drainQueue(threadId), 0);
       const visible = useThreads.getState().visible[threadId];
       if (!visible || !document.hasFocus()) {
         const title = threadTitle(useThreads.getState().threads[threadId]);
@@ -427,11 +430,36 @@ export interface TurnOverrides {
 }
 
 /** Sends a message to a thread (starting it first if `target` is a draft). Returns the real thread id. */
-export async function sendMessage(target: string, text: string, attachments: Attachment[] = [], prefs: TurnOverrides = {}): Promise<string> {
+/**
+ * Sends a message to a thread (starting it first if `target` is a draft). Returns the real thread id.
+ * While one of our turns is running:
+ * - "steer" injects it into that turn — unless the turn is already writing its final answer, where
+ *   Codex drops late steers; then it goes out as the next turn the moment the summary finishes;
+ * - "queue" / "auto" hold it and send it as the next turn once the current one ends.
+ */
+export async function sendMessage(
+  target: string,
+  text: string,
+  attachments: Attachment[] = [],
+  prefs: TurnOverrides = {},
+  how: "auto" | "steer" | "queue" = "auto",
+): Promise<string> {
   const ui = useUI.getState();
   const access = accessOverrides(prefs.access ?? "config");
   const input = buildInput(text, attachments);
   if (!input.length) return target;
+
+  if (!isDraft(target)) {
+    flushNow();
+    const live = useThreads.getState().live[target];
+    if (live?.activeTurnId) {
+      const finishing = how === "steer" && isWritingFinalAnswer(live);
+      if (how !== "steer" || finishing) {
+        enqueueMessage(target, { id: crypto.randomUUID(), text, attachments, prefs });
+        return target;
+      }
+    }
+  }
 
   let threadId = target;
   if (isDraft(target)) {
@@ -470,10 +498,8 @@ export async function sendMessage(target: string, text: string, attachments: Att
   const clientId = crypto.randomUUID();
   addOptimistic(threadId, clientId, input);
   try {
-    if (lt?.activeTurnId) {
-      await rpc.request("turn/steer", { threadId, input, expectedTurnId: lt.activeTurnId, clientUserMessageId: clientId });
-    } else {
-      await rpc.request("turn/start", {
+    const start = () =>
+      rpc.request("turn/start", {
         threadId,
         input,
         clientUserMessageId: clientId,
@@ -483,6 +509,18 @@ export async function sendMessage(target: string, text: string, attachments: Att
         approvalPolicy: access.approvalPolicy,
         sandboxPolicy: access.sandboxPolicy,
       });
+    if (lt?.activeTurnId && how === "steer") {
+      const expected = lt.activeTurnId;
+      try {
+        await rpc.request("turn/steer", { threadId, input, expectedTurnId: expected, clientUserMessageId: clientId });
+      } catch (err) {
+        // Sent just as the turn finished: steering has nothing to join, so start a new turn instead.
+        flushNow();
+        if (useThreads.getState().live[threadId]?.activeTurnId === expected) throw err;
+        await start();
+      }
+    } else {
+      await start();
     }
   } catch (err) {
     clearOptimistic(threadId, clientId);
@@ -508,6 +546,69 @@ function settingsFrom(res: {
     sandbox: res.sandbox,
     cwd: res.cwd,
   };
+}
+
+/** True once the running turn has started streaming its final answer (a steer then goes unanswered). */
+export function isWritingFinalAnswer(lt: LiveThread): boolean {
+  const turn = lt.activeTurnId ? lt.turns[lt.activeTurnId] : undefined;
+  const last = turn ? lt.items[turn.itemIds[turn.itemIds.length - 1]] : undefined;
+  return last?.type === "agentMessage" && last.phase === "final_answer";
+}
+
+function enqueueMessage(threadId: string, msg: QueuedMessage) {
+  useThreads.setState((s) => ({ queued: { ...s.queued, [threadId]: [...(s.queued[threadId] ?? []), msg] } }));
+}
+
+function takeQueued(threadId: string, id?: string): QueuedMessage | undefined {
+  const list = useThreads.getState().queued[threadId] ?? [];
+  const msg = id ? list.find((m) => m.id === id) : list[0];
+  if (!msg) return undefined;
+  useThreads.setState((s) => {
+    const rest = (s.queued[threadId] ?? []).filter((m) => m.id !== msg.id);
+    const queued = { ...s.queued };
+    if (rest.length) queued[threadId] = rest;
+    else delete queued[threadId];
+    return { queued };
+  });
+  return msg;
+}
+
+/** Start the next queued follow-up if the thread is idle. */
+async function drainQueue(threadId: string) {
+  flushNow();
+  if (useThreads.getState().live[threadId]?.activeTurnId) return;
+  const msg = takeQueued(threadId);
+  if (!msg) return;
+  try {
+    await sendMessage(threadId, msg.text, msg.attachments, msg.prefs);
+  } catch (err) {
+    enqueueMessage(threadId, msg); // keep it; the error is already shown on the thread
+    toast(`Couldn't send queued message: ${(err as Error).message}`, "error");
+  }
+}
+
+/** Queued message actions: send it into the running turn now, drop it, or take it back to edit. */
+export function steerQueued(threadId: string, id: string) {
+  const msg = takeQueued(threadId, id);
+  if (msg) void sendMessage(threadId, msg.text, msg.attachments, msg.prefs, "steer").catch((err) => toast(err.message, "error"));
+}
+
+export function discardQueued(threadId: string, id: string) {
+  takeQueued(threadId, id);
+}
+
+export function editQueued(threadId: string, id: string) {
+  const msg = takeQueued(threadId, id);
+  if (msg) window.dispatchEvent(new CustomEvent("ret:composer-fill", { detail: { threadId, text: msg.text } }));
+}
+
+/** Re-send a message that reached a turn too late to be answered, as a fresh turn. */
+export function resendUnanswered(threadId: string, item: Extract<ThreadItem, { type: "userMessage" }>) {
+  const text = item.content.map((c) => (c.type === "text" ? c.text : "")).join("\n").trim();
+  const attachments: Attachment[] = item.content.flatMap((c) =>
+    c.type === "localImage" ? [{ path: c.path, name: c.path.split(/[\\/]/).pop() ?? "image" }] : [],
+  );
+  void sendMessage(threadId, text, attachments).catch((err) => toast(`Couldn't send: ${err.message}`, "error"));
 }
 
 export async function interrupt(threadId: string) {

@@ -197,7 +197,7 @@ function createWindow() {
     minWidth: 720,
     minHeight: 480,
     show: false,
-    backgroundColor: "#0c0c0f",
+    backgroundColor: "#000000",
     titleBarStyle: "hidden",
     titleBarOverlay: process.platform === "darwin" ? undefined : { color: "#00000000", symbolColor: "#a1a1aa", height: 38 },
     trafficLightPosition: { x: 14, y: 12 },
@@ -365,7 +365,7 @@ function registerIpc() {
   ipcMain.on(IPC.setTheme, (_e, theme: "dark" | "light") => {
     nativeTheme.themeSource = theme;
     if (process.platform !== "darwin" && win && !win.isDestroyed()) {
-      win.setBackgroundColor(theme === "light" ? "#f6f6f8" : "#0c0c0f");
+      win.setBackgroundColor(theme === "light" ? "#f6f6f8" : "#000000");
       win.setTitleBarOverlay({ color: "#00000000", symbolColor: theme === "light" ? "#55556a" : "#a1a1aa", height: 38 });
     }
   });

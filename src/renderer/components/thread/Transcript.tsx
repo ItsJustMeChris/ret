@@ -2,11 +2,12 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "rea
 import { useShallow } from "zustand/react/shallow";
 import { ChevronRight, CircleAlert, FileDiff, GitFork, LoaderCircle } from "lucide-react";
 import { useThreads } from "../../state/threads";
-import { forkThread, loadOlder } from "../../state/actions";
+import { forkThread, loadOlder, resendUnanswered } from "../../state/actions";
 import type { ThreadItem } from "../../protocol";
 import { activitySummary, DiffView, isActivity, ItemView } from "./Items";
 import { diffStats, duration } from "../../lib/format";
 import { Approvals } from "./Approvals";
+import { TurnRail } from "./TurnRail";
 
 type Ctx = { threadId: string; cwd: string | null };
 
@@ -94,6 +95,7 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
         </div>
       )}
       {live && !pending && <Working since={turn.startedAt} elsewhere={elsewhere} />}
+      {!live && !pending && turn.status !== "interrupted" && <UnansweredNotice threadId={ctx.threadId} lastItemId={turn.itemIds[turn.itemIds.length - 1]} count={turn.itemIds.length} />}
       {turn.error && (
         <div className="turn-error">
           <CircleAlert size={14} />
@@ -123,6 +125,21 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
     </section>
   );
 });
+
+/** A steer that landed after the final answer: the turn ended with the user's message unanswered. */
+function UnansweredNotice({ threadId, lastItemId, count }: { threadId: string; lastItemId: string | undefined; count: number }) {
+  const item = useThreads((s) => (lastItemId ? s.live[threadId]?.items[lastItemId] : undefined));
+  if (!item || item.type !== "userMessage" || count < 2) return null;
+  return (
+    <div className="unanswered">
+      <CircleAlert size={13} />
+      <span>This message arrived as the turn was ending and wasn't answered.</span>
+      <button className="link" onClick={() => resendUnanswered(threadId, item)}>
+        Send again
+      </button>
+    </div>
+  );
+}
 
 function Working({ since, elsewhere }: { since: number | null; elsewhere?: boolean }) {
   const [, tick] = useState(0);
@@ -161,12 +178,19 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
     const ro = new ResizeObserver(() => {
       if (stick.current) el.scrollTop = el.scrollHeight;
     });
+    // Programmatic jumps (turn rail) must not be pulled back to the bottom while
+    // off-screen turns render at their real size along the way.
+    const unstick = () => {
+      stick.current = false;
+    };
     ro.observe(inner);
     el.addEventListener("scroll", onScroll, { passive: true });
+    el.addEventListener("ret:unstick", unstick);
     el.scrollTop = el.scrollHeight;
     return () => {
       ro.disconnect();
       el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("ret:unstick", unstick);
     };
   }, [threadId, loading]);
 
@@ -179,6 +203,7 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
   }
 
   return (
+    <div className="transcript-wrap">
     <div className="transcript" ref={scroller}>
       <div className="transcript-inner" ref={content}>
         {lt.olderCursor && (
@@ -198,6 +223,8 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
         )}
         <Approvals threadId={threadId} />
       </div>
+    </div>
+    <TurnRail threadId={threadId} scroller={scroller} />
     </div>
   );
 }

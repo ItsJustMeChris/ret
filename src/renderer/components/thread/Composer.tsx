@@ -3,10 +3,11 @@ import { ArrowUp, Gauge, LoaderCircle, Paperclip, Rocket, Settings2, Shield, Shi
 import { useThreads } from "../../state/threads";
 import { useUI, isDraft, type AccessPreset } from "../../state/ui";
 import { useConn } from "../../state/conn";
-import { interrupt, sendMessage, type Attachment, type TurnOverrides } from "../../state/actions";
+import { interrupt, isWritingFinalAnswer, sendMessage, type Attachment, type TurnOverrides } from "../../state/actions";
 import { bridge, isDesktop } from "../../bridge";
 import { toast } from "../../state/toasts";
 import { Select, type SelectOption } from "../ui/Select";
+import { QueueTray } from "./QueueTray";
 
 const ACCESS_OPTIONS: SelectOption<AccessPreset>[] = [
   { value: "config", label: "Config default", description: "Whatever your config.toml sets", icon: <Settings2 size={13} /> },
@@ -33,6 +34,11 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
   const [sending, setSending] = useState(false);
   const ta = useRef<HTMLTextAreaElement>(null);
   const running = useThreads((s) => !!s.live[threadId]?.activeTurnId);
+  // Final summary streaming: Enter now means "send right after it finishes" (a steer would be dropped).
+  const finishing = useThreads((s) => {
+    const lt = s.live[threadId];
+    return !!lt?.activeTurnId && isWritingFinalAnswer(lt);
+  });
   // Another Codex process owns the current turn; writing to the same thread from here could corrupt it.
   const elsewhere = useThreads((s) => !!s.external[threadId]);
   const threadModel = useThreads((s) => s.live[threadId]?.settings?.model ?? s.threads[threadId]?.model ?? null);
@@ -62,6 +68,18 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     drafts.set(threadId, text);
   }, [threadId, text]);
 
+  // "Edit" on a queued follow-up hands its text back to this composer.
+  useEffect(() => {
+    const onFill = (e: Event) => {
+      const d = (e as CustomEvent<{ threadId: string; text: string }>).detail;
+      if (d.threadId !== threadId) return;
+      setText((cur) => (cur.trim() ? `${cur}\n${d.text}` : d.text));
+      ta.current?.focus();
+    };
+    window.addEventListener("ret:composer-fill", onFill);
+    return () => window.removeEventListener("ret:composer-fill", onFill);
+  }, [threadId]);
+
   useEffect(() => {
     if (autoFocus) ta.current?.focus();
   }, [threadId]); // on appear only, never when the pane merely regains focus
@@ -74,7 +92,7 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     el.style.height = `${Math.min(el.scrollHeight, 320)}px`;
   }, [text]);
 
-  const submit = async () => {
+  const submit = async (how: "auto" | "steer" | "queue" = "auto") => {
     const value = text;
     if ((!value.trim() && !attachments.length) || sending || elsewhere) return;
     setSending(true);
@@ -83,7 +101,7 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     setAttachments([]);
     drafts.delete(threadId);
     try {
-      await sendMessage(threadId, value, attachments, effectiveOverrides());
+      await sendMessage(threadId, value, attachments, effectiveOverrides(), how);
     } catch (err) {
       toast(`Couldn't send: ${(err as Error).message}`, "error");
       setText(value);
@@ -95,7 +113,8 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      void submit();
+      // While a turn runs: Enter steers it, Ctrl+Enter queues the message for the next turn.
+      void submit(e.ctrlKey || e.metaKey ? "queue" : running ? "steer" : "auto");
     } else if (e.key === "Escape" && running) {
       e.preventDefault();
       void interrupt(threadId);
@@ -166,6 +185,8 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
   ];
 
   return (
+    <>
+    <QueueTray threadId={threadId} />
     <div
       className={`composer ${running ? "running" : ""} ${elsewhere ? "elsewhere" : ""} ${compact ? "compact" : ""}`}
       onDrop={onDrop}
@@ -200,7 +221,15 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
         rows={1}
         value={text}
         placeholder={
-          elsewhere ? "Waiting for the other app to finish…" : running ? "Steer the current turn…  (Esc to stop)" : isDraft(threadId) ? "Describe a task…" : "Reply…"
+          elsewhere
+            ? "Waiting for the other app to finish…"
+            : finishing
+              ? "Wrapping up — Enter sends right after this summary  (Esc stops)"
+              : running
+                ? "Steer the current turn…  (Ctrl+Enter queues for after · Esc stops)"
+              : isDraft(threadId)
+                ? "Describe a task…"
+                : "Reply…"
         }
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
@@ -251,11 +280,12 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
             <Square size={12} fill="currentColor" />
           </button>
         ) : (
-          <button className="send" title={running ? "Steer (Enter)" : "Send (Enter)"} disabled={elsewhere || (!text.trim() && !attachments.length)} onClick={() => void submit()}>
+          <button className="send" title={finishing ? "Send right after this summary (Enter)" : running ? "Steer the running turn (Enter) · Ctrl+Enter queues for after" : "Send (Enter)"} disabled={elsewhere || (!text.trim() && !attachments.length)} onClick={(e) => void submit(e.ctrlKey || e.metaKey ? "queue" : running ? "steer" : "auto")}>
             <ArrowUp size={16} />
           </button>
         )}
       </div>
     </div>
+    </>
   );
 }

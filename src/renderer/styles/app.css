@@ -12,16 +12,17 @@
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0b0b0e;
-  --bg-1: #101015;
-  --bg-2: #15151b;
-  --bg-3: #1c1c24;
-  --bg-4: #24242e;
-  --line: rgba(255, 255, 255, 0.065);
-  --line-2: rgba(255, 255, 255, 0.11);
-  --text: #e9e9ef;
-  --text-2: #a6a6b4;
-  --text-3: #6d6d7c;
+  /* True black with neutral greys; depth comes from lifted surfaces and hairlines, not shadows. */
+  --bg: #000000;
+  --bg-1: #0a0a0a;
+  --bg-2: #121212;
+  --bg-3: #1b1b1b;
+  --bg-4: #262626;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-2: rgba(255, 255, 255, 0.135);
+  --text: #ededed;
+  --text-2: #a3a3a3;
+  --text-3: #6e6e6e;
   --accent: #8b9cff;
   --accent-strong: #a3b0ff;
   --accent-soft: rgba(139, 156, 255, 0.13);
@@ -31,10 +32,10 @@
   --amber-soft: rgba(242, 179, 61, 0.14);
   --red: #f2616a;
   --red-soft: rgba(242, 97, 106, 0.13);
-  --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.35);
-  --shadow-lg: 0 30px 80px -20px rgba(0, 0, 0, 0.75), 0 8px 20px rgba(0, 0, 0, 0.4);
-  --grid-dot: rgba(255, 255, 255, 0.075);
-  --code-bg: #0e0e13;
+  --shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.95), 0 2px 6px rgba(0, 0, 0, 0.7);
+  --shadow-lg: 0 30px 80px -20px rgba(0, 0, 0, 1), 0 10px 24px rgba(0, 0, 0, 0.75);
+  --grid-dot: rgba(255, 255, 255, 0.085);
+  --code-bg: #0a0a0a;
 }
 
 [data-theme="light"] {
@@ -801,14 +802,14 @@ body.resizing .transcript {
 .usage-fill {
   height: 100%;
   border-radius: 4px;
-  background: var(--accent);
-  transition: width 0.4s var(--ease);
+  transition:
+    width 0.6s var(--ease),
+    background 0.6s var(--ease);
 }
-.usage-fill[data-level="mid"] {
-  background: var(--amber);
-}
-.usage-fill[data-level="high"] {
-  background: var(--red);
+.usage-left {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  transition: color 0.6s var(--ease);
 }
 .foot-row {
   display: flex;
@@ -821,18 +822,6 @@ body.resizing .transcript {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-.avatar {
-  flex: none;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-size: 12px;
-  font-weight: 700;
-  color: #0b0b18;
-  background: linear-gradient(135deg, var(--accent), #c79bff);
 }
 .account-text {
   min-width: 0;
@@ -3230,13 +3219,23 @@ textarea::placeholder {
   bottom: -6px;
   width: 8px;
 }
-.sidebar-hotzone {
+/* Grows with the pointer's intent to open the hidden sidebar (driven from JS). */
+.sidebar-handle {
   position: absolute;
   z-index: 59;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 8px;
+  left: 2px;
+  top: 30%;
+  height: 40%;
+  width: 3px;
+  border-radius: 3px;
+  background: linear-gradient(var(--accent), color-mix(in srgb, var(--accent) 40%, transparent));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 60%, transparent);
+  opacity: 0;
+  transform-origin: center;
+  pointer-events: none;
+  transition:
+    opacity 0.12s linear,
+    transform 0.12s var(--ease);
 }
 body.resizing .sidebar-layer {
   transition: none;
@@ -3481,4 +3480,282 @@ body.resizing .sidebar-layer {
 .file-head [data-path],
 .tool-head [data-path] {
   cursor: pointer;
+}
+
+/* Queued follow-ups: a tray docked on top of the composer */
+.queue-tray {
+  width: calc(100% - 32px - 28px);
+  max-width: calc(860px - 28px);
+  margin: 6px auto 0;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 134px;
+  overflow-y: auto;
+  border: 1px solid var(--line-2);
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  background: color-mix(in srgb, var(--bg-2) 65%, var(--bg));
+  animation: tray-in 0.2s var(--ease);
+}
+.queue-tray + .composer {
+  margin-top: 0;
+}
+.queue-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 0 4px 0 7px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  animation: queue-row-in 0.22s var(--ease);
+}
+.queue-row:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+.queue-icon {
+  flex: none;
+  color: var(--accent);
+}
+.queue-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.queue-files {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.queue-when {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.queue-row:first-child .queue-when {
+  color: var(--accent);
+}
+.queue-actions {
+  flex: none;
+  display: flex;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.queue-row:hover .queue-actions,
+.queue-row:focus-within .queue-actions {
+  opacity: 1;
+}
+@keyframes tray-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes queue-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@container pane (width < 640px) {
+  .queue-tray {
+    width: calc(100% - 16px - 20px);
+    margin-top: 4px;
+  }
+}
+
+/* ==========================================================================
+   Turn rail: jump between turns
+   ========================================================================== */
+.transcript-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+/* Hidden until the pointer finds it: the transparent pill is the hover target. */
+.turn-rail {
+  position: absolute;
+  left: 8px; /* refined in JS to hug the text column */
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  width: 36px;
+  /* Spread evenly; long threads compress instead of overflowing. */
+  height: max(64px, min(calc(var(--n) * 11px + 16px), 72%));
+  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: 0 0 0 1px transparent;
+  transition:
+    background 0.22s var(--ease) 0.3s,
+    box-shadow 0.22s var(--ease) 0.3s;
+}
+.turn-rail:hover,
+.turn-rail:focus-within {
+  background: color-mix(in srgb, var(--bg-1) 86%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--shadow);
+  transition-delay: 0s;
+}
+.rail-tick {
+  --mag: 0;
+  position: relative;
+  flex: 1 1 0;
+  max-height: 14px;
+  min-height: 3px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+.rail-tick > span {
+  display: block;
+  height: 2px;
+  width: calc(10px + var(--mag) * 12px);
+  border-radius: 2px;
+  background: var(--text-3);
+  opacity: 0;
+  transform: scaleX(0.2);
+  transition:
+    width 0.16s var(--ease),
+    height 0.16s var(--ease),
+    background 0.2s,
+    opacity 0.2s var(--ease) 0.3s,
+    transform 0.25s var(--ease) 0.3s;
+}
+/* Reveal: ticks grow in from the centre, staggered top to bottom. */
+.turn-rail:hover .rail-tick > span,
+.turn-rail:focus-within .rail-tick > span {
+  opacity: calc(0.5 + var(--mag) * 0.5);
+  transform: scaleX(1);
+  transition-delay: 0s, 0s, 0s, min(calc(var(--i) * 14ms), 220ms), min(calc(var(--i) * 14ms), 220ms);
+}
+.turn-rail:hover .rail-tick.lit > span,
+.turn-rail:focus-within .rail-tick.lit > span {
+  width: calc(16px + var(--mag) * 8px);
+  background: var(--text);
+  opacity: 0.95;
+}
+.turn-rail .rail-tick:hover > span {
+  height: 3px;
+  background: var(--accent);
+  opacity: 1;
+}
+.turn-rail:hover .rail-tick.running > span {
+  background: var(--green);
+  animation: tick-pulse 1.4s ease-in-out infinite;
+}
+@keyframes tick-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.rail-preview {
+  position: absolute;
+  left: calc(100% + 8px);
+  width: max-content;
+  max-width: 300px;
+  transform: translateY(-50%);
+  padding: 8px 11px;
+  border-radius: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  animation: rail-pop 0.16s var(--ease);
+}
+@keyframes rail-pop {
+  from {
+    opacity: 0;
+    transform: translate(-6px, -50%) scale(0.97);
+  }
+}
+.rail-preview-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  color: var(--text-3);
+  margin-bottom: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.rail-preview-text {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.turn.flash {
+  animation: turn-flash 1.1s var(--ease);
+  border-radius: 10px;
+}
+@keyframes turn-flash {
+  0%,
+  30% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+    background: transparent;
+  }
+}
+@container pane (width < 480px) {
+  .turn-rail {
+    display: none;
+  }
+}
+
+.transcript-wrap > .transcript {
+  min-width: 0;
+}
+
+.unanswered {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 12px;
+}
+.unanswered .link {
+  margin-left: auto;
+  color: var(--amber);
+  font-weight: 600;
+}
+
+/* Black theme: canvas windows sit one step above the canvas */
+[data-theme="dark"] .cwin,
+[data-theme="dark"] .cwin > .thread-pane {
+  background: var(--bg-1);
+}
+[data-theme="dark"] .cwin .pane-header {
+  background: var(--bg-2);
+}
+[data-theme="dark"] .cwin.focused .pane-header {
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-2));
 }

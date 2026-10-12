@@ -9,8 +9,9 @@ startExternalWatcher();
 
 if (import.meta.env.DEV) {
   // Handy for poking at state from devtools.
-  void Promise.all([import("./state/threads"), import("./state/ui"), import("./state/conn"), import("./rpc/client")]).then(
-    ([threads, ui, conn, client]) => Object.assign(window, { __ret: { useThreads: threads.useThreads, useUI: ui.useUI, useConn: conn.useConn, rpc: client.rpc } }),
+  void Promise.all([import("./state/threads"), import("./state/ui"), import("./state/conn"), import("./rpc/client"), import("./state/actions")]).then(
+    ([threads, ui, conn, client, actions]) =>
+      Object.assign(window, { __ret: { useThreads: threads.useThreads, useUI: ui.useUI, useConn: conn.useConn, rpc: client.rpc, actions } }),
   );
 }
 createRoot(document.getElementById("root")!).render(<App />);

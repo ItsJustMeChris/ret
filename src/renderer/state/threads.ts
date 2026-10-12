@@ -72,6 +72,15 @@ export interface ThreadsState {
   visible: Record<string, number>;
   /** Threads whose latest turn is running in a different Codex process (VS Code, CLI, another app-server). */
   external: Record<string, ExternalRun>;
+  /** Follow-ups typed while a turn runs; each is sent as its own turn when the current one ends. */
+  queued: Record<string, QueuedMessage[]>;
+}
+
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  attachments: import("./actions").Attachment[];
+  prefs: import("./actions").TurnOverrides;
 }
 
 export interface ExternalRun {
@@ -104,15 +113,30 @@ export const useThreads = create<ThreadsState>(() => ({
   unread: {},
   visible: {},
   external: {},
+  queued: {},
 }));
 
 export const stripTurns = (t: Thread): Thread => (t.turns?.length ? { ...t, turns: [] } : t);
+
+/**
+ * Item order for a turn. Only a "full" item list is authoritative; `turn/completed` (and
+ * other notifications) carry a *summary* — often just the final message — which must be
+ * merged into what we've already shown, never replace it.
+ */
+function mergeItemIds(turn: Turn, prev?: TurnState): string[] {
+  const ids = turn.items?.map((i) => i.id) ?? [];
+  if (!ids.length) return prev?.itemIds ?? [];
+  if (!prev?.itemIds.length || turn.itemsView === "full") return ids;
+  const known = new Set(prev.itemIds);
+  const added = ids.filter((id) => !known.has(id));
+  return added.length ? [...prev.itemIds, ...added] : prev.itemIds;
+}
 
 export function turnStateFrom(turn: Turn, prev?: TurnState): TurnState {
   return {
     id: turn.id,
     status: turn.status,
-    itemIds: turn.items?.length ? turn.items.map((i) => i.id) : (prev?.itemIds ?? []),
+    itemIds: mergeItemIds(turn, prev),
     error: turn.error,
     startedAt: turn.startedAt,
     completedAt: turn.completedAt,

@@ -53,7 +53,13 @@ How Ret detects this: each of those apps runs its own private app-server, so Ret
 
 **Floating sidebar.** The sidebar floats over the content and never resizes it.
 - Pin it to keep it open.
-- Unpin it (Ctrl+B) and it slides away. Move the cursor to the left edge to slide it back out; it tucks away again when you leave.
+- Unpin it (Ctrl+B) and it slides away. It reads your pointer's motion to tell when you're reaching for it:
+  - A quick throw toward the left edge opens it before the cursor gets there.
+  - Arriving at the edge at speed opens it at once.
+  - A slow approach opens after a brief touch of the edge or a short rest beside it.
+  - Aiming at something near the edge doesn't open it, and neither does resting on a button or tab there.
+  - A faint handle at the edge brightens as the intent builds.
+- It tucks away again when you move off. A decisive move away closes it quickly; drifting gets a little grace.
 
 **Links, files and right-click.**
 - Web links open in your browser. Right-click a link to open it, copy its address, or copy its text.
