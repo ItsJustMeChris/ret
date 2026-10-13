@@ -1,7 +1,7 @@
 {
   "name": "ret",
   "productName": "Ret",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "A fast, multi-project desktop workbench for the Codex app-server.",
   "private": true,
   "main": "dist/main/index.cjs",
