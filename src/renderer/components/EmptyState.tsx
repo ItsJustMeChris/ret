@@ -13,7 +13,8 @@ export function EmptyState() {
   const workspaces = useThreads((s) => s.workspaces);
   const projects = useUI((s) => s.projects);
   const threadProject = useUI((s) => s.threadProject);
-  const tree = useMemo(() => buildProjects(threads, projects, threadProject, workspaces).slice(0, 6), [threads, projects, threadProject, workspaces]);
+  const checkouts = useUI((s) => s.checkouts);
+  const tree = useMemo(() => buildProjects(threads, projects, threadProject, workspaces, checkouts).slice(0, 6), [threads, projects, threadProject, workspaces, checkouts]);
   const recent = useMemo(
     () =>
       Object.values(threads)
