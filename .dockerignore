@@ -8,3 +8,7 @@ promo
 site/demo
 site/assets/*.mp4
 *.log
+# Dokploy writes the app's env vars to a .env beside the Dockerfile (site/.env) before building;
+# site/ is copied into nginx's web root, so it must never enter the context.
+**/.env
+**/.env.*
