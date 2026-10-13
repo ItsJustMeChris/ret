@@ -13,6 +13,18 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "5300", "--bind", "127.0.0.1", "--directory", "site"],
       "port": 5300
+    },
+    {
+      "name": "ret-demo",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:demo"],
+      "port": 5299
+    },
+    {
+      "name": "ret-demo-static",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "5301", "--bind", "127.0.0.1", "--directory", "site"],
+      "port": 5301
     }
   ]
 }

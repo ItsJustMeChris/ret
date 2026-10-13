@@ -226,6 +226,8 @@ src/renderer/
   agents.ts            what the UI needs per provider: names, permission choices, how they're sent
   state/               zustand stores: threads (live, and which provider owns each), ui (persisted), conn (per provider); actions
   components/          sidebar, focus view, canvas, code view, inbox, thread pane, composer, approvals…
+  demo/                getret.app's demo: a RetBridge with scripted engines and a pretend workspace in the page
+site/                getret.app (static), and the Dockerfile that builds the demo and serves it
 ```
 
 **Adding an agent.** Every agent is an *engine* in the main process that speaks the app-server protocol (`src/shared/protocol`) to the renderer. Codex speaks it natively; Claude Code gets an adapter (`src/main/claude`) that translates. Another agent needs the same: an engine that answers the methods in `claude/engine.ts`, plus its entry in `src/renderer/agents.ts`. The views never ask which agent a thread uses, only what it offers.

@@ -18,5 +18,5 @@
     "noEmit": true,
     "paths": { "@shared/*": ["./src/shared/*"] }
   },
-  "include": ["src", "vite.config.mts"]
+  "include": ["src", "vite.config.mts", "vite.demo.config.mts"]
 }

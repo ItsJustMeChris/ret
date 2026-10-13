@@ -1,0 +1,5 @@
+/* Ret in a browser tab: there are no native window controls to make room for.
+   (Scoped to the demo's root attribute so it outranks app.css, which loads after this.) */
+html[data-ret-demo] .titlebar {
+  padding-right: 10px;
+}
