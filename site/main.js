@@ -338,7 +338,7 @@
     live.classList.add("active");
     exit.hidden = false;
     tilt();
-    frame.focus();
+    frame.focus({ preventScroll: true });
   }
   function disengage() {
     if (!engaged) return;
@@ -396,7 +396,15 @@
       if (!liveReady) return;
       frame.contentWindow.postMessage({ type: "ret-demo:mode", mode: b.dataset.try }, location.origin);
       heroStage.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center" });
-      setTimeout(engage, reduced ? 0 : 650);
+      // Hand the demo the pointer once the page has arrived (scrollend doesn't fire if it was already there).
+      let done = false;
+      const arrive = () => {
+        if (done) return;
+        done = true;
+        engage();
+      };
+      addEventListener("scrollend", arrive, { once: true });
+      setTimeout(arrive, reduced ? 0 : 1200);
     }),
   );
 
