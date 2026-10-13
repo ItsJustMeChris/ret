@@ -191,6 +191,19 @@ The macOS build is signed and notarized, which needs these repository secrets: `
 
 Running copies check every 4 hours (or on demand in Settings → Ret), download the update in the background, and ask before restarting into it. If you say *Later*, it installs the next time you quit.
 
+## Website
+
+[getret.app](https://getret.app) is `site/`: plain HTML, CSS and JS. Its hero embeds the real app: `npm run build:demo` builds `src/renderer` with an in-browser demo engine (`src/renderer/demo/`) into `site/demo/`, so the demo always matches the current renderer. The download buttons find the latest release's installers through the GitHub API, so shipping a release needs no site change.
+
+```bash
+npm run build:demo                                   # → site/demo/
+python -m http.server 5300 --directory site          # preview at http://localhost:5300
+```
+
+It deploys as one image, `site/Dockerfile`, built from the repo root: it builds the demo, then nginx serves `site/` (`site/nginx.conf`). On Dokploy that's Build Type *Dockerfile*, Docker File `site/Dockerfile`, Docker Context Path `.`, and a domain on container port 80 with HTTPS; Autodeploy then redeploys on every push to main.
+
+The tour video is the promo render (`promo/`), served from [cdn.getret.app/ret-promo.mp4](https://cdn.getret.app/ret-promo.mp4) rather than git; after re-rendering, upload the new `promo/out/ret-promo.mp4` there. The `<video>`'s `data-src` in `site/index.html` points at it, and the section hides itself if it can't load.
+
 ## Source layout
 
 ```
