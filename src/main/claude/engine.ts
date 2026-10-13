@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   forkSession,
@@ -20,8 +19,9 @@ import type { RateLimitWindow } from "../../shared/protocol/generated/v2";
 import { FsService } from "../fsService";
 import { gitInfo } from "../git";
 import { buildTurns, type HistoryTurn, type StoredMessage } from "./history";
-import { claudeAuthStatus, claudeEnv } from "./platform";
+import { claudeAuthStatus, claudeConfigDir, claudeEnv } from "./platform";
 import { ClaudeSession, type ClaudeAccess, type SessionHost, type ThreadConfig } from "./session";
+import { TranscriptUsage } from "./usage";
 
 export interface ClaudeTarget {
   binary: string;
@@ -87,6 +87,8 @@ export class ClaudeEngine {
   /** Plan usage: the 5-hour/7-day windows, plus per-model weekly buckets (Fable, Opus…) by limit id. */
   private usage: { at: number; snapshot: RateLimitSnapshot | null; byId: Record<string, RateLimitSnapshot> } | null = null;
   private elsewhere: { at: number; busy: Set<string>; reading: Promise<Set<string>> | null } = { at: 0, busy: new Set(), reading: null };
+  /** Tokens per day, tallied from transcripts (`account/usage/read`); running totals go out while a read is underway. */
+  private tokens = new TranscriptUsage(claudeConfigDir, (days) => this.notify("account/usage/updated", { dailyUsageBuckets: days }));
   /** Claude Code's own model entries (with what each resolves to) and the user's configured model, from the probe. */
   private modelInfos: { list: ModelInfo[]; configured: string | null } = { list: [], configured: null };
   private creating = new Map<string, Promise<ClaudeSession>>();
@@ -340,6 +342,15 @@ export class ClaudeEngine {
         if (!usage?.snapshot) throw rpcError("Plan usage isn't available for this sign-in");
         return { rateLimits: usage.snapshot, rateLimitsByLimitId: usage.byId, ordinaryUsageAllowed: null, rateLimitResetCredits: null, accountId: null, rateLimitUpsell: null };
       }
+      case "account/usage/read": {
+        if (p?.threadId) throw rpcError("Per-thread usage isn't available for Claude Code", -32601);
+        const daily = await this.tokens.daily();
+        const peak = daily.reduce((m, d) => Math.max(m, d.tokens), 0);
+        return {
+          summary: { lifetimeTokens: null, peakDailyTokens: daily.length ? peak : null, longestRunningTurnSec: null, currentStreakDays: null, longestStreakDays: null },
+          dailyUsageBuckets: daily,
+        };
+      }
       case "account/login/start":
       case "account/logout":
         throw rpcError("Sign in and out with Claude Code itself (`claude auth login`).");
@@ -465,7 +476,7 @@ export class ClaudeEngine {
   private busyElsewhere(): Promise<Set<string>> {
     if (Date.now() - this.elsewhere.at < 1500) return Promise.resolve(this.elsewhere.busy);
     this.elsewhere.reading ??= (async () => {
-      const dir = join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), "sessions");
+      const dir = join(claudeConfigDir(), "sessions");
       const busy = new Set<string>();
       const names = await readdir(dir).catch(() => [] as string[]);
       await Promise.all(

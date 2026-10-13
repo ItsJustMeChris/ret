@@ -110,6 +110,11 @@ function wireProvider(p: ProviderId) {
               : null,
         }));
         return;
+      case "account/usage/updated":
+        // Running totals from a read that's still going: the chart fills in as they come. Only
+        // for a read we're waiting on, whose answer ends the loading state.
+        if (usageReads.has(p)) patchProvider(p, (c) => ({ tokenUsage: { at: c.tokenUsage?.at ?? 0, days: usageDays(params.dailyUsageBuckets), loading: true } }));
+        return;
       case "fs/changed":
         onFsChanged(params);
         return;
@@ -183,6 +188,36 @@ export async function loadRateLimits(p: ProviderId) {
     patchProvider(p, { rateLimits });
   } catch {
     /* not available for api-key auth */
+  }
+}
+
+/** `account/usage/read` buckets as day → tokens. Typed as bigint (ts-rs), but JSON brings numbers. */
+function usageDays(buckets: { startDate: string; tokens: number | bigint }[] | null | undefined): Record<string, number> {
+  const days: Record<string, number> = {};
+  for (const b of buckets ?? []) days[b.startDate] = Number(b.tokens);
+  return days;
+}
+
+/** Providers with an `account/usage/read` in flight. */
+const usageReads = new Set<ProviderId>();
+
+/**
+ * Tokens per day, for the home screen's chart. Reads again once what's held is older than
+ * `maxAgeMs`. Engines that take a while (Claude's transcripts) send running totals meanwhile.
+ */
+export async function loadTokenUsage(p: ProviderId, maxAgeMs = 0) {
+  const held = useConn.getState().providers[p].tokenUsage;
+  if (usageReads.has(p) || (held && Date.now() - held.at < maxAgeMs)) return;
+  usageReads.add(p);
+  patchProvider(p, (c) => ({ tokenUsage: { at: c.tokenUsage?.at ?? 0, days: c.tokenUsage?.days ?? {}, loading: true } }));
+  try {
+    const res = await clients[p].request("account/usage/read", {});
+    patchProvider(p, { tokenUsage: { at: Date.now(), days: usageDays(res.dailyUsageBuckets), loading: false } });
+  } catch {
+    // Not available for this engine or sign-in.
+    patchProvider(p, { tokenUsage: held?.at ? { ...held, loading: false } : null });
+  } finally {
+    usageReads.delete(p);
   }
 }
 

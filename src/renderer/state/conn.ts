@@ -30,6 +30,8 @@ export interface ProviderConn {
   account: AccountState | null;
   accountLoaded: boolean;
   rateLimits: GetAccountRateLimitsResponse | null;
+  /** Tokens per local day (YYYY-MM-DD → tokens), from `account/usage/read`; when it was last read in full, and whether a read is underway. */
+  tokenUsage: { at: number; days: Record<string, number>; loading: boolean } | null;
   models: Model[];
   /** Collaboration mode presets (Plan, Default) with their suggested model/effort. */
   modes: { name: string; mode: "plan" | "default" | null; model: string | null; reasoning_effort: string | null }[];
@@ -54,6 +56,7 @@ export const emptyProviderConn = (): ProviderConn => ({
   account: null,
   accountLoaded: false,
   rateLimits: null,
+  tokenUsage: null,
   models: [],
   modes: [],
   defaults: { model: null, effort: null, serviceTier: null },

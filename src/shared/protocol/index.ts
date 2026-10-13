@@ -57,6 +57,7 @@ export interface ResultMap {
   "account/read": v2.GetAccountResponse;
   "account/login/start": v2.LoginAccountResponse;
   "account/rateLimits/read": v2.GetAccountRateLimitsResponse;
+  "account/usage/read": v2.GetAccountTokenUsageResponse;
 }
 export type ResultOf<M extends Method> = M extends keyof ResultMap ? ResultMap[M] : unknown;
 
