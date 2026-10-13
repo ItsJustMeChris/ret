@@ -12,9 +12,15 @@ export function duration(ms: number | null | undefined): string {
   if (ms == null) return "";
   if (ms < 1000) return `${ms}ms`;
   const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
-  const m = Math.floor(s / 60);
-  return `${m}m ${Math.round(s % 60)}s`;
+  if (s < 59.5) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
+  // Two units from the largest that applies: 4m 12s, 2h 5m, 3d 4h.
+  const total = Math.round(s);
+  const d = Math.floor(total / 86_400);
+  const h = Math.floor((total % 86_400) / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  return `${m}m ${total % 60}s`;
 }
 
 export function compactNumber(n: number): string {
