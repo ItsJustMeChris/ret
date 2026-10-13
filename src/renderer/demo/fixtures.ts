@@ -6,6 +6,7 @@ import type { Turn } from "@shared/protocol";
 import { userMessage } from "./items";
 import { notesElsewhere, ORDERS_QUESTION, ordersQuestion, passkeysRetry, rateApproval, respond, viteLive } from "./scripts";
 import * as W from "./workspace";
+import { localDay } from "../lib/format";
 
 /**
  * The demo's threads. Ids are fixed so the seeded layout (seed.ts) can place them; times are
@@ -96,6 +97,23 @@ function limits(now: number) {
       byId: { seven_day_opus: snapshot("seven_day_opus", "Opus", w(64, 10_080, 4 * DAY + 2 * HOUR), null) },
     },
   };
+}
+
+/** A month of tokens per day: busy weekdays, quieter weekends, the odd day off. Same every visit. */
+function tokenHistory(now: number) {
+  let seed = 20_261_013;
+  const rand = () => (seed = (seed * 48_271) % 2_147_483_647) / 2_147_483_647;
+  const out: Record<ProviderId, { startDate: string; tokens: number }[]> = { codex: [], claude: [] };
+  for (let i = 29; i >= 0; i--) {
+    const day = new Date((now - i * DAY) * 1000);
+    const weekend = day.getDay() === 0 || day.getDay() === 6;
+    for (const [p, scale] of [["codex", 140e6], ["claude", 90e6]] as const) {
+      const r = rand();
+      if (weekend ? r < 0.45 : r < 0.06) continue;
+      out[p].push({ startDate: localDay(day), tokens: Math.round(scale * (weekend ? 0.3 : 1) * (0.35 + r)) });
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -580,6 +598,7 @@ export function populate(world: World) {
   world.models = MODELS;
   world.defaults = { codex: { model: "gpt-6.1-sol", effort: "medium" }, claude: { model: "default", effort: "high" } };
   world.limits = limits(now);
+  world.tokens = tokenHistory(now);
   world.respond = respond;
 
   for (const d of defs(world, now)) {

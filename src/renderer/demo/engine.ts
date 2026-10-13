@@ -1,6 +1,7 @@
 import type { EngineStatus, ProviderId } from "@shared/bridge";
 import type { Model, RateLimitSnapshot, Thread, ThreadStatus, ThreadTokenUsage, Turn, TurnPlanStep, UserInput } from "@shared/protocol";
 import { PROVIDERS } from "../agents";
+import { localDay } from "../lib/format";
 import { DemoFs, fromBase64, toBase64 } from "./fs";
 import { Cancelled, Run, type Script } from "./driver";
 import { BRANCH } from "./workspace";
@@ -66,6 +67,8 @@ export class World {
   limits = {} as Record<ProviderId, { snapshot: RateLimitSnapshot; byId: Record<string, RateLimitSnapshot> }>;
   models = {} as Record<ProviderId, Model[]>;
   defaults = {} as Record<ProviderId, { model: string; effort: string }>;
+  /** Tokens per day (`account/usage/read`), oldest first. */
+  tokens = {} as Record<ProviderId, { startDate: string; tokens: number }[]>;
 
   owned(provider: ProviderId) {
     return [...this.threads.values()].filter((t) => t.provider === provider);
@@ -351,6 +354,10 @@ export class DemoEngine {
       last: { ...u.last, inputTokens: Math.floor(Math.min((u.modelContextWindow ?? 200_000) * 0.92, u.last.inputTokens + grow)), outputTokens: Math.floor(grow / 4) },
     };
     this.notify("thread/tokenUsage/updated", { threadId: t.meta.id, turnId: turn.id, tokenUsage: t.usage });
+    const days = this.world.tokens[this.provider];
+    const today = localDay(new Date());
+    if (days.at(-1)?.startDate === today) days.at(-1)!.tokens += grow * 4;
+    else days.push({ startDate: today, tokens: grow * 4 });
     this.notify("turn/completed", { threadId: t.meta.id, turn: { ...turn, items: [], itemsView: "notLoaded" } });
     this.statusChanged(t);
     const lim = this.world.limits[this.provider];
@@ -473,6 +480,13 @@ export class DemoEngine {
       case "account/rateLimits/read": {
         const lim = this.world.limits[this.provider];
         return { rateLimits: lim.snapshot, rateLimitsByLimitId: lim.byId, ordinaryUsageAllowed: true, rateLimitResetCredits: null, accountId: null, rateLimitUpsell: null };
+      }
+      case "account/usage/read": {
+        const days = this.world.tokens[this.provider];
+        return {
+          summary: { lifetimeTokens: null, peakDailyTokens: Math.max(0, ...days.map((d) => d.tokens)), longestRunningTurnSec: null, currentStreakDays: null, longestStreakDays: null },
+          dailyUsageBuckets: days,
+        };
       }
       case "account/login/start":
       case "account/login/cancel":
