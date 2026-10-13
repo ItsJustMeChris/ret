@@ -39,67 +39,84 @@ export function CanvasView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [board.id]);
 
-  // Paint viewport changes straight to the DOM. Everything here is compositor work (a transform)
-  // except when the zoom changes, and even then the windows' contents aren't restyled or redrawn.
+  // Paint viewport changes straight to the DOM. While the view moves, the world and the dot grid are
+  // GPU layers (.moving): the compositor moves and scales the windows as last drawn instead of
+  // redrawing them every frame. Once it settles they're flattened back into the page, because text
+  // on a layer of its own only gets grayscale antialiasing, and flat it gets ClearType.
   useLayoutEffect(() => {
+    const view = vpRef.current!;
     const world = worldRef.current!;
     const items = itemsRef.current!;
     const grid = gridRef.current!;
     let last: Viewport | null = null;
     let settle = 0;
     let undo = 0;
-    /**
-     * Zoom the windows' contents were last drawn at. The world is will-change: transform, so the
-     * compositor scales that drawing to the current zoom instead of redrawing every window each
-     * frame (and pans don't re-layer the page).
-     */
+    let moving = false;
+    /** Zoom the windows' contents were last drawn at, while moving: the compositor scales that drawing. */
     let drawnAt = 0;
     const counterScale = (zoom: number) => items.style.setProperty("--inv-zoom", String(1 / zoom));
-    /** Draw the windows afresh at the current zoom: will-change off for a frame (two, from a timer). */
+    const setMoving = (on: boolean) => {
+      moving = on;
+      drawnAt = viewport.vp.zoom;
+      view.classList.toggle("moving", on);
+      cancelAnimationFrame(undo);
+      world.classList.remove("redraw");
+    };
+    /** Draw the windows afresh at the current zoom mid-gesture: will-change off for a frame (two, from a timer). */
     const redraw = () => {
       drawnAt = viewport.vp.zoom;
       world.classList.add("redraw");
       cancelAnimationFrame(undo);
       undo = requestAnimationFrame(() => (undo = requestAnimationFrame(() => world.classList.remove("redraw"))));
     };
-    const settled = () => {
-      counterScale(viewport.vp.zoom);
-      if (viewport.vp.zoom !== drawnAt) redraw();
-    };
-    const off = viewport.subscribe((vp) => {
+    const place = (vp: Viewport) => {
       // Whole device pixels: a fractional offset makes the browser redraw every glyph to re-align it.
       const r = window.devicePixelRatio || 1;
       const x = Math.round(vp.x * r) / r;
       const y = Math.round(vp.y * r) / r;
-      world.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${vp.zoom})`;
+      // While moving, translate3d keeps the world a layer through a redraw's frame without will-change.
+      world.style.transform = moving ? `translate3d(${x}px, ${y}px, 0) scale(${vp.zoom})` : `translate(${x}px, ${y}px) scale(${vp.zoom})`;
       const g = GRID * vp.zoom;
-      grid.style.transform = `translate3d(${mod(x, g)}px, ${mod(y, g)}px, 0)`;
-      if (vp.zoom === last?.zoom) return;
+      grid.style.transform = `translate(${mod(x, g)}px, ${mod(y, g)}px)`;
+    };
+    const settled = () => {
+      counterScale(viewport.vp.zoom);
+      setMoving(false);
+      place(viewport.vp);
+    };
+    const off = viewport.subscribe((vp) => {
+      const prev = last;
+      last = vp;
+      const gesture = !!prev && !viewport.jumping;
+      if (gesture && (vp.x !== prev.x || vp.y !== prev.y || vp.zoom !== prev.zoom)) {
+        if (!moving) setMoving(true);
+        clearTimeout(settle);
+        settle = window.setTimeout(settled, 150);
+      } else if (!gesture && moving) {
+        clearTimeout(settle);
+        setMoving(false);
+      }
+      place(vp);
+      if (vp.zoom === prev?.zoom) return;
 
+      const g = GRID * vp.zoom;
       grid.style.backgroundSize = `${g}px ${g}px`;
       grid.style.backgroundPosition = `${GRID_PAD % g}px ${GRID_PAD % g}px`;
       grid.hidden = vp.zoom < 0.45;
       zoomLabelRef.current!.textContent = `${Math.round(vp.zoom * 100)}%`;
       const nextCard = vp.zoom < CARD_ZOOM;
-      if (!last || nextCard !== last.zoom < CARD_ZOOM) {
+      if (!prev || nextCard !== prev.zoom < CARD_ZOOM) {
         // Back to full windows: render them without holding up the zoom (they're usually ready already).
         if (nextCard) setCard(true);
         else startTransition(() => setCard(false));
       }
-      const gesture = !!last && !viewport.jumping;
       // Things kept the same size on screen (window outlines and glows, link badges, card text)
       // follow a zoom live only on cards. Full windows catch up when it settles: restyling every
       // window each frame costs more than a moment of slightly-off outline shows.
       if (nextCard || !gesture) counterScale(vp.zoom);
-      // Redraw sharp once a zoom settles, along the way when it has drifted far enough to look
-      // soft (in) or cost memory (out), and straight away on a jump to another board.
-      if (!last) drawnAt = vp.zoom;
-      else if (!gesture || vp.zoom > drawnAt * 2 || vp.zoom < drawnAt / 1.6) redraw();
-      if (gesture) {
-        clearTimeout(settle);
-        settle = window.setTimeout(settled, 150);
-      }
-      last = vp;
+      // Settling flattens the world, which draws it sharp. Redraw along the way when the zoom has
+      // drifted far enough to look soft (in) or cost memory (out).
+      if (moving && (vp.zoom > drawnAt * 2 || vp.zoom < drawnAt / 1.6)) redraw();
     });
     return () => {
       off();

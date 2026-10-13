@@ -2644,22 +2644,24 @@ body.resizing .transcript {
   cursor: default;
   touch-action: none;
 }
-/* The dots: a layer one spacing bigger than the view that slides (mod one spacing) as you pan,
-   so panning moves pixels on the GPU instead of repainting the whole background. */
+/* The dots: one spacing bigger than the view, sliding (mod one spacing) as you pan. */
 .canvas-grid {
   position: absolute;
   inset: -48px; /* GRID_PAD in CanvasView */
   background-image: radial-gradient(circle at 1px 1px, var(--grid-dot) 1px, transparent 1.2px);
-  will-change: transform;
   pointer-events: none;
 }
-/* The compositor moves and scales the windows as last drawn, instead of redrawing them every zoom
-   frame and re-layering the page every pan frame. CanvasView drops this for a frame (.redraw) to
-   draw them sharp at a new zoom once it settles. */
-.canvas-world {
+/* While the view moves (.moving, from CanvasView), the grid and the windows are GPU layers: the
+   compositor moves and scales them as last drawn instead of repainting them every frame. When it
+   settles they go back to being painted with the page, where text gets ClearType instead of the
+   grayscale antialiasing a layer of its own gets. The grid would hold the windows on a layer too,
+   being under them. CanvasView drops will-change for a frame (.redraw) to redraw the windows at a
+   new zoom mid-gesture. */
+.canvas-viewport.moving > .canvas-grid,
+.canvas-viewport.moving > .canvas-world {
   will-change: transform;
 }
-.canvas-world.redraw {
+.canvas-viewport.moving > .canvas-world.redraw {
   will-change: auto;
 }
 .canvas-viewport.panning,
