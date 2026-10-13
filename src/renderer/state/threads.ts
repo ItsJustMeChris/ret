@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { ProviderId } from "@shared/bridge";
 import type {
+  BackgroundTask,
   ServerRequest,
   Thread,
   ThreadItem,
@@ -90,6 +91,8 @@ export interface ThreadsState {
   attended: Record<string, number>;
   /** Threads whose latest turn is running in a different Codex process (VS Code, CLI, another app-server). */
   external: Record<string, ExternalRun>;
+  /** Work a thread left running after its turn (Claude Code's background shells, subagents, monitors), here or in another app. */
+  background: Record<string, BackgroundTask[]>;
   /** Follow-ups typed while a turn runs; each is sent as its own turn when the current one ends. */
   queued: Record<string, QueuedMessage[]>;
   /** Named workspaces the engines keep (see agents.ts), which the sidebar groups threads by. */
@@ -136,6 +139,7 @@ export const useThreads = create<ThreadsState>(() => ({
   visible: {},
   attended: {},
   external: {},
+  background: {},
   queued: {},
   workspaces: [],
 }));
@@ -308,6 +312,14 @@ function apply(d: Draft, provider: ProviderId, method: string, p: any, hooks: Ho
     case "thread/name/updated":
       setThread(d, p.threadId, { name: p.threadName ?? null });
       break;
+    case "thread/backgroundTasks/updated": {
+      // Ret's own (Claude Code engine): the thread's whole list, replacing the last one.
+      if (!p.tasks?.length && !d.background[p.threadId]) break;
+      d.background = own(d.background);
+      if (p.tasks?.length) d.background[p.threadId] = p.tasks;
+      else delete d.background[p.threadId];
+      break;
+    }
     case "thread/project/updated":
       setThread(d, p.threadId, { projectId: p.projectId ?? null });
       break;

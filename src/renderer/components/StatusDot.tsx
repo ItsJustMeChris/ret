@@ -15,8 +15,23 @@ export function threadStateOf(s: ReturnType<typeof useThreads.getState>, threadI
   }
   if (t?.status.type === "systemError") return "error";
   if (s.unread[threadId]) return "unread";
+  // Its turn is over but work it started still runs (a background shell, subagent, monitor), and
+  // the agent picks the thread up again when that's done: not idle, not dead.
+  if (s.background[threadId]?.length) return "running";
   return "idle";
 }
+
+/** Background tasks keeping an otherwise finished thread busy, when that's all that's running. */
+export function backgroundOnly(s: ReturnType<typeof useThreads.getState>, threadId: string): number {
+  if (s.external[threadId] || s.live[threadId]?.activeTurnId || s.threads[threadId]?.status.type === "active") return 0;
+  return s.background[threadId]?.length ?? 0;
+}
+
+export function useBackgroundOnly(threadId: string): number {
+  return useThreads((s) => backgroundOnly(s, threadId));
+}
+
+export const backgroundLabel = (n: number) => (n === 1 ? "Waiting on background work" : `Waiting on ${n} background tasks`);
 
 export function useThreadState(threadId: string): ThreadState {
   return useThreads((s) => threadStateOf(s, threadId));
@@ -38,11 +53,13 @@ export function useRunsElsewhere(threadId: string) {
 export const StatusDot = memo(function StatusDot({ threadId }: { threadId: string }) {
   const state = useThreadState(threadId);
   const elsewhere = useRunsElsewhere(threadId);
+  const background = useBackgroundOnly(threadId);
   const agent = useThreads((s) => PROVIDERS[s.owner[threadId] ?? "codex"].name);
+  const shown = state === "running" && background > 0;
   return (
     <span
-      className={`status-dot ${state} ${elsewhere ? "elsewhere" : ""}`}
-      title={elsewhere ? `Running in another ${agent} app (VS Code, the CLI…)` : STATE_LABEL[state]}
+      className={`status-dot ${state} ${elsewhere ? "elsewhere" : ""} ${shown ? "background" : ""}`}
+      title={elsewhere ? `Running in another ${agent} app (VS Code, the CLI…)` : shown ? backgroundLabel(background) : STATE_LABEL[state]}
     />
   );
 });

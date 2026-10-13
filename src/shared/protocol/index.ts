@@ -63,3 +63,20 @@ export type ResultOf<M extends Method> = M extends keyof ResultMap ? ResultMap[M
 
 export type ServerRequestMethod = ServerRequest["method"];
 export type ServerRequestOf<M extends ServerRequestMethod> = Extract<ServerRequest, { method: M }>;
+
+/**
+ * Work a thread left running after its turn ended (a background shell, subagent or monitor). The
+ * agent takes the thread up again when it finishes. Ret's own extension, sent by the Claude Code
+ * engine as `thread/backgroundTasks/updated`, which replaces the thread's whole list each time.
+ */
+export interface BackgroundTask {
+  id: string;
+  kind: "shell" | "agent" | "monitor" | "workflow" | "task";
+  description: string;
+  /** When it started (ms), or when Ret first saw it running. */
+  startedAt: number;
+}
+export interface ThreadBackgroundTasksUpdatedNotification {
+  threadId: string;
+  tasks: BackgroundTask[];
+}
