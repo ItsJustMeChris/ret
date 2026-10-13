@@ -365,7 +365,9 @@ export class ClaudeEngine {
     const id = info.sessionId;
     const s = this.sessions.get(id);
     const set = this.state.settings[id];
-    const named = info.customTitle ?? (info.summary && info.summary !== info.firstPrompt ? info.summary : null);
+    // The SDK's customTitle is the title Claude Code (or /rename, or the desktop app) gave the
+    // session. Its summary falls back to the latest prompt, which isn't a name.
+    const named = info.customTitle || null;
     return {
       id,
       environments: null,
@@ -612,7 +614,7 @@ export class ClaudeEngine {
       id = crypto.randomUUID();
       const now = Date.now();
       const git = await gitInfo(cwd).catch(() => null);
-      const thread = this.threadFrom({ sessionId: id, summary: source.name ?? source.preview, firstPrompt: source.preview, lastModified: now, createdAt: now, cwd, gitBranch: git?.branch ?? undefined });
+      const thread = this.threadFrom({ sessionId: id, summary: source.name ?? source.preview, customTitle: source.name ?? undefined, firstPrompt: source.preview, lastModified: now, createdAt: now, cwd, gitBranch: git?.branch ?? undefined });
       this.pending.set(id, { thread: { ...thread, status: { type: "idle" } }, fork: { from: sourceId, at, turns: kept } });
     }
     this.state.lineage[id] = sourceId;
