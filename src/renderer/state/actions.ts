@@ -8,6 +8,7 @@ import { guarded, toast } from "./toasts";
 import { normPath, projectIndex, projectKeyFor, threadTitle, type Workspace } from "./projects";
 import { fillComposer } from "./composerDrafts";
 import { backfillLineage, lineageKnown } from "./lineage";
+import { cancelTitle, isTitleThread, titleEvent, titleFromMessage } from "./titles";
 import {
   addPendingRequest,
   emptyLive,
@@ -86,6 +87,7 @@ function applyProviderSettings(settings: ProvidersSettings) {
 function wireProvider(p: ProviderId) {
   const rpc = clients[p];
   rpc.onNotification((method, params) => {
+    if (titleEvent(method, params)) return; // a hidden title thread's, not one of ours
     switch (method) {
       case "account/updated":
         void loadAccount(p);
@@ -124,6 +126,7 @@ function wireProvider(p: ProviderId) {
       case "item/started":
       case "item/completed":
         if (params?.item?.type === "userMessage" && params.item.clientId) clearOptimistic(params.threadId, params.item.clientId);
+        if (method === "item/completed" && params?.item?.type === "userMessage") titleFromMessage(p, params.threadId, params.item);
         break;
     }
     enqueueNotification(p, method, params);
@@ -134,8 +137,12 @@ function wireProvider(p: ProviderId) {
       rpc.respondError(req.id, -32601, `${req.method} is not supported by Ret`);
       return;
     }
-    addPendingRequest(p, req);
     const threadId = (req.params as any)?.threadId;
+    if (threadId && isTitleThread(threadId)) {
+      rpc.respondError(req.id, -32601, "A title thread can't ask for anything");
+      return;
+    }
+    addPendingRequest(p, req);
     if (threadId && !useThreads.getState().visible[threadId]) {
       bridge.notify(`${PROVIDERS[p].name} needs your input`, threadTitle(useThreads.getState().threads[threadId]));
     }
@@ -834,6 +841,7 @@ export function respondToRequest(key: string, result: unknown) {
 }
 
 async function renameThreadImpl(threadId: string, name: string) {
+  cancelTitle(threadId);
   await rpcFor(ownerOf(threadId)).request("thread/name/set", { threadId, name });
   useThreads.setState((s) => (s.threads[threadId] ? { threads: { ...s.threads, [threadId]: { ...s.threads[threadId], name } } } : s));
 }

@@ -498,6 +498,8 @@ export class DemoEngine {
   }
 
   private startThread(p: any) {
+    // Hidden side threads (Ret's title requests) have no model behind them here.
+    if (p.ephemeral) throw rpcError("Ephemeral threads aren't part of the web demo.", -32601);
     const cwd = String(p.cwd ?? "");
     const id = crypto.randomUUID();
     const now = sec();
