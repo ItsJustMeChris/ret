@@ -200,7 +200,7 @@ npm run build:demo                                   # → site/demo/
 python -m http.server 5300 --directory site          # preview at http://localhost:5300
 ```
 
-It deploys as one image, `site/Dockerfile`, built from the repo root: it builds the demo, then nginx serves `site/` (`site/nginx.conf`). On Dokploy that's Build Type *Dockerfile*, Docker File `site/Dockerfile`, Docker Context Path `.`, and a domain on container port 80 with HTTPS; Autodeploy then redeploys on every push to main.
+It deploys as one image, `site/Dockerfile`, built from the repo root: it builds the demo, then nginx serves `site/` (`site/nginx.conf`). On Dokploy that's Build Type *Dockerfile*, Docker File `site/Dockerfile`, Docker Context Path `.` (typed in: left blank, Dokploy uses the Dockerfile's folder, `site/`, and the build can't find `package.json`), and a domain on container port 80 with HTTPS; Autodeploy then redeploys on every push to main.
 
 The tour video is the promo render (`promo/`), served from [cdn.getret.app/ret-promo.mp4](https://cdn.getret.app/ret-promo.mp4) rather than git; after re-rendering, upload the new `promo/out/ret-promo.mp4` there. The `<video>`'s `data-src` in `site/index.html` points at it, and the section hides itself if it can't load.
 
