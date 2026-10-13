@@ -191,6 +191,7 @@ export function createDemoBridge(): RetBridge & { world: World } {
         BRANCH[path] = branch;
         return { path, branch, repoRoot };
       },
+      mainCheckouts: async () => ({}),
     },
     files: {
       saveImage: async () => {

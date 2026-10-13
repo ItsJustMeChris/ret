@@ -392,7 +392,7 @@ function contextProject(projects: ProjectNode[]): ProjectNode | undefined {
   const { threads, workspaces } = useThreads.getState();
   const t = focused ? threads[focused.threadId] : undefined;
   const draft = focused ? ui.drafts[focused.threadId] : undefined;
-  const key = draft?.projectKey ?? (t ? projectKeyFor(t, threads, projectIndex(ui.projects, workspaces), ui.threadProject) : undefined);
+  const key = draft?.projectKey ?? (t ? projectKeyFor(t, threads, projectIndex(ui.projects, workspaces, ui.checkouts), ui.threadProject) : undefined);
   return projects.find((p) => p.key === key) ?? projects[0];
 }
 
@@ -408,7 +408,7 @@ function placeApp(kind: AppKind, at: { x: number; y: number }) {
 function canvasMenu(at: { x: number; y: number }, x: number, y: number, setMenu: SetMenu): MenuItem[] {
   const ui = useUI.getState();
   const { threads, workspaces } = useThreads.getState();
-  const projects = buildProjects(threads, ui.projects, ui.threadProject, workspaces);
+  const projects = buildProjects(threads, ui.projects, ui.threadProject, workspaces, ui.checkouts);
   const here = contextProject(projects);
   const board = activeBoard(ui);
   const create = (p: ProjectNode) => newThread(p.key, p.path, { mode: "canvas", at });

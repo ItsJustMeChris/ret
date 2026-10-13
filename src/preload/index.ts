@@ -53,6 +53,7 @@ const bridge: RetBridge = {
   git: {
     info: (p) => ipcRenderer.invoke(IPC.gitInfo, p),
     createWorktree: (cwd, label) => ipcRenderer.invoke(IPC.gitWorktree, cwd, label),
+    mainCheckouts: (cwds) => ipcRenderer.invoke(IPC.gitCheckouts, cwds),
   },
   files: {
     saveImage: (data, ext) => ipcRenderer.invoke(IPC.saveImage, data, ext),
