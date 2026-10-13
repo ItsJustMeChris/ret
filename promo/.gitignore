@@ -1,0 +1,4 @@
+node_modules/
+out/
+# Hosted at https://cdn.getret.app/soundtrack.wav (or regenerate it with scripts/soundtrack.py).
+public/soundtrack.wav

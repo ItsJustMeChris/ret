@@ -1,0 +1,10 @@
+# Only site/Dockerfile builds an image (getret.app); it needs the sources, not local builds.
+.git
+.claude
+node_modules
+dist
+release
+promo
+site/demo
+site/assets/*.mp4
+*.log

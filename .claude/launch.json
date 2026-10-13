@@ -7,6 +7,12 @@
       "runtimeArgs": ["scripts/dev-web.mjs"],
       "port": 5199,
       "autoPort": true
+    },
+    {
+      "name": "ret-site",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "5300", "--bind", "127.0.0.1", "--directory", "site"],
+      "port": 5300
     }
   ]
 }

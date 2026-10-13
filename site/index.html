@@ -1,0 +1,861 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ret · The desktop workbench for coding agents</title>
+    <meta name="description" content="Run lots of Codex and Claude Code agents at once, across every project, without losing track of them. Threads, forks, a canvas, an inbox for everything that needs you. For Windows and macOS." />
+    <link rel="canonical" href="https://getret.app/" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="color-scheme" content="dark" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://getret.app/" />
+    <meta property="og:site_name" content="Ret" />
+    <meta property="og:title" content="Ret · Run lots of agents. Lose track of none." />
+    <meta property="og:description" content="The desktop workbench for Codex and Claude Code. Threads, forks, a canvas, and one inbox for everything that needs you." />
+    <meta property="og:image" content="https://getret.app/assets/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Ret · Run lots of agents. Lose track of none." />
+    <meta name="twitter:description" content="The desktop workbench for Codex and Claude Code. For Windows and macOS." />
+    <meta name="twitter:image" content="https://getret.app/assets/og.png" />
+
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="assets/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+    <script>document.documentElement.classList.add("js");</script>
+    <script src="main.js" defer></script>
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Ret",
+        "url": "https://getret.app/",
+        "description": "The desktop workbench for running lots of Codex and Claude Code agents at once, across every project.",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Windows, macOS",
+        "image": "https://getret.app/assets/icon-192.png",
+        "downloadUrl": "https://github.com/ItsJustMeChris/ret/releases/latest"
+      }
+    </script>
+  </head>
+  <body>
+    <!-- Icons: lucide (the app's own icon set), plus the GitHub mark. -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="i-rows" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M21 9H3"/><path d="M21 15H3"/></symbol>
+      <symbol id="i-window" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/></symbol>
+      <symbol id="i-code" viewBox="0 0 24 24"><path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/></symbol>
+      <symbol id="i-inbox" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+      <symbol id="i-panel" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></symbol>
+      <symbol id="i-fork" viewBox="0 0 24 24"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+      <symbol id="i-max" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/><path d="M9 21H3v-6"/></symbol>
+      <symbol id="i-term" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/></symbol>
+      <symbol id="i-filepen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></symbol>
+      <symbol id="i-filetext" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+      <symbol id="i-filecode" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 12.5 8 15l2 2.5"/><path d="m14 12.5 2 2.5-2 2.5"/></symbol>
+      <symbol id="i-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
+      <symbol id="i-branch" viewBox="0 0 24 24"><path d="M15 6a9 9 0 0 0-9 9V3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/></symbol>
+      <symbol id="i-zap" viewBox="0 0 24 24"><path d="M15.914 4a1.5 1.5 0 00-2.474-1.561l-9 9A1.5 1.5 0 005.5 14h4.002a.5.5 0 01.471.666L8.086 20a1.5 1.5 0 002.475 1.56l9-9A1.5 1.5 0 0018.5 10h-3.997a.5.5 0 01-.472-.667z"/></symbol>
+      <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+      <symbol id="i-cmd" viewBox="0 0 24 24"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></symbol>
+      <symbol id="i-pointer" viewBox="0 0 24 24"><path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+      <symbol id="i-chevr" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+      <symbol id="i-chevd" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+      <symbol id="i-keyboard" viewBox="0 0 24 24"><path d="M10 8h.01"/><path d="M12 12h.01"/><path d="M14 8h.01"/><path d="M16 12h.01"/><path d="M18 8h.01"/><path d="M6 8h.01"/><path d="M7 16h10"/><path d="M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/></symbol>
+      <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></symbol>
+      <symbol id="i-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
+      <symbol id="i-bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
+      <symbol id="i-todo" viewBox="0 0 24 24"><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><rect x="3" y="4" width="6" height="6" rx="1"/></symbol>
+      <symbol id="i-enter" viewBox="0 0 24 24"><path d="M20 4v7a4 4 0 0 1-4 4H4"/><path d="m9 10-5 5 5 5"/></symbol>
+      <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </svg>
+
+    <header class="nav" id="nav">
+      <div class="wrap">
+        <a class="brand" href="#top" aria-label="Ret home">
+          <img src="assets/favicon.svg" alt="" width="30" height="30" />
+          Ret
+        </a>
+        <nav class="nav-links" aria-label="Sections">
+          <a href="#modes">Views</a>
+          <a href="#approvals">Approvals</a>
+          <a href="#forks">Forks</a>
+          <a href="#agents">Agents</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+        <div class="nav-end">
+          <a class="gh-link" href="https://github.com/ItsJustMeChris/ret" rel="noopener">
+            <svg class="i i-fill"><use href="#i-github" /></svg>
+            <span>GitHub</span>
+          </a>
+          <a class="btn btn-primary btn-sm" href="#download" data-dl-primary>
+            <svg class="i"><use href="#i-download" /></svg>
+            <span>Download</span>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main id="top">
+      <!-- ================================================================ hero -->
+      <section class="hero">
+        <div class="hero-glow"></div>
+        <div class="wrap">
+          <div class="hero-copy">
+            <a class="chip" href="#agents">
+              <span class="tag">New</span>
+              Claude Code joins Codex
+              <svg class="i"><use href="#i-chevr" /></svg>
+            </a>
+            <h1>Run lots of&nbsp;agents.<br /><span class="tint">Lose track of&nbsp;none.</span></h1>
+            <p class="lede">
+              Ret is the desktop workbench for <strong>Codex</strong> and <strong>Claude Code</strong>. Start threads across every project, fork them, spread them out on a canvas, and clear whatever's waiting on you from one inbox.
+            </p>
+            <div class="cta">
+              <a class="btn btn-primary" href="#download" data-dl-primary>
+                <svg class="i"><use href="#i-download" /></svg>
+                <span data-dl-label>Download Ret</span>
+              </a>
+              <a class="btn btn-ghost" href="https://github.com/ItsJustMeChris/ret" rel="noopener">
+                <svg class="i i-fill"><use href="#i-github" /></svg>
+                View on GitHub
+              </a>
+            </div>
+            <div class="cta-meta">
+              <span data-version-line>Windows &amp; macOS</span>
+              <span class="sep">·</span>
+              <span>Updates itself</span>
+              <span class="sep">·</span>
+              <a href="#download" data-dl-other>Other platforms</a>
+            </div>
+          </div>
+
+          <div class="hero-stage">
+            <div class="stage live-host" id="hero-stage" style="--w: 1280; --h: 780">
+              <!-- The real app (built from src/renderer with an in-browser demo engine) loads here on big screens. -->
+              <div class="live" id="live" hidden>
+                <iframe id="live-frame" title="Ret, running in your browser" tabindex="-1" loading="lazy"></iframe>
+                <button class="live-gate" id="live-gate" type="button">
+                  <span class="pill">
+                    <svg class="i"><use href="#i-pointer" /></svg>
+                    This is the real app, running in your browser. Click to try it.
+                  </span>
+                </button>
+                <button class="live-exit" id="live-exit" type="button" hidden>
+                  Done exploring
+                </button>
+              </div>
+
+              <!-- Animated redraw: shown on small screens, and while the live demo loads. -->
+              <div class="scaled m" id="hero-mock" aria-hidden="true">
+                <div class="m-app">
+                  <div class="m-bar">
+                    <svg class="i"><use href="#i-panel" /></svg>
+                    <span class="wordmark">ret</span>
+                    <div class="m-modes">
+                      <span><svg class="i"><use href="#i-rows" /></svg>Focus</span>
+                      <span class="on"><svg class="i"><use href="#i-window" /></svg>Canvas</span>
+                      <span><svg class="i"><use href="#i-code" /></svg>Code</span>
+                      <span><svg class="i"><use href="#i-inbox" /></svg>Inbox <b class="m-count" data-h="need-count">1</b></span>
+                    </div>
+                    <div class="m-search">
+                      <svg class="i"><use href="#i-search" /></svg>
+                      Search threads, files, commands
+                      <span class="k"><span data-mod-sym>Ctrl</span> K</span>
+                    </div>
+                    <span class="m-pill amber" data-h="need-pill">1 needs you</span>
+                    <span class="m-pill green" data-h="work-pill">3 working</span>
+                  </div>
+
+                  <div class="m-body m-dotgrid">
+                    <svg class="m-links" viewBox="0 0 1280 730" preserveAspectRatio="none">
+                      <path d="M 482 132 C 508 132, 504 164, 530 164" />
+                    </svg>
+                    <span class="m-forkbadge" style="left: 506px; top: 148px"><svg class="i"><use href="#i-fork" /></svg></span>
+
+                    <!-- W1: the approval -->
+                    <div class="m-win" data-h="w1" style="left: 34px; top: 28px; width: 448px; height: 440px">
+                      <div class="m-head">
+                        <span class="dot running" data-h="w1-dot"></span>
+                        <span class="title">Rate-limit the login endpoint</span>
+                        <span class="proj">api</span>
+                        <span class="sp"></span>
+                        <span class="badge">Codex</span>
+                        <svg class="i"><use href="#i-max" /></svg>
+                        <svg class="i"><use href="#i-x" /></svg>
+                      </div>
+                      <div class="m-tx bottom" data-h="w1-tx">
+                        <div class="m-text">Sessions now expire after 30 days of inactivity, and the refresh test covers it.</div>
+                        <div class="m-step"><svg class="i"><use href="#i-term" /></svg><span>Ran <code>npm test -- session</code></span><svg class="i ok"><use href="#i-check" /></svg></div>
+                        <div class="m-user">Add rate limiting to /login and keep the tests green.</div>
+                        <div class="m-step"><svg class="i"><use href="#i-filetext" /></svg><span>Read src/server/auth.ts</span><svg class="i ok"><use href="#i-check" /></svg></div>
+                        <div class="m-step"><svg class="i"><use href="#i-filepen" /></svg><span>Edited src/server/rateLimit.ts</span><span class="add">+48</span><span class="del">−2</span><svg class="i ok"><use href="#i-check" /></svg></div>
+                        <div class="m-text" data-h="w1-text">The limiter is in: 5 attempts a minute per IP and email, with a <code>Retry-After</code> header. Running the auth tests to make sure nothing broke.</div>
+                        <div class="m-card" data-h="w1-card" hidden>
+                          <div class="ct"><svg class="i"><use href="#i-term" /></svg>Run this command?</div>
+                          <pre>npm test -- auth</pre>
+                          <div class="m-btns">
+                            <span class="m-btn primary" data-h="w1-allow">Allow once</span>
+                            <span class="m-btn">Allow for this session</span>
+                            <span class="m-btn ghost">Decline</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- W4: glance-size window with a question -->
+                    <div class="m-win ask" style="left: 34px; top: 494px; width: 448px; height: 206px">
+                      <div class="m-head">
+                        <span class="dot attention"></span>
+                        <span class="title">Orders page does 300 queries</span>
+                        <span class="proj">shop</span>
+                        <span class="sp"></span>
+                        <span class="badge claude">Claude Code</span>
+                        <svg class="i"><use href="#i-max" /></svg>
+                      </div>
+                      <div class="m-tx">
+                        <div class="m-step"><svg class="i"><use href="#i-term" /></svg><span>Ran <code>npm test -- orders</code></span><svg class="i ok"><use href="#i-check" /></svg></div>
+                        <div class="m-text">Found the N+1 in <code>orders/repo.ts</code>. Two ways to fix it:</div>
+                        <div class="m-opts">
+                          <span class="m-opt"><span class="n">1</span>Batch the lookups with a DataLoader</span>
+                          <span class="m-opt"><span class="n">2</span>Join line items in one query</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- W2: the fork -->
+                    <div class="m-win" style="left: 530px; top: 56px; width: 380px; height: 312px">
+                      <div class="m-head">
+                        <span class="dot running"></span>
+                        <svg class="i fork"><use href="#i-fork" /></svg>
+                        <span class="title">Try a Redis store</span>
+                        <span class="badge wt"><svg class="i"><use href="#i-branch" /></svg>try-redis</span>
+                        <span class="sp"></span>
+                        <span class="badge claude">Claude Code</span>
+                      </div>
+                      <div class="m-tx bottom" data-h="w2-tx">
+                        <div class="m-step"><svg class="i"><use href="#i-filepen" /></svg><span>Edited src/server/rateLimit.ts</span><span class="add">+48</span><span class="del">−2</span><svg class="i ok"><use href="#i-check" /></svg></div>
+                        <div class="m-text">The limiter is in: 5 attempts a minute per IP and email.</div>
+                        <div class="m-user">Same idea, but back it with Redis.</div>
+                        <div class="m-step"><svg class="i"><use href="#i-filepen" /></svg><span>Edited src/server/store/redis.ts</span><span class="add">+31</span><span class="del">−4</span><svg class="i ok"><use href="#i-check" /></svg></div>
+                        <div class="m-text" data-h="w2-text">Redis store wired up. Spinning up a container to test against it.</div>
+                      </div>
+                    </div>
+
+                    <!-- W3: running -->
+                    <div class="m-win" style="left: 530px; top: 396px; width: 380px; height: 304px">
+                      <div class="m-head">
+                        <span class="dot running"></span>
+                        <span class="title">Move us off webpack</span>
+                        <span class="proj">web</span>
+                        <span class="sp"></span>
+                        <span class="badge">Codex</span>
+                      </div>
+                      <div class="m-tx bottom" data-h="w3-tx">
+                        <div class="m-text">The dev build takes 41 s cold; most of it is babel-loader.</div>
+                        <div class="m-user">Move us off webpack.</div>
+                        <div class="m-step"><svg class="i"><use href="#i-term" /></svg><span>Ran <code>rg webpack -l</code></span><svg class="i ok"><use href="#i-check" /></svg></div>
+                        <div class="m-step"><svg class="i"><use href="#i-filepen" /></svg><span>Edited vite.config.ts</span><span class="add">+64</span><svg class="i ok"><use href="#i-check" /></svg></div>
+                        <div class="m-text" data-h="w3-text">Build passes. Checking the dev server for HMR…</div>
+                      </div>
+                    </div>
+
+                    <!-- W5: finished, unread -->
+                    <div class="m-win" style="left: 958px; top: 28px; width: 290px; height: 300px">
+                      <div class="m-head">
+                        <span class="dot unread"></span>
+                        <span class="title">Draft release notes</span>
+                        <span class="proj">docs</span>
+                        <span class="sp"></span>
+                        <span class="badge">Codex</span>
+                      </div>
+                      <div class="m-tx">
+                        <div class="m-user">Draft notes from the merged PRs.</div>
+                        <div class="m-text">Here's the draft, grouped by area:</div>
+                        <div class="m-lines"><i style="width: 88%"></i><i style="width: 72%"></i><i style="width: 80%"></i><i style="width: 54%"></i><i style="width: 66%"></i></div>
+                      </div>
+                    </div>
+
+                    <span class="m-beacon" style="right: 18px; top: 372px">
+                      <span class="dot attention" style="width: 8px; height: 8px"></span>
+                      Add passkeys needs you
+                      <svg class="i"><use href="#i-arrow" /></svg>
+                    </span>
+
+                    <div class="m-zoom" style="left: 958px; top: 660px">
+                      <span>−</span><span class="v">100%</span><span>+</span>
+                    </div>
+                    <div class="m-minimap" style="left: 1092px; top: 594px; width: 156px; height: 106px">
+                      <i class="attention" data-h="mm-w1" style="left: 4px; top: 4px; width: 44px; height: 42px"></i>
+                      <i class="attention" style="left: 4px; top: 50px; width: 44px; height: 20px"></i>
+                      <i class="running" style="left: 53px; top: 7px; width: 37px; height: 30px"></i>
+                      <i class="running" style="left: 53px; top: 41px; width: 37px; height: 29px"></i>
+                      <i class="unread" style="left: 95px; top: 4px; width: 28px; height: 29px"></i>
+                      <i class="attention" style="left: 134px; top: 38px; width: 18px; height: 14px"></i>
+                      <b style="left: 1px; top: 1px; width: 126px; height: 73px"></b>
+                    </div>
+
+                    <div class="m-cursor" data-h="cursor">
+                      <span class="ring"></span>
+                      <svg width="26" height="26" viewBox="0 0 24 24"><path d="M3 2 L3 19 L7.5 14.8 L10.5 21.5 L13.4 20.2 L10.5 13.7 L16.8 13.7 Z" fill="#fff" stroke="#000" stroke-width="1.3" stroke-linejoin="round" /></svg>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p class="hero-note" id="hero-note" hidden>On a bigger screen, the window above is the real app, and you can click around in it.</p>
+
+          <div class="works-with">
+            Works with
+            <span class="badge">Codex</span>
+            <span class="badge claude">Claude Code</span>
+            on your own sign-in. Your config, MCP servers, hooks and skills come along.
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ modes -->
+      <section class="section" id="modes">
+        <div class="wrap">
+          <div class="section-head center reveal">
+            <span class="label"><svg class="i"><use href="#i-window" /></svg>Four views</span>
+            <h2>Four ways to see <span class="tint">the same work.</span></h2>
+            <p class="sub">Switch from the title bar or with <kbd data-alt>Alt</kbd> <kbd>1</kbd>–<kbd>4</kbd>. Every thread is the same live thread in each, so you can triage in one view and dig in in another.</p>
+          </div>
+
+          <div class="modes">
+            <article class="mode reveal" data-mode="focus">
+              <div class="mini mini-focus" aria-hidden="true">
+                <div class="mt"><i class="on"></i><i></i><i></i></div>
+                <div class="mp"><div><b></b><u></u><u></u><u class="s"></u><s></s></div><em><svg class="i"><use href="#i-fork" /></svg></em><div><b></b><u></u><u class="s"></u><u></u><s></s></div></div>
+              </div>
+              <h3><svg class="i"><use href="#i-rows" /></svg>Focus <kbd><span data-alt>Alt</span> 1</kbd></h3>
+              <p>Browser-style tabs, one thread at full size. A tab can hold two threads side by side, and forking opens the fork next to the original.</p>
+              <button class="try" type="button" data-try="focus">Show me in the demo <svg class="i"><use href="#i-arrow" /></svg></button>
+            </article>
+            <article class="mode reveal" data-mode="canvas">
+              <div class="mini mini-canvas" aria-hidden="true">
+                <i style="left: 8%; top: 12%; width: 34%; height: 46%"><b class="g"></b></i>
+                <i style="left: 50%; top: 18%; width: 28%; height: 34%"><b class="a"></b></i>
+                <i style="left: 14%; top: 66%; width: 30%; height: 24%"><b class="u"></b></i>
+                <i style="left: 54%; top: 60%; width: 26%; height: 30%"><b class="g"></b></i>
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M 42 30 C 46 30, 46 34, 50 34" /></svg>
+                <span class="mm"></span>
+                <span class="bc"></span>
+              </div>
+              <h3><svg class="i"><use href="#i-window" /></svg>Canvas <kbd><span data-alt>Alt</span> 2</kbd></h3>
+              <p>An infinite canvas of thread windows. Fork links, a minimap, and beacons on the edge pointing at anything off screen that needs you.</p>
+              <button class="try" type="button" data-try="canvas">Show me in the demo <svg class="i"><use href="#i-arrow" /></svg></button>
+            </article>
+            <article class="mode reveal" data-mode="code">
+              <div class="mini mini-code" aria-hidden="true">
+                <div class="tr"><u></u><u class="d1"></u><u class="d1 m"></u><u class="d1 a"></u><u></u><u class="d1"></u></div>
+                <div class="ed"><u style="width: 50%"></u><u style="width: 74%"></u><u class="chg" style="width: 62%"></u><u class="chg" style="width: 80%"></u><u style="width: 40%"></u><u style="width: 66%"></u><u style="width: 30%"></u></div>
+                <div class="th"><b></b><u></u><u class="s"></u><s></s></div>
+              </div>
+              <h3><svg class="i"><use href="#i-code" /></svg>Code <kbd><span data-alt>Alt</span> 3</kbd></h3>
+              <p>The project's files, Monaco editor tabs, and a thread beside them. Files the agent touched are marked, and open files reload as it edits.</p>
+              <button class="try" type="button" data-try="code">Show me in the demo <svg class="i"><use href="#i-arrow" /></svg></button>
+            </article>
+            <article class="mode reveal" data-mode="inbox">
+              <div class="mini mini-inbox" aria-hidden="true">
+                <div class="ls"><span class="a"><b></b><u></u></span><span class="a on"><b></b><u></u></span><span class="u"><b></b><u></u></span><span class="r"><b></b><u></u></span><span class="g"><b></b><u></u></span></div>
+                <div class="th"><b></b><u></u><u class="s"></u><em></em><s></s></div>
+              </div>
+              <h3><svg class="i"><use href="#i-inbox" /></svg>Inbox <kbd><span data-alt>Alt</span> 4</kbd></h3>
+              <p>Everything that wants you, across every project: needs you, ready to review, failed, working. <kbd>j</kbd> <kbd>k</kbd> to move, <kbd>e</kbd> to clear.</p>
+              <button class="try" type="button" data-try="inbox">Show me in the demo <svg class="i"><use href="#i-arrow" /></svg></button>
+            </article>
+          </div>
+          <p class="modes-foot reveal">Code and Inbox can also live on the canvas as windows of their own, next to your threads.</p>
+        </div>
+      </section>
+
+      <div class="divider"></div>
+
+      <!-- ================================================================ approvals -->
+      <section class="section" id="approvals">
+        <div class="wrap split">
+          <div class="split-copy reveal">
+            <span class="label"><svg class="i"><use href="#i-bell" /></svg>Approvals &amp; questions</span>
+            <h2>Approvals come <span class="tint">to you.</span></h2>
+            <p class="sub">When an agent wants to run a command, edit a file or get more access, it asks in the thread, and the Inbox and a notification tell you if you're looking elsewhere. Questions dock on top of the composer.</p>
+            <ul class="ticks">
+              <li><strong>Allow once, for the session, or always</strong> for that command. Or decline, or stop the turn.</li>
+              <li><strong>Answer with one key.</strong> Click, press the option's number, or <kbd>↑</kbd> <kbd>↓</kbd> and <kbd>Enter</kbd>. Several questions go one at a time, with Back.</li>
+              <li><strong>Skip</strong> to let the agent carry on without an answer.</li>
+              <li><strong>Secret answers</strong> get their own hidden field and never touch your drafts.</li>
+            </ul>
+          </div>
+          <div class="demo-frame has-bar reveal">
+            <span class="demo-hint"><svg class="i"><use href="#i-pointer" /></svg>Go ahead, it works</span>
+            <div class="stage fluid" id="approve-stage" style="--w: 600; --h: 580">
+              <div class="scaled m">
+                <div class="m-win" style="position: relative; width: 600px; height: 580px">
+                  <div class="m-head">
+                    <span class="dot attention" id="ap-dot"></span>
+                    <span class="title">Rate-limit the login endpoint</span>
+                    <span class="proj">api</span>
+                    <span class="sp"></span>
+                    <span class="badge">Codex</span>
+                    <svg class="i"><use href="#i-max" /></svg>
+                  </div>
+                  <div class="m-tx bottom" id="ap-tx">
+                    <div class="m-step"><svg class="i"><use href="#i-filepen" /></svg><span>Edited src/server/session.ts</span><span class="add">+12</span><span class="del">−3</span><svg class="i ok"><use href="#i-check" /></svg></div>
+                    <div class="m-text">Sessions now expire after 30 days of inactivity, and the refresh test covers it.</div>
+                    <div class="m-user">Add rate limiting to /login and keep the tests green.</div>
+                    <div class="m-step"><svg class="i"><use href="#i-filetext" /></svg><span>Read src/server/auth.ts</span><svg class="i ok"><use href="#i-check" /></svg></div>
+                    <div class="m-step"><svg class="i"><use href="#i-filepen" /></svg><span>Edited src/server/rateLimit.ts</span><span class="add">+48</span><span class="del">−2</span><svg class="i ok"><use href="#i-check" /></svg></div>
+                    <div class="m-text">The limiter is in: 5 attempts a minute per IP and email. Running the auth tests to make sure nothing broke.</div>
+                    <div class="m-card" id="ap-card">
+                      <div class="ct"><svg class="i"><use href="#i-term" /></svg>Run this command?</div>
+                      <pre>npm test -- auth</pre>
+                      <div class="m-btns">
+                        <button class="m-btn primary" type="button" data-ap="once">Allow once</button>
+                        <button class="m-btn" type="button" data-ap="session">Allow for this session</button>
+                        <button class="m-btn ghost" type="button" data-ap="decline">Decline</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="m-q" id="ap-q" hidden style="margin: 0 12px 10px">
+                    <div class="qt">Where should the attempt counters live?</div>
+                    <div class="qs">Question 1 of 1</div>
+                    <div class="m-opts">
+                      <button class="m-opt" type="button" data-q="1"><span class="n">1</span>In memory<small>One instance only</small></button>
+                      <button class="m-opt" type="button" data-q="2"><span class="n">2</span>Redis, shared across instances<small>Recommended</small></button>
+                      <button class="m-opt" type="button" data-q="3"><span class="n">3</span>Other…</button>
+                    </div>
+                    <div class="qf"><span><kbd>1</kbd>–<kbd>3</kbd> pick</span><span><kbd>↑</kbd><kbd>↓</kbd> <kbd>Enter</kbd></span><span class="sk">Skip</span></div>
+                  </div>
+                  <div class="m-composer">
+                    <div class="ph" id="ap-ph">Ask for follow-up changes</div>
+                    <div class="row"><span class="plan">Plan</span><span>Auto</span><span class="sp"></span><span class="send"><svg class="i"><use href="#i-up" /></svg></span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button class="replay" id="ap-replay" type="button" hidden><svg class="i"><use href="#i-refresh" /></svg>Again</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="divider"></div>
+
+      <!-- ================================================================ forks -->
+      <section class="section" id="forks">
+        <div class="wrap split flip">
+          <div class="split-copy reveal">
+            <span class="label"><svg class="i"><use href="#i-fork" /></svg>Forks</span>
+            <h2>Fork any turn.<br /><span class="tint">Try both ideas at once.</span></h2>
+            <p class="sub">Fork the whole conversation, fork from any earlier turn, or select a passage and fork with it quoted. Put a fork in its own git worktree and parallel experiments never touch each other's files.</p>
+            <ul class="ticks">
+              <li><strong><kbd data-mod>Ctrl</kbd> <kbd>Shift</kbd> <kbd>F</kbd></strong> forks the thread you're in.</li>
+              <li><strong>Fork from here</strong> on any turn, or right-click a selection and <strong>Fork with selection</strong>.</li>
+              <li><strong>Forks nest</strong> as folders in the sidebar, holding the original and its forks. A fork of a fork nests again.</li>
+              <li><strong>Fork links</strong> connect threads on the canvas. Click one to frame both; right-click to compare them side by side.</li>
+            </ul>
+          </div>
+          <div class="demo-frame reveal">
+            <div class="stage" id="fork-stage" style="--w: 620; --h: 520">
+              <div class="scaled m">
+                <div class="m-win" style="left: 0; top: 0; width: 540px; height: 330px">
+                  <div class="m-head">
+                    <span class="dot unread"></span>
+                    <span class="title">Rate-limit the login endpoint</span>
+                    <span class="proj">api</span>
+                    <span class="sp"></span>
+                    <span class="badge">Codex</span>
+                  </div>
+                  <div class="m-tx" style="padding-top: 26px; gap: 24px">
+                    <div class="m-turn">
+                      <div class="m-user">Add rate limiting to /login and keep the tests green.</div>
+                      <div class="m-step"><svg class="i"><use href="#i-filepen" /></svg><span>Edited src/server/rateLimit.ts</span><span class="add">+48</span><svg class="i ok"><use href="#i-check" /></svg></div>
+                      <div class="m-text">Two ways to store the counters: in memory, or Redis so <span class="m-sel">every instance shares the same limits</span>. I went with memory for now.</div>
+                    </div>
+                    <div class="m-turn hover">
+                      <div class="m-turn-actions">
+                        <span class="hot"><svg class="i"><use href="#i-fork" /></svg>Fork from here</span>
+                        <span><svg class="i"><use href="#i-filetext" /></svg>Copy</span>
+                      </div>
+                      <div class="m-step"><svg class="i"><use href="#i-term" /></svg><span>Ran <code>npm test -- auth</code></span><svg class="i ok"><use href="#i-check" /></svg></div>
+                      <div class="m-text">All 42 auth tests pass. The limiter returns <code>429</code> with a <code>Retry-After</code> header once you're over.</div>
+                    </div>
+                  </div>
+                  <div class="m-menu" style="left: 104px; top: 180px">
+                    <span><svg class="i"><use href="#i-filetext" /></svg>Copy</span>
+                    <span class="hot"><svg class="i"><use href="#i-fork" /></svg>Fork with selection</span>
+                  </div>
+                </div>
+
+                <div class="m-win" style="left: 262px; top: 262px; width: 358px; height: 252px">
+                  <div class="m-side" style="position: relative; width: 100%; border: 0; height: 100%">
+                    <div class="sh" style="margin-top: 0"><svg class="i"><use href="#i-folder" /></svg>api</div>
+                    <div class="m-row folder d1"><svg class="i"><use href="#i-chevd" /></svg><span>Rate-limit the login endpoint</span></div>
+                    <div class="m-row d2"><span class="dot unread"></span><span>Rate-limit the login endpoint</span></div>
+                    <div class="m-row d2 on"><span class="dot running"></span><span>Try a Redis store</span><span class="t"><span class="badge wt"><svg class="i"><use href="#i-branch" /></svg>worktree</span></span></div>
+                    <div class="m-row d2" style="padding-left: 54px"><span class="dot idle"></span><span>Postgres instead?</span></div>
+                    <div class="m-row d1"><span class="dot attention"></span><span>Add passkeys</span></div>
+                    <div class="m-row d1"><span class="dot idle"></span><span>Tidy the error types</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="divider"></div>
+
+      <!-- ================================================================ agents -->
+      <section class="section" id="agents">
+        <div class="wrap">
+          <div class="section-head center reveal">
+            <span class="label"><svg class="i"><use href="#i-sparkles" /></svg>Agents</span>
+            <h2>Two agents.<br /><span class="tint">One way of working.</span></h2>
+            <p class="sub">Codex and Claude Code get the same transcript, approvals, questions, Plan mode, forks, inbox and usage meters. A new thread's model menu lists both, so picking a model picks the agent.</p>
+          </div>
+          <div class="agent-grid">
+            <article class="agent-card codex reveal">
+              <header><span class="badge">Codex</span><span class="how">codex app-server</span></header>
+              <dl>
+                <div>
+                  <dt>The official engine, unchanged</dt>
+                  <dd>Ret drives <code>codex app-server</code>, the same JSON-RPC engine the Codex IDE extension uses. Models, tools, sandboxing, MCP servers and your <code>~/.codex/config.toml</code> behave exactly as they do in the CLI.</dd>
+                </div>
+                <div>
+                  <dt>Your ChatGPT sign-in</dt>
+                  <dd>Ret uses Codex's own login, so if the CLI is signed in, so is Ret. Plan limits show in the sidebar.</dd>
+                </div>
+                <div>
+                  <dt>Updates itself, safely</dt>
+                  <dd>Ret checks npm for new releases, verifies each against the registry's sha512, smoke-tests it, and swaps it in only when no thread is running. The previous version stays for rollback.</dd>
+                </div>
+                <div>
+                  <dt>Or share the desktop app's engine</dt>
+                  <dd>Attach to the background Codex daemon the Codex desktop app uses, and threads you run there stream live into Ret too.</dd>
+                </div>
+              </dl>
+            </article>
+            <article class="agent-card claude reveal">
+              <header><span class="badge claude">Claude Code</span><span class="how">Agent SDK · your claude</span></header>
+              <dl>
+                <div>
+                  <dt>Your install, run unmodified</dt>
+                  <dd>Ret finds the <code>claude</code> you installed (native installer, Homebrew, npm or bun) and runs it through Anthropic's Agent SDK. Your settings, CLAUDE.md files, hooks, skills and MCP servers apply as in the terminal.</dd>
+                </div>
+                <div>
+                  <dt>Sign-in stays with Claude Code</dt>
+                  <dd>Sign in happens in Claude Code itself. Ret never reads or stores your credentials. The 5-hour and 7-day limits sit next to Codex's.</dd>
+                </div>
+                <div>
+                  <dt>Kept up to date</dt>
+                  <dd>When a new version is out and no Claude thread is running, Ret runs Claude Code's own <code>claude update</code>.</dd>
+                </div>
+                <div>
+                  <dt>Same threads as the CLI</dt>
+                  <dd>Every Claude Code session on your machine shows up in its project, and threads Ret starts are ordinary sessions: <code>claude --resume</code> picks them up.</dd>
+                </div>
+              </dl>
+            </article>
+          </div>
+          <div class="shared reveal">
+            <span class="lbl">Both get</span>
+            <ul>
+              <li><svg class="i"><use href="#i-check" /></svg>Transcript</li>
+              <li><svg class="i"><use href="#i-check" /></svg>Approvals</li>
+              <li><svg class="i"><use href="#i-check" /></svg>Questions</li>
+              <li><svg class="i"><use href="#i-check" /></svg>Plan mode</li>
+              <li><svg class="i"><use href="#i-check" /></svg>Forks &amp; worktrees</li>
+              <li><svg class="i"><use href="#i-check" /></svg>Inbox</li>
+              <li><svg class="i"><use href="#i-check" /></svg>Usage meters</li>
+              <li><svg class="i"><use href="#i-check" /></svg>Threads from other apps</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <div class="divider"></div>
+
+      <!-- ================================================================ details -->
+      <section class="section" id="details">
+        <div class="wrap">
+          <div class="section-head center reveal">
+            <span class="label"><svg class="i"><use href="#i-sparkles" /></svg>The details</span>
+            <h2>Built for keeping <span class="tint">ten things moving.</span></h2>
+          </div>
+          <div class="bento">
+            <article class="card span-2 reveal">
+              <div class="art dots">
+                <div class="keys-art">
+                  <div class="key-combo steer"><div class="kk"><kbd>Enter</kbd></div><span class="what">Steer</span></div>
+                  <div class="key-combo queue"><div class="kk"><kbd data-mod>Ctrl</kbd><kbd>Enter</kbd></div><span class="what">Queue</span></div>
+                  <div class="key-combo stop"><div class="kk"><kbd>Esc</kbd></div><span class="what">Stop</span></div>
+                </div>
+              </div>
+              <h3>Steer, queue or stop a running turn</h3>
+              <p>Enter steers the turn in flight. <kbd data-mod>Ctrl</kbd> <kbd>Enter</kbd> queues your message for after it, in a tray where you can push it in now, pull it back to edit, or drop it. Esc stops.</p>
+            </article>
+            <article class="card reveal">
+              <div class="art dots">
+                <div class="plan-art">
+                  <div class="ph"><svg class="i"><use href="#i-todo" /></svg>Plan</div>
+                  <ol><li>Add a limiter middleware</li><li>Back it with Redis</li><li>Cover it with tests</li></ol>
+                  <span class="go">Implement this plan</span>
+                </div>
+              </div>
+              <h3>Plan mode</h3>
+              <p><kbd>Shift</kbd> <kbd>Tab</kbd> and the agent thinks it through first, asks what it needs, then proposes a plan you can implement with one click.</p>
+            </article>
+            <article class="card reveal">
+              <div class="art dots">
+                <div class="else-art">
+                  <div class="else-row"><span class="dot elsewhere"></span><span class="n">Bump the SDK</span><span class="w"><span class="spin"></span>Codex CLI</span></div>
+                  <div class="else-row"><span class="dot elsewhere"></span><span class="n">Fix the flaky e2e</span><span class="w"><span class="spin"></span>VS Code</span></div>
+                  <div class="else-row"><span class="dot unread"></span><span class="n">Profile cold start</span><span class="w">claude, done</span></div>
+                </div>
+              </div>
+              <h3>Sees work running elsewhere</h3>
+              <p>Threads from the agents' CLIs, VS Code extensions and desktop apps show up too, update live, and notify you when they finish.</p>
+            </article>
+            <article class="card reveal">
+              <div class="art dots">
+                <div class="rail-art" id="rail-art">
+                  <div class="rail" id="rail"></div>
+                  <span class="rail-tip" id="rail-tip">Point at the rail</span>
+                </div>
+              </div>
+              <h3>A turn rail for long threads</h3>
+              <p>Hover the edge of a transcript for a rail of its turns. Ticks spread out around the pointer so they stay easy to hit. Try it above.</p>
+            </article>
+            <article class="card reveal">
+              <div class="art">
+                <div class="side-art">
+                  <span class="edge"></span>
+                  <div class="panel"><i style="width: 60%"></i><i></i><i style="width: 80%"></i><i style="width: 70%"></i><i style="width: 50%"></i><i style="width: 76%"></i></div>
+                  <span class="trail"></span>
+                  <svg class="cursor" viewBox="0 0 24 24"><path d="M3 2 L3 19 L7.5 14.8 L10.5 21.5 L13.4 20.2 L10.5 13.7 L16.8 13.7 Z" fill="#fff" stroke="#000" stroke-width="1.3" stroke-linejoin="round" /></svg>
+                </div>
+              </div>
+              <h3>A sidebar that reads your intent</h3>
+              <p>Unpinned, it reads your pointer's motion: a quick throw toward the edge opens it before you arrive, while aiming at a button near the edge doesn't.</p>
+            </article>
+            <article class="card reveal">
+              <div class="art dots">
+                <div class="usage-art">
+                  <div class="meter"><div class="top"><span><b>Codex</b> · 7-day</span><span>38%</span></div><div class="bar"><i style="--v: 38%"></i></div></div>
+                  <div class="meter"><div class="top"><span><b>Claude Code</b> · 5-hour</span><span>71%</span></div><div class="bar"><i style="--v: 71%; --c: #e08b6c"></i></div></div>
+                  <div class="meter"><div class="top"><span><b>Claude Code</b> · 7-day</span><span>24%</span></div><div class="bar"><i style="--v: 24%; --c: #e08b6c"></i></div></div>
+                </div>
+              </div>
+              <h3>Usage at a glance</h3>
+              <p>Plan limits for both agents slide up from the sidebar. One that's nearly used up shows even when you don't look.</p>
+            </article>
+            <article class="card span-2 reveal">
+              <div class="art dots">
+                <div class="sizes-art">
+                  <div class="sz"><div class="w" style="width: 90px; height: 64px"><div class="h"><b></b><u></u></div><div class="b"><div class="col"><i style="width: 80%"></i><div class="btns"><i></i><i></i></div></div></div></div><span>Glance</span></div>
+                  <div class="sz"><div class="w" style="width: 124px; height: 96px"><div class="h"><b></b><u></u></div><div class="b"><div class="col"><i style="width: 60%; align-self: flex-end"></i><i></i><i style="width: 70%"></i><div class="cmp"></div></div></div></div><span>Compact</span></div>
+                  <div class="sz"><div class="w" style="width: 160px; height: 120px"><div class="h"><b></b><u></u></div><div class="b"><div class="col"><i style="width: 55%; align-self: flex-end"></i><i></i><i style="width: 86%"></i><i style="width: 64%"></i><i style="width: 78%"></i><div class="cmp"></div></div></div></div><span>Regular</span></div>
+                  <div class="sz"><div class="w" style="width: 220px; height: 120px"><div class="h"><b></b><u></u></div><div class="b"><div class="col"><i style="width: 55%; align-self: flex-end"></i><i></i><i style="width: 86%"></i><i style="width: 64%"></i><div class="cmp"></div></div><div class="side"><i></i><i style="width: 70%"></i><i style="width: 85%"></i><i style="width: 60%"></i></div></div></div><span>Wide</span></div>
+                </div>
+              </div>
+              <h3>Windows that fit their size</h3>
+              <p>Every thread adapts to its own size, not the screen's: a tiny window shows status, the last message and any approval buttons; a wide one can add a details panel with the plan, changed files, tokens and lineage.</p>
+            </article>
+          </div>
+
+          <div class="speed reveal">
+            <div>
+              <svg class="i"><use href="#i-zap" /></svg>
+              <h3>Batched per frame</h3>
+              <p>Streaming events land once per animation frame in a copy-on-write store, and each transcript item re-renders only itself.</p>
+            </div>
+            <div>
+              <svg class="i"><use href="#i-eye" /></svg>
+              <h3>Off-screen is free</h3>
+              <p>Turns you can't see skip layout, so a long thread costs what's on screen.</p>
+            </div>
+            <div>
+              <svg class="i"><use href="#i-window" /></svg>
+              <h3>A canvas that glides</h3>
+              <p>Pan, zoom and drag write straight to the DOM. None of them trigger a React render.</p>
+            </div>
+            <div>
+              <svg class="i"><use href="#i-gauge" /></svg>
+              <h3>Idle threads let go</h3>
+              <p>Threads nobody is looking at unsubscribe from the engine after three minutes.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="divider"></div>
+
+      <!-- ================================================================ keys -->
+      <section class="section" id="keys">
+        <div class="wrap">
+          <div class="section-head center reveal">
+            <span class="label"><svg class="i"><use href="#i-keyboard" /></svg>Keyboard</span>
+            <h2>Your hands can <span class="tint">stay put.</span></h2>
+          </div>
+          <div class="keys reveal">
+            <div><span>Command palette: threads, projects, commands</span><span><kbd data-mod>Ctrl</kbd><kbd>K</kbd></span></div>
+            <div><span>New thread in this project</span><span><kbd data-mod>Ctrl</kbd><kbd>N</kbd></span></div>
+            <div><span>Focus, Canvas, Code, Inbox</span><span><kbd data-alt>Alt</kbd><kbd>1</kbd>…<kbd>4</kbd></span></div>
+            <div><span>Fork this thread</span><span><kbd data-mod>Ctrl</kbd><kbd>Shift</kbd><kbd>F</kbd></span></div>
+            <div><span>Pin or unpin the sidebar</span><span><kbd data-mod>Ctrl</kbd><kbd>B</kbd></span></div>
+            <div><span>Toggle Plan mode</span><span><kbd>Shift</kbd><kbd>Tab</kbd></span></div>
+            <div><span>Steer a running turn, or queue for after it</span><span><kbd>Enter</kbd><kbd data-mod>Ctrl</kbd><kbd>Enter</kbd></span></div>
+            <div><span>Stop the running turn</span><span><kbd>Esc</kbd></span></div>
+            <div><span>Inbox: move, mark done</span><span><kbd>j</kbd><kbd>k</kbd><kbd>e</kbd></span></div>
+            <div><span>Canvas: fit all, zoom</span><span><kbd data-mod>Ctrl</kbd><kbd>0</kbd><kbd data-mod>Ctrl</kbd><kbd>±</kbd></span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ tour -->
+      <section class="section" id="tour" style="padding-top: 40px">
+        <div class="wrap">
+          <div class="section-head center reveal">
+            <span class="label"><svg class="i"><use href="#i-play" /></svg>The tour</span>
+            <h2>A minute with Ret.</h2>
+          </div>
+          <div class="tour reveal" id="tour-box">
+            <!-- The promo render lives on the CDN, not in git. If it can't load, this section hides itself. -->
+            <video id="tour-video" data-src="https://cdn.getret.app/ret-promo.mp4" poster="assets/ret-tour-poster.jpg" preload="none" playsinline></video>
+            <button class="play" type="button" id="tour-play" aria-label="Play the one-minute tour">
+              <span><svg class="i i-fill"><use href="#i-play" /></svg>Play the tour · 0:56</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <div class="divider"></div>
+
+      <!-- ================================================================ faq -->
+      <section class="section" id="faq">
+        <div class="wrap">
+          <div class="section-head center reveal">
+            <span class="label"><svg class="i"><use href="#i-filetext" /></svg>FAQ</span>
+            <h2>Questions, answered.</h2>
+          </div>
+          <div class="faq reveal">
+            <details>
+              <summary>Do I need an account for Ret?<svg class="i"><use href="#i-chevd" /></svg></summary>
+              <p>No. Ret uses each agent's own sign-in. For Codex that's Codex's login (if the CLI is signed in, Ret is too), or you can sign in with ChatGPT from Ret. For Claude Code, sign-in happens in Claude Code itself, and Ret never reads or stores those credentials.</p>
+            </details>
+            <details>
+              <summary>Do I have to install Codex first?<svg class="i"><use href="#i-chevd" /></svg></summary>
+              <p>No. Ret downloads its own copy of Codex, verifies it, and keeps it current. On first launch it starts right away on any Codex you already have, then switches over once its own copy is ready. You can point it at a system install or a custom path in Settings instead.</p>
+            </details>
+            <details>
+              <summary>And Claude Code?<svg class="i"><use href="#i-chevd" /></svg></summary>
+              <p>Install Claude Code the usual way (native installer, Homebrew, npm or bun). Ret finds it and runs it unmodified; it never downloads or bundles Claude Code. If you'd rather use just one agent, turn the other off in Settings → Agents.</p>
+            </details>
+            <details>
+              <summary>Will my existing setup carry over?<svg class="i"><use href="#i-chevd" /></svg></summary>
+              <p>Yes. Your <code>~/.codex/config.toml</code>, models, sandboxing and MCP servers apply to Codex exactly as in the CLI. Your Claude Code settings, CLAUDE.md files, hooks, skills and MCP servers apply as they do in the terminal.</p>
+            </details>
+            <details>
+              <summary>Can I keep using the CLIs and editors?<svg class="i"><use href="#i-chevd" /></svg></summary>
+              <p>Yes. Threads from the agents' CLIs, VS Code extensions and desktop apps show up in Ret's sidebar, with live transcripts while they run. Replying from Ret waits until another app's turn ends, so two processes never write to one thread. Claude threads Ret starts resume with <code>claude --resume</code>.</p>
+            </details>
+            <details>
+              <summary>Which platforms does it run on?<svg class="i"><use href="#i-chevd" /></svg></summary>
+              <p>Windows (x64) and macOS (Apple Silicon and Intel; signed and notarized). On Linux you can build it from source; see the README on GitHub.</p>
+            </details>
+            <details>
+              <summary>How do updates work?<svg class="i"><use href="#i-chevd" /></svg></summary>
+              <p>Ret checks for a new version every few hours, downloads it in the background, and asks before restarting into it. Choose Later and it installs the next time you quit.</p>
+            </details>
+            <details>
+              <summary>Is Ret made by OpenAI or Anthropic?<svg class="i"><use href="#i-chevd" /></svg></summary>
+              <p>No. Ret is an independent project. Codex and Claude Code are products of OpenAI and Anthropic; Ret runs the official versions you sign in to.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ download -->
+      <section class="download" id="download">
+        <div class="wrap">
+          <div class="mascot-wrap reveal" aria-hidden="true">
+            <svg class="mascot" id="mascot" viewBox="0 0 1250 1250">
+              <g fill="#062155">
+                <g class="ant-l"><path d="M 395 150 C 470 170 550 215 605 300" stroke="#062155" stroke-width="56" fill="none" stroke-linecap="round" /><circle cx="362" cy="138" r="80" /></g>
+                <g class="ant-r"><path d="M 855 150 C 780 170 700 215 645 300" stroke="#062155" stroke-width="56" fill="none" stroke-linecap="round" /><circle cx="888" cy="138" r="80" /></g>
+                <rect x="570" y="262" width="110" height="50" rx="20" />
+                <ellipse cx="627" cy="1030" rx="258" ry="138" />
+                <g transform="rotate(-40 425 1078)"><ellipse cx="425" cy="1078" rx="128" ry="142" /><ellipse cx="415" cy="1080" rx="70" ry="100" fill="#f7f8fb" /></g>
+                <g transform="rotate(40 828 1078)"><ellipse cx="828" cy="1078" rx="128" ry="142" /><ellipse cx="838" cy="1080" rx="70" ry="100" fill="#f7f8fb" /></g>
+                <rect x="170" y="290" width="914" height="628" rx="380" ry="300" />
+                <rect x="222" y="352" width="810" height="536" rx="300" ry="250" fill="#f7f8fb" />
+                <rect x="290" y="444" width="674" height="378" rx="200" ry="175" />
+                <g class="eye"><circle cx="452" cy="640" r="97" fill="#f7f8fb" /><g class="pupil"><circle cx="482" cy="634" r="64" /><circle cx="498" cy="600" r="24" fill="#f7f8fb" /></g></g>
+                <g class="eye"><circle cx="802" cy="640" r="97" fill="#f7f8fb" /><g class="pupil"><circle cx="806" cy="634" r="64" /><circle cx="822" cy="600" r="24" fill="#f7f8fb" /></g></g>
+              </g>
+            </svg>
+          </div>
+          <h2 class="reveal">Get Ret.</h2>
+          <p class="sub reveal" style="margin-left: auto; margin-right: auto; max-width: 560px">Bring your Codex and Claude Code sign-ins. Ret keeps itself and Codex up to date from here on.</p>
+          <div class="dl-cards reveal">
+            <a class="dl-card" data-dl="win" href="https://github.com/ItsJustMeChris/ret/releases/latest">
+              <span class="os">Windows</span>
+              <span class="what">Installer · x64 <span data-size="win"></span></span>
+              <span class="mine-tag">Your system</span>
+              <svg class="i"><use href="#i-download" /></svg>
+            </a>
+            <a class="dl-card" data-dl="mac-arm64" href="https://github.com/ItsJustMeChris/ret/releases/latest">
+              <span class="os">macOS</span>
+              <span class="what">Apple Silicon · .dmg <span data-size="mac-arm64"></span></span>
+              <span class="mine-tag">Your system</span>
+              <svg class="i"><use href="#i-download" /></svg>
+            </a>
+            <a class="dl-card" data-dl="mac-x64" href="https://github.com/ItsJustMeChris/ret/releases/latest">
+              <span class="os">macOS</span>
+              <span class="what">Intel · .dmg <span data-size="mac-x64"></span></span>
+              <span class="mine-tag">Your system</span>
+              <svg class="i"><use href="#i-download" /></svg>
+            </a>
+          </div>
+          <p class="dl-foot reveal">
+            <span data-version-foot>Latest release</span> · <a href="https://github.com/ItsJustMeChris/ret/releases" rel="noopener">All releases</a> · <a href="https://github.com/ItsJustMeChris/ret#run-it" rel="noopener">Build from source</a><br />
+            The macOS builds are signed and notarized. Windows may show a SmartScreen prompt for a new app; choose <em>More info</em> → <em>Run anyway</em>.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <a class="brand" href="#top"><img src="assets/favicon.svg" alt="" width="24" height="24" />Ret</a>
+        <nav aria-label="Links">
+          <a href="https://github.com/ItsJustMeChris/ret" rel="noopener">GitHub</a>
+          <a href="https://github.com/ItsJustMeChris/ret/releases" rel="noopener">Releases</a>
+          <a href="https://github.com/ItsJustMeChris/ret/issues" rel="noopener">Issues</a>
+        </nav>
+        <span class="fine">Not affiliated with OpenAI or Anthropic. Codex and Claude Code are trademarks of their respective owners.</span>
+      </div>
+    </footer>
+  </body>
+</html>
