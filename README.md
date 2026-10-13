@@ -18,21 +18,6 @@ npm run dist       # Windows installer → release/
 npm run dist:mac   # macOS dmg + zip → release/ (on a Mac)
 ```
 
-App icons are generated from `build/icon-source.png` with `python scripts/make-icons.py`.
-
-## Release
-
-```bash
-npm version patch          # bump the version and tag it
-git push --follow-tags     # CI builds Windows + macOS and publishes the release
-```
-
-Installed copies update themselves from the release. Signing the macOS build needs these repository secrets: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`.
-
-## Website
-
-`site/` is getret.app. Its hero embeds the real app, built from `src/renderer` by `npm run build:demo`. It deploys with `site/Dockerfile`, built from the repo root, and the tour video lives on `cdn.getret.app`.
-
 ## Layout
 
 ```
@@ -42,5 +27,3 @@ src/shared/     what both sides share, including the agent protocol
 site/           getret.app
 promo/          the launch video
 ```
-
-When a Codex release changes the protocol, run `npm run gen:protocol` and fix what `npm run typecheck` flags.
