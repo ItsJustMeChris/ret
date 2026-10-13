@@ -5,7 +5,6 @@ import type { ServerRequest, Thread, ThreadItem, UserInput } from "@shared/proto
 import { PROVIDERS, accessFor, pickProvider } from "../agents";
 import { enabledProviders, patchProvider, signedIn, useConn, type ProviderConn } from "./conn";
 import { guarded, toast } from "./toasts";
-import { coveredLeft } from "../components/canvas/viewport";
 import { normPath, projectIndex, projectKeyFor, threadTitle, type Workspace } from "./projects";
 import { fillComposer } from "./composerDrafts";
 import { backfillLineage, lineageKnown } from "./lineage";
@@ -1087,7 +1086,7 @@ export function setSplitRatio(left: string, ratio: number) {
 /** Keep a window placed at a pointer position fully inside the visible canvas when it fits. */
 function clampToView(at: { x: number; y: number }, w: number, h: number, vp: { x: number; y: number; zoom: number }) {
   const el = document.querySelector(".canvas-viewport");
-  const left = (coveredLeft() - vp.x) / vp.zoom + 16;
+  const left = -vp.x / vp.zoom + 16;
   const top = -vp.y / vp.zoom + 16;
   const right = ((el?.clientWidth ?? 1200) - vp.x) / vp.zoom - 16;
   const bottom = ((el?.clientHeight ?? 800) - vp.y) / vp.zoom - 16;
@@ -1109,10 +1108,9 @@ function freeSpot(wins: CanvasWin[], x: number, y: number, w: number, h: number)
 
 function freeSpotInView(wins: CanvasWin[], vp: { x: number; y: number; zoom: number }, w: number, h: number) {
   const el = document.querySelector(".canvas-viewport");
-  const vw = ((el?.clientWidth ?? 1200) - coveredLeft()) / vp.zoom;
+  const vw = (el?.clientWidth ?? 1200) / vp.zoom;
   const vh = (el?.clientHeight ?? 800) / vp.zoom;
-  // Start right of the pinned sidebar, which floats over the canvas.
-  const ox = (coveredLeft() - vp.x) / vp.zoom;
+  const ox = -vp.x / vp.zoom;
   const oy = -vp.y / vp.zoom;
   for (let y = oy + 24; y + h <= oy + vh + h * 0.5; y += 40) {
     for (let x = ox + 24; x + w <= ox + vw; x += 40) {

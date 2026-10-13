@@ -2,7 +2,6 @@ import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { CircleAlert, LoaderCircle } from "lucide-react";
 import { useThreads } from "../../state/threads";
-import { useUI } from "../../state/ui";
 import type { ThreadItem } from "@shared/protocol";
 import { duration, plainText } from "../../lib/format";
 
@@ -201,8 +200,7 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [turns.length >= 2, turns.length]);
 
-  // Sit just left of the text column, and clear of the floating sidebar when it's pinned over us.
-  const sidebar = useUI((s) => (s.sidebarOpen ? s.sidebarWidth : 0));
+  // Sit just left of the text column.
   const show = turns.length >= 2;
   useLayoutEffect(() => {
     const el = rail.current;
@@ -213,16 +211,14 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
       const scale = scaleOf(wrap);
       const w = wrap.getBoundingClientRect();
       const inner = wrap.querySelector(".transcript-inner")?.getBoundingClientRect();
-      let left = inner ? (inner.left - w.left) / scale - 14 : 8;
-      const pinned = document.querySelector(".sidebar-layer.pinned");
-      if (pinned && wrap.closest(".chrome-focus")) left = Math.max(left, (pinned.getBoundingClientRect().right - w.left) / scale + 8);
+      const left = inner ? (inner.left - w.left) / scale - 14 : 8;
       el.style.left = `${Math.max(6, Math.round(left))}px`;
     };
     place();
     const ro = new ResizeObserver(place);
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [show, sidebar]);
+  }, [show]);
 
   if (turns.length < 2) return null;
   const lit = new Set(visible.split("|"));

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useUI } from "../state/ui";
 import { Sidebar } from "./Sidebar";
 import { EDGE, EDGE_DWELL_MS, GRACE_BAND, NEAR, NEAR_DWELL_MS, STILL_SPEED, createTracker, edgeIntent } from "../lib/edgeIntent";
@@ -15,8 +15,9 @@ const FIELDS = "input, textarea, select, [contenteditable]";
 const TARGETS = "button, a, input, textarea, select, [role=button], [role=tab], [contenteditable], .turn-rail";
 
 /**
- * The sidebar always floats over the content (it never resizes the main area).
- * Pinned: stays out. Unpinned: hidden off-screen, and slides out when the pointer's
+ * Pinned: a solid column that takes its width out of the main area (a spacer in the flow
+ * reserves it, so the panel itself never remounts). Unpinned: it pops off the edge and is
+ * tossed away, then lives off-screen, floating back over the content when the pointer's
  * motion says you're reaching for it (see edgeIntent); a faint handle at the edge grows
  * with that intent. It slides back when you move away, with a little grace for drift.
  */
@@ -24,6 +25,9 @@ export function SidebarShell() {
   const docked = useUI((s) => s.sidebarOpen);
   const width = useUI((s) => s.sidebarWidth);
   const [peek, setPeek] = useState(false);
+  /** The flourish for a pin toggle: tossed away when unpinned, landing when pinned from out of sight. */
+  const [motion, setMotion] = useState<"toss" | "land" | null>(null);
+  const wasDocked = useRef(docked);
   const layer = useRef<HTMLDivElement>(null);
   const handle = useRef<HTMLDivElement>(null);
   const hideTimer = useRef(0);
@@ -36,6 +40,7 @@ export function SidebarShell() {
   const open = () => {
     if (peekRef.current) return;
     peekRef.current = true;
+    setMotion(null); // reaching for it mid-toss: it comes straight back
     setPeek(true);
   };
   const close = () => {
@@ -51,11 +56,19 @@ export function SidebarShell() {
     setPeek(false);
   };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (wasDocked.current === docked) return;
+    wasDocked.current = docked;
     if (docked) {
+      // A peeking panel just settles into the column; one out of sight lands there.
+      setMotion(peekRef.current ? null : "land");
       peekRef.current = false;
       hovering.current = false;
       setPeek(false);
+    } else {
+      // The pointer is likely still near it: don't let a peek catch it on the way out.
+      closedAt.current = performance.now();
+      setMotion("toss");
     }
   }, [docked]);
 
@@ -247,10 +260,14 @@ export function SidebarShell() {
 
   return (
     <>
+      <div className={`sidebar-dock ${motion ?? ""}`} style={{ width: docked ? width : 0 }} aria-hidden />
       <div
         ref={layer}
-        className={`sidebar-layer ${mode}`}
+        className={`sidebar-layer ${mode} ${motion ?? ""}`}
         style={{ width }}
+        onAnimationEnd={(e) => {
+          if (e.target === e.currentTarget) setMotion(null);
+        }}
         onPointerEnter={() => {
           hovering.current = true;
           clearTimeout(hideTimer.current);

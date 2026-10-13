@@ -4380,10 +4380,24 @@ textarea::placeholder {
 
 
 /* ==========================================================================
-   Floating sidebar (always over the content)
+   Sidebar shell: a solid column when pinned, a floating card when peeking
    ========================================================================== */
 .app-body {
   position: relative;
+  overflow: clip; /* a tossed sidebar tips up out of it: keep it under the title bar */
+}
+/* Reserves the pinned sidebar's width in the flow, so the content makes room for it. */
+.sidebar-dock {
+  flex: none;
+  transition: width 0.34s var(--ease);
+}
+/* Pop first, then the content follows the card out, staying under it until it's clear. */
+.sidebar-dock.toss {
+  transition: width 0.34s cubic-bezier(0.45, 0, 0.25, 1) 0.14s;
+}
+/* Landing: trail the card a little, so the content never shows ahead of it. */
+.sidebar-dock.land {
+  transition-duration: 0.52s;
 }
 .sidebar-layer {
   position: absolute;
@@ -4397,7 +4411,11 @@ textarea::placeholder {
   transition:
     transform 0.26s var(--ease),
     opacity 0.26s var(--ease),
-    box-shadow 0.26s var(--ease);
+    box-shadow 0.26s var(--ease),
+    top 0.26s var(--ease),
+    bottom 0.26s var(--ease),
+    left 0.26s var(--ease),
+    border-radius 0.26s var(--ease);
 }
 .sidebar-layer > .sidebar {
   flex: 1;
@@ -4407,12 +4425,78 @@ textarea::placeholder {
   overflow: hidden;
   background: color-mix(in srgb, var(--bg-1) 92%, transparent);
   backdrop-filter: blur(16px) saturate(1.2);
+  transition:
+    border-radius 0.26s var(--ease),
+    border-color 0.26s var(--ease),
+    background-color 0.26s var(--ease);
+}
+/* Pinned: flush with the window's edges, a column of the layout rather than a card over it. */
+.sidebar-layer.pinned {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.sidebar-layer.pinned > .sidebar {
+  border-color: transparent var(--line) transparent transparent;
+  border-radius: 0;
+  background: var(--bg-1);
+  backdrop-filter: none;
 }
 .sidebar-layer.hidden {
   transform: translateX(calc(-100% - 16px));
   opacity: 0;
   box-shadow: none;
   pointer-events: none;
+}
+/* Unpinned: it pops off the edge as a card, winds up, and is flicked away to the left. */
+.sidebar-layer.toss {
+  transform-origin: 0 100%;
+  animation: sidebar-toss 0.48s both;
+}
+@keyframes sidebar-toss {
+  0% {
+    transform: none;
+    opacity: 1;
+    box-shadow: none;
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.3, 1);
+  }
+  26% {
+    transform: translateX(6px) rotate(0.8deg) scale(1.02);
+    opacity: 1;
+    box-shadow: var(--shadow-lg);
+    animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.35);
+  }
+  100% {
+    transform: translateX(calc(-100% - 56px)) rotate(-11deg) scale(0.94);
+    opacity: 0;
+    box-shadow: var(--shadow-lg);
+  }
+}
+/* Pinned from out of sight: it swings in from where it was tossed and settles into the column. */
+.sidebar-layer.land {
+  transform-origin: 0 100%;
+  animation: sidebar-land 0.44s var(--ease) both;
+}
+@keyframes sidebar-land {
+  0% {
+    transform: translateX(calc(-100% - 24px)) rotate(-4deg);
+    opacity: 0;
+  }
+  45% {
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-layer.toss,
+  .sidebar-layer.land {
+    animation-duration: 1ms; /* still ends, so the shell clears the flourish */
+  }
 }
 /* Out of sight, its spinners and status pings can't run on the compositor, so the browser would
    tick them on the main thread and re-layer the whole page every frame. */
@@ -4448,7 +4532,9 @@ textarea::placeholder {
     opacity 0.12s linear,
     transform 0.12s var(--ease);
 }
-body.resizing .sidebar-layer {
+body.resizing .sidebar-layer,
+body.resizing .sidebar-layer > .sidebar,
+body.resizing .sidebar-dock {
   transition: none;
 }
 

@@ -4,7 +4,7 @@ import { useThreads } from "../../state/threads";
 import { focusWindow } from "../../state/actions";
 import type { Board } from "../../state/ui";
 import { threadStateOf, type ThreadState } from "../StatusDot";
-import { coveredLeft, viewport, type Viewport } from "./viewport";
+import { viewport, type Viewport } from "./viewport";
 
 const INSET = 20; // px from the viewport edge
 const SPACING = 26; // min px between beacons on the same edge
@@ -36,10 +36,9 @@ export function Beacons({ board, viewportEl }: { board: Board; viewportEl: React
     const place = (vp: Viewport) => {
       const el = viewportEl.current;
       if (!el || !flagged.length) return;
-      const left = coveredLeft();
       const { w: W, h: H } = viewport.size;
-      const box = { x0: left + INSET, y0: INSET, x1: W - INSET, y1: H - INSET };
-      const ox = (left + W) / 2, oy = H / 2;
+      const box = { x0: INSET, y0: INSET, x1: W - INSET, y1: H - INSET };
+      const ox = W / 2, oy = H / 2;
       const placed: { el: HTMLButtonElement; edge: string; x: number; y: number }[] = [];
 
       for (const { win } of flagged) {
@@ -47,7 +46,7 @@ export function Beacons({ board, viewportEl }: { board: Board; viewportEl: React
         if (!b) continue;
         const sx = win.x * vp.zoom + vp.x, sy = win.y * vp.zoom + vp.y;
         const sw = win.w * vp.zoom, sh = win.h * vp.zoom;
-        const visW = Math.min(sx + sw, W) - Math.max(sx, left);
+        const visW = Math.min(sx + sw, W) - Math.max(sx, 0);
         const visH = Math.min(sy + sh, H) - Math.max(sy, 0);
         if (visW >= Math.min(SHOWN, sw) && visH >= Math.min(SHOWN, sh)) {
           b.hidden = true;

@@ -97,13 +97,12 @@ class ViewportController {
     this.anim = requestAnimationFrame(step);
   }
 
-  /** Viewport that fits `rect` (world coords) into a `vw`×`vh` screen area, minus `left` covered pixels. */
-  fitRect(rect: { x: number; y: number; w: number; h: number }, vw: number, vh: number, pad = 48, maxZoom = 1, left = coveredLeft()): Viewport {
-    const aw = Math.max(200, vw - left);
-    const zoom = clamp(Math.min((aw - pad * 2) / rect.w, (vh - pad * 2) / rect.h, maxZoom), MIN_ZOOM, MAX_ZOOM);
+  /** Viewport that fits `rect` (world coords) into a `vw`×`vh` screen area. */
+  fitRect(rect: { x: number; y: number; w: number; h: number }, vw: number, vh: number, pad = 48, maxZoom = 1): Viewport {
+    const zoom = clamp(Math.min((vw - pad * 2) / rect.w, (vh - pad * 2) / rect.h, maxZoom), MIN_ZOOM, MAX_ZOOM);
     return {
       zoom,
-      x: left + (aw - rect.w * zoom) / 2 - rect.x * zoom,
+      x: (vw - rect.w * zoom) / 2 - rect.x * zoom,
       y: (vh - rect.h * zoom) / 2 - rect.y * zoom,
     };
   }
@@ -134,15 +133,9 @@ export function boundsOf(wins: CanvasWin[]) {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
-/** Screen-space width on the canvas's left covered by the pinned (floating) sidebar. */
-export function coveredLeft(): number {
-  const s = useUI.getState();
-  return s.sidebarOpen ? s.sidebarWidth + 12 : 0;
-}
-
 export function viewportSize() {
   const el = document.querySelector<HTMLElement>(".canvas-viewport");
-  return { w: el?.clientWidth ?? window.innerWidth, h: el?.clientHeight ?? window.innerHeight, left: coveredLeft() };
+  return { w: el?.clientWidth ?? window.innerWidth, h: el?.clientHeight ?? window.innerHeight };
 }
 
 export function fitAll(animate = true) {
@@ -164,15 +157,14 @@ export function revealWindow(winId: string) {
   const sw = win.w * zoom;
   const sh = win.h * zoom;
   const pad = 32;
-  const left = coveredLeft();
-  const fits = sw <= w - left - pad * 2 && sh <= h - pad * 2;
+  const fits = sw <= w - pad * 2 && sh <= h - pad * 2;
   if (!fits || zoom < 0.6) {
     viewport.animateTo(viewport.fitRect(win, w, h, 40, 1));
     return;
   }
   let dx = 0;
   let dy = 0;
-  if (sx < left + pad) dx = left + pad - sx;
+  if (sx < pad) dx = pad - sx;
   else if (sx + sw > w - pad) dx = w - pad - (sx + sw);
   if (sy < pad) dy = pad - sy;
   else if (sy + sh > h - pad) dy = h - pad - (sy + sh);
