@@ -14,10 +14,11 @@ import {
   type SDKSessionInfo,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { EngineStatus } from "../../shared/bridge";
-import type { Model, RateLimitSnapshot, Thread } from "../../shared/protocol";
+import type { BackgroundTask, Model, RateLimitSnapshot, Thread } from "../../shared/protocol";
 import type { RateLimitWindow } from "../../shared/protocol/generated/v2";
 import { FsService } from "../fsService";
 import { gitInfo } from "../git";
+import { sameTasks, TranscriptBackground } from "./background";
 import { buildTurns, type HistoryTurn, type StoredMessage } from "./history";
 import { claudeAuthStatus, claudeConfigDir, claudeEnv } from "./platform";
 import { ClaudeSession, type ClaudeAccess, type SessionHost, type ThreadConfig } from "./session";
@@ -86,7 +87,12 @@ export class ClaudeEngine {
   private probing: Promise<void> | null = null;
   /** Plan usage: the 5-hour/7-day windows, plus per-model weekly buckets (Fable, Opus…) by limit id. */
   private usage: { at: number; snapshot: RateLimitSnapshot | null; byId: Record<string, RateLimitSnapshot> } | null = null;
-  private elsewhere: { at: number; busy: Set<string>; reading: Promise<Set<string>> | null } = { at: 0, busy: new Set(), reading: null };
+  private elsewhere: { at: number; entries: RegistryEntry[]; reading: Promise<RegistryEntry[]> | null } = { at: 0, entries: [], reading: null };
+  /** Background work of sessions running in other Claude Code processes, read from their transcripts. */
+  private backgroundElsewhere = new TranscriptBackground(claudeConfigDir);
+  /** What was last reported of it, per session; and whether a look is underway. */
+  private reportedElsewhere = new Map<string, BackgroundTask[]>();
+  private lookingElsewhere = false;
   /** Tokens per day, tallied from transcripts (`account/usage/read`); running totals go out while a read is underway. */
   private tokens = new TranscriptUsage(claudeConfigDir, (days) => this.notify("account/usage/updated", { dailyUsageBuckets: days }));
   /** Claude Code's own model entries (with what each resolves to) and the user's configured model, from the probe. */
@@ -273,10 +279,13 @@ export class ClaudeEngine {
     if (method !== "initialize" && this.status.state !== "running") throw rpcError(this.status.error ?? "Claude Code is not available");
     switch (method) {
       case "initialize":
-        // A new connection: anything still waiting on the old one is asked again.
+        // A new connection: anything still waiting on the old one is asked again, and it hears what
+        // runs in the background (here now; elsewhere at the next look).
         setImmediate(() => {
           for (const [id, r] of this.requests) this.write({ id, method: r.method, params: r.params });
+          for (const s of this.sessions.values()) if (s.background.length) this.notify("thread/backgroundTasks/updated", { threadId: s.config.id, tasks: s.background });
         });
+        this.reportedElsewhere = new Map();
         void this.probe();
         return { userAgent: `claude-code/${this.status.version ?? "unknown"}`, codexHome: "", platformFamily: process.platform === "win32" ? "windows" : "unix", platformOs: process.platform };
       case "thread/list":
@@ -405,6 +414,7 @@ export class ClaudeEngine {
   }
 
   private async listThreads(p: any) {
+    void this.lookElsewhere();
     const all = (await listSessions({})).filter((i) => !this.state.archived.includes(i.sessionId));
     for (const i of all) this.infos.set(i.sessionId, i);
     const ids = new Set(all.map((i) => i.sessionId));
@@ -470,16 +480,17 @@ export class ClaudeEngine {
   }
 
   /**
-   * Sessions another Claude Code process (the CLI, the desktop app, an IDE, another SDK app) is
-   * busy with right now. Every running claude records itself in `<config>/sessions/<pid>.json`
-   * with its session id and whether it's busy or idle. Entries from processes that have exited,
-   * and sessions Ret itself is running, don't count. Read at most every 1.5 s.
+   * Sessions another Claude Code process (the CLI, the desktop app, an IDE, another SDK app) has
+   * open right now. Every running claude records itself in `<config>/sessions/<pid>.json` with its
+   * session id, when it started, and whether it's busy or idle. Entries from processes that have
+   * exited, and sessions Ret itself is running (live events cover those), don't count. Read at
+   * most every 1.5 s.
    */
-  private busyElsewhere(): Promise<Set<string>> {
-    if (Date.now() - this.elsewhere.at < 1500) return Promise.resolve(this.elsewhere.busy);
+  private openElsewhere(): Promise<RegistryEntry[]> {
+    if (Date.now() - this.elsewhere.at < 1500) return Promise.resolve(this.elsewhere.entries);
     this.elsewhere.reading ??= (async () => {
       const dir = join(claudeConfigDir(), "sessions");
-      const busy = new Set<string>();
+      const entries: RegistryEntry[] = [];
       const names = await readdir(dir).catch(() => [] as string[]);
       await Promise.all(
         names
@@ -487,18 +498,53 @@ export class ClaudeEngine {
           .map(async (n) => {
             try {
               const e = JSON.parse(await readFile(join(dir, n), "utf8"));
-              if (e?.status !== "busy" || typeof e.sessionId !== "string" || !alive(e.pid)) return;
-              if (this.sessions.get(e.sessionId)?.query) return; // ours: live events cover it
-              busy.add(e.sessionId);
+              if (typeof e?.sessionId !== "string" || !alive(e.pid)) return;
+              if (this.sessions.get(e.sessionId)?.query) return;
+              entries.push({ sessionId: e.sessionId, busy: e.status === "busy", startedAt: Number(e.startedAt) || 0 });
             } catch {
               /* being rewritten, or not a session entry */
             }
           }),
       );
-      this.elsewhere = { at: Date.now(), busy, reading: null };
-      return busy;
+      this.elsewhere = { at: Date.now(), entries, reading: null };
+      return entries;
     })();
     return this.elsewhere.reading;
+  }
+
+  /** Sessions another Claude Code process is busy with right now. */
+  private async busyElsewhere(): Promise<Set<string>> {
+    return new Set((await this.openElsewhere()).filter((e) => e.busy).map((e) => e.sessionId));
+  }
+
+  /**
+   * Background work (shells, subagents, monitors) of sessions open in other Claude Code processes.
+   * Their own notifications never reach Ret, so it's read from their transcripts, and changes go out
+   * as `thread/backgroundTasks/updated`. Looked at with each thread list, which Ret polls to follow
+   * work running elsewhere.
+   */
+  private async lookElsewhere() {
+    if (this.lookingElsewhere) return;
+    this.lookingElsewhere = true;
+    try {
+      const open = await this.openElsewhere();
+      const found = new Map<string, BackgroundTask[]>();
+      for (const e of open) {
+        const tasks = await this.backgroundElsewhere.running(e.sessionId, e.startedAt).catch(() => [] as BackgroundTask[]);
+        if (tasks.length) found.set(e.sessionId, tasks);
+      }
+      this.backgroundElsewhere.keep(new Set(open.map((e) => e.sessionId)));
+      for (const [threadId, tasks] of found) {
+        if (!sameTasks(this.reportedElsewhere.get(threadId) ?? [], tasks)) this.notify("thread/backgroundTasks/updated", { threadId, tasks });
+      }
+      // Finished, or its process exited (taking the work with it). A session Ret now runs reports its own.
+      for (const threadId of this.reportedElsewhere.keys()) {
+        if (!found.has(threadId) && !this.sessions.get(threadId)?.query) this.notify("thread/backgroundTasks/updated", { threadId, tasks: [] });
+      }
+      this.reportedElsewhere = found;
+    } finally {
+      this.lookingElsewhere = false;
+    }
   }
 
   /** Thread settings as the app-server reports them on start/resume/fork. */
@@ -828,6 +874,14 @@ export class ClaudeEngine {
     this.usage = { at: this.usage?.at ?? Date.now(), snapshot: next, byId };
     this.notify("account/rateLimits/updated", { rateLimits: next, rateLimitsByLimitId: byId });
   }
+}
+
+/** A session another Claude Code process has open, from its entry in the session registry. */
+interface RegistryEntry {
+  sessionId: string;
+  busy: boolean;
+  /** When that process started (ms): background work launched before then died with an earlier one. */
+  startedAt: number;
 }
 
 /** Whether a process is still running (a registry entry outlives a crashed claude). */

@@ -8,7 +8,7 @@ import { useThreads } from "../state/threads";
 import { useConn } from "../state/conn";
 import { threadTitle } from "../state/projects";
 import { plainText, timeAgo } from "../lib/format";
-import { STATE_LABEL, useRunsElsewhere, useThreadState } from "./StatusDot";
+import { backgroundLabel, STATE_LABEL, useBackgroundOnly, useRunsElsewhere, useThreadState } from "./StatusDot";
 import type { EngineStatus, ProviderId, UpdaterState } from "../../shared/bridge";
 import { PROVIDERS } from "../agents";
 
@@ -326,13 +326,14 @@ function ThreadCard({ id, forks }: { id: string; forks: number }) {
   const t = useThreads((s) => s.threads[id]);
   const state = useThreadState(id);
   const elsewhere = useRunsElsewhere(id);
+  const background = useBackgroundOnly(id);
   const owner = useThreads((s) => s.owner[id] ?? "codex");
   if (!t) return null;
 
   // An unnamed thread's title is just its first message, so the message alone leads.
   const named = !!t.name?.trim();
   const preview = previewText(t.preview ?? "");
-  const status = elsewhere ? `Running in another ${PROVIDERS[owner].name} app` : state === "idle" ? null : STATE_LABEL[state];
+  const status = elsewhere ? `Running in another ${PROVIDERS[owner].name} app` : background && state === "running" ? backgroundLabel(background) : state === "idle" ? null : STATE_LABEL[state];
   const origin = originLabel(t.originator, t.source);
   const branch = t.gitInfo?.branch;
   const meta = [status, `Updated ${timeAgo(t.updatedAt) === "now" ? "just now" : `${timeAgo(t.updatedAt)} ago`}`, origin].filter(Boolean);

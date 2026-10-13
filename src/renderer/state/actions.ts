@@ -173,7 +173,9 @@ function wireProvider(p: ProviderId) {
         live[id] = lt.activeTurnId ? { ...emptyLive() } : { ...lt, subscribed: false };
       }
       const requests = Object.fromEntries(Object.entries(s.requests).filter(([, r]) => r.provider !== p));
-      return { live, requests };
+      // The engine tells a new connection what still runs in the background.
+      const background = Object.fromEntries(Object.entries(s.background).filter(([id]) => (s.owner[id] ?? "codex") !== p));
+      return { live, requests, background };
     });
     void loadAccount(p);
     void loadModels(p);
