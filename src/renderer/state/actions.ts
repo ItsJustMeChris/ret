@@ -70,6 +70,17 @@ export function bootstrap() {
     void loadThreadList();
     for (const p of enabledProviders()) void loadRateLimits(p);
   });
+
+  // Threads arrive from the list, the poll for work in other apps, and live events. However one
+  // comes, look at its folder soon after: a linked worktree groups with its main checkout.
+  let checkoutsTimer = 0;
+  useThreads.subscribe((s, prev) => {
+    if (s.threads === prev.threads || checkoutsTimer) return;
+    checkoutsTimer = window.setTimeout(() => {
+      checkoutsTimer = 0;
+      void resolveCheckouts();
+    }, 300);
+  });
 }
 
 /** Providers turned on or off: a disabled provider's threads leave the sidebar until it's back. */
@@ -350,7 +361,7 @@ export async function ownerFor(threadId: string): Promise<ProviderId> {
 export function loadThreadList(only?: ProviderId): Promise<void> {
   const ps = only ? [only] : enabledProviders();
   for (const p of ps) void loadWorkspaces(p);
-  return Promise.all(ps.map(listProvider)).then(() => void resolveCheckouts());
+  return Promise.all(ps.map(listProvider)).then(() => {});
 }
 
 /** Folders already asked about this session, worktree or not. */
