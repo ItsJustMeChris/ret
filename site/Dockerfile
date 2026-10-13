@@ -1,5 +1,7 @@
 # getret.app as one image: builds the live demo (the real renderer, running on an in-browser
-# demo engine) from src/renderer, then serves site/ with nginx. Build from the repo root:
+# demo engine) from src/renderer, then serves site/ with nginx. The build context must be the
+# repo root, not site/ (in Dokploy, set Docker Context Path to "." explicitly: left blank, it
+# defaults to the Dockerfile's folder):
 #
 #   docker build -f site/Dockerfile -t getret .
 #   docker run --rm -p 8080:80 getret        # → http://localhost:8080
