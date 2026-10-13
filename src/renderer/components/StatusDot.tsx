@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { useThreads } from "../state/threads";
+import { PROVIDERS } from "../agents";
 
 export type ThreadState = "attention" | "running" | "error" | "unread" | "idle";
 
@@ -29,7 +30,7 @@ export const STATE_LABEL: Record<ThreadState, string> = {
   idle: "Idle",
 };
 
-/** True when the thread's current turn is running in another Codex process (VS Code, CLI…). */
+/** True when the thread's current turn is running in another process of its agent (VS Code, the CLI, a desktop app…). */
 export function useRunsElsewhere(threadId: string) {
   return useThreads((s) => !!s.external[threadId]);
 }
@@ -37,10 +38,11 @@ export function useRunsElsewhere(threadId: string) {
 export const StatusDot = memo(function StatusDot({ threadId }: { threadId: string }) {
   const state = useThreadState(threadId);
   const elsewhere = useRunsElsewhere(threadId);
+  const agent = useThreads((s) => PROVIDERS[s.owner[threadId] ?? "codex"].name);
   return (
     <span
       className={`status-dot ${state} ${elsewhere ? "elsewhere" : ""}`}
-      title={elsewhere ? "Running in another Codex app (VS Code, CLI…)" : STATE_LABEL[state]}
+      title={elsewhere ? `Running in another ${agent} app (VS Code, the CLI…)` : STATE_LABEL[state]}
     />
   );
 });

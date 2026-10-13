@@ -1,7 +1,8 @@
 import { AppWindow, Code2, Command, Inbox, PanelLeft, Rows3 } from "lucide-react";
 import { useUI } from "../state/ui";
 import { useInboxCount } from "./inbox/InboxView";
-import { useConn } from "../state/conn";
+import { useConn, useEnabledProviders } from "../state/conn";
+import { PROVIDERS } from "../agents";
 import { useThreads } from "../state/threads";
 import { bridge } from "../bridge";
 
@@ -36,7 +37,8 @@ export function Titlebar() {
   const mode = useUI((s) => s.mode);
   const inboxCount = useInboxCount();
   const sidebarOpen = useUI((s) => s.sidebarOpen);
-  const codex = useConn((s) => s.codex);
+  const engines = useConn((s) => s.providers);
+  const enabled = useEnabledProviders();
   const isMac = bridge.platform === "darwin";
 
   return (
@@ -87,11 +89,18 @@ export function Titlebar() {
       </button>
       <div className="tb-right">
         <GlobalActivity />
-        {codex && codex.state !== "running" && (
-          <span className={`conn conn-${codex.state}`} data-card="codex">
-            {codex.state === "starting" ? "Starting codex…" : codex.state === "missing" ? "Installing codex…" : "codex offline"}
-          </span>
-        )}
+        {enabled.map((p) => {
+          const st = engines[p].status;
+          if (!st || st.state === "running" || st.state === "disabled") return null;
+          const name = PROVIDERS[p].name;
+          const label =
+            st.state === "starting" ? `Starting ${name}…` : st.state === "missing" ? (p === "codex" ? "Installing Codex…" : `${name} not found`) : `${name} offline`;
+          return (
+            <span key={p} className={`conn conn-${st.state}`} data-card="engine" data-provider={p}>
+              {label}
+            </span>
+          );
+        })}
       </div>
     </header>
   );

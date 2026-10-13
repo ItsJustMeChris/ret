@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Download, LoaderCircle, RefreshCw, Settings, CircleAlert, Check, ArrowUpCircle } from "lucide-react";
-import { useConn } from "../state/conn";
+import type { ProviderId } from "@shared/bridge";
+import { useConn, useEnabledProviders } from "../state/conn";
 import { useUI } from "../state/ui";
-import { codexStatus } from "./HoverCards";
+import { PROVIDERS } from "../agents";
+import { engineStatus } from "./HoverCards";
 
 type Window = { usedPercent: number; windowDurationMins: number | null; resetsAt: number | null };
 
@@ -32,7 +34,7 @@ function windowLabel(mins: number | null) {
   return mins >= 1440 ? `${Math.round(mins / 1440)}d limit` : `${Math.round(mins / 60)}h limit`;
 }
 
-function Meter({ w, now }: { w: Window; now: number }) {
+function Meter({ w, now, label }: { w: Window; now: number; label?: string | null }) {
   const left = Math.max(0, Math.min(100, Math.round(100 - w.usedPercent)));
   const color = meterColor(left);
   const tip = w.resetsAt
@@ -41,7 +43,7 @@ function Meter({ w, now }: { w: Window; now: number }) {
   return (
     <div className="usage" title={tip}>
       <div className="usage-row">
-        <span>{windowLabel(w.windowDurationMins)}</span>
+        <span>{label ? `${label} · ` : ""}{windowLabel(w.windowDurationMins)}</span>
         <span className="usage-left" style={{ color }}>
           {left}% left
         </span>
@@ -53,32 +55,52 @@ function Meter({ w, now }: { w: Window; now: number }) {
   );
 }
 
-export function UsageMeter() {
-  const rl = useConn((s) => s.rateLimits?.rateLimits);
+/**
+ * A provider's plan usage windows, then any other limits it reports (per-model buckets such as
+ * Claude's Fable weekly limit). `label` names the provider when several are on.
+ */
+export function UsageMeter({ provider, label }: { provider: ProviderId; label?: string }) {
+  const windows = useUsageWindows(provider, label);
   // Keep the "resets in" countdown current.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
   }, []);
-  const windows = [rl?.primary, rl?.secondary].filter((w): w is Window => !!w);
   if (!windows.length) return null;
   return (
     <>
-      {windows.map((w, i) => (
-        <Meter key={i} w={w} now={now} />
+      {windows.map((m, i) => (
+        <Meter key={i} w={m.w} now={now} label={m.label} />
       ))}
     </>
   );
 }
 
-export function CodexBadge() {
-  const codex = useConn((s) => s.codex);
-  const up = useConn((s) => s.updater);
+/** Every usage window a provider reports: its main limits, then other buckets (per-model ones). */
+function useUsageWindows(provider: ProviderId, label?: string): { w: Window; label?: string | null }[] {
+  const rl = useConn((s) => s.providers[provider].rateLimits?.rateLimits);
+  const byId = useConn((s) => s.providers[provider].rateLimits?.rateLimitsByLimitId);
+  const windows: { w: Window; label?: string | null }[] = [rl?.primary, rl?.secondary].filter((w): w is Window => !!w).map((w) => ({ w, label }));
+  for (const [id, snap] of Object.entries(byId ?? {})) {
+    if (!snap || id === rl?.limitId) continue; // the main limit, already shown
+    const name = [label, snap.limitName ?? id].filter(Boolean).join(" · ");
+    for (const w of [snap.primary, snap.secondary]) if (w) windows.push({ w, label: name });
+  }
+  return windows;
+}
+
+/** Below this share left, a limit shows on the account line while usage is tucked away. */
+const LOW_LEFT = 20;
+
+export function EngineBadge({ provider }: { provider: ProviderId }) {
+  const codex = useConn((s) => s.providers[provider].status);
+  const updater = useConn((s) => s.updater);
+  const up = provider === "codex" ? updater : null;
   if (!codex) return null;
-  // Always "Codex <version>"; the state rides along as a small chip. Details live in the hover card.
-  const st = codexStatus(codex, up);
-  const busy = codex.state === "starting" || up?.phase === "verifying" || up?.phase === "extracting";
+  // Always "<Name> <version>"; the state rides along as a small chip. Details live in the hover card.
+  const st = engineStatus(codex, up);
+  const busy = codex.state === "starting" || up?.phase === "verifying" || up?.phase === "extracting" || codex.update?.phase === "updating";
   const icon = busy ? (
     <LoaderCircle size={11} className="spin" />
   ) : st.tone === "bad" ? (
@@ -92,32 +114,76 @@ export function CodexBadge() {
   ) : (
     <Check size={11} className="st-ok" />
   );
+  const name = PROVIDERS[provider].short;
   return (
-    <button className="codex-badge" data-card="codex" aria-label="Codex status" onClick={() => useUI.setState({ settingsOpen: true })}>
+    <button className="codex-badge" data-card="engine" data-provider={provider} aria-label={`${PROVIDERS[provider].name} status`} onClick={() => useUI.setState({ settingsOpen: true })}>
       {icon}
-      <span className="codex-badge-text">Codex{codex.version ? ` ${codex.version}` : ""}</span>
+      <span className="codex-badge-text">{name}{codex.version ? ` ${codex.version}` : ""}</span>
       {st.short && <span className={`codex-chip ${st.tone}`}>{st.short}</span>}
     </button>
   );
 }
 
+/** How a provider is signed in, in a word or two. Never the account's email (Settings shows that). */
+function AccountLine({ provider, label }: { provider: ProviderId; label: boolean }) {
+  const account = useConn((s) => s.providers[provider].account?.account);
+  const subscription = account?.type === "chatgpt" || account?.type === "claudeAi";
+  // A subscription reads as "Codex PLUS": the provider's name stands where the email was.
+  const name = subscription
+    ? PROVIDERS[provider].short
+    : account?.type === "apiKey"
+      ? "API key"
+      : account?.type === "cloud"
+        ? account.provider
+        : "Not signed in";
+  const plan = account?.type === "chatgpt" || account?.type === "claudeAi" ? account.planType : null;
+  // Usage is out of sight until hovered, so a limit that's nearly used up still says so here.
+  const windows = useUsageWindows(provider);
+  const left = windows.length ? Math.max(0, Math.round(100 - Math.max(...windows.map((m) => m.w.usedPercent)))) : null;
+  return (
+    <span className="account-line">
+      {label && !subscription && <span className="account-provider">{PROVIDERS[provider].short}</span>}
+      <span className="account-name">{name}</span>
+      {plan && <span className="plan">{String(plan)}</span>}
+      {left != null && left < LOW_LEFT && (
+        <span className="usage-low" style={{ color: meterColor(left) }} title="Hover for usage">
+          {left}% left
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function SidebarFooter() {
-  const account = useConn((s) => s.account?.account);
+  const enabled = useEnabledProviders();
+  const several = enabled.length > 1;
   return (
     <div className="sidebar-foot">
-      <UsageMeter />
+      {/* Plan usage slides up over the thread list while the footer is hovered, and takes no room otherwise. */}
+      <div className="usage-pop">
+        <div className="usage-pop-panel">
+          {enabled.map((p) => (
+            <UsageMeter key={p} provider={p} label={several ? PROVIDERS[p].short : undefined} />
+          ))}
+        </div>
+      </div>
       <div className="foot-row">
-        <div className="account" title={account?.type === "chatgpt" ? (account.email ?? "") : ""}>
+        <div className="account">
           <span className="account-text">
-            <span className="account-name">{account?.type === "chatgpt" ? account.email : account?.type === "apiKey" ? "API key" : "Not signed in"}</span>
-            {account?.type === "chatgpt" && <span className="plan">{String(account.planType)}</span>}
+            {enabled.map((p) => (
+              <AccountLine key={p} provider={p} label={several} />
+            ))}
           </span>
         </div>
         <button className="icon-btn" title="Settings" onClick={() => useUI.setState({ settingsOpen: true })}>
           <Settings size={15} />
         </button>
       </div>
-      <CodexBadge />
+      <div className="engine-badges">
+        {enabled.map((p) => (
+          <EngineBadge key={p} provider={p} />
+        ))}
+      </div>
     </div>
   );
 }

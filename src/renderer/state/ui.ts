@@ -1,5 +1,13 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { ProviderId } from "@shared/bridge";
+
+export interface ComposerPrefs {
+  model: string | null;
+  effort: string | null;
+  access: AccessPreset;
+  speed?: string;
+}
 
 export type ViewMode = "focus" | "canvas" | "code" | "inbox";
 
@@ -22,7 +30,8 @@ export interface CodeLayout {
 export interface InboxState {
   selected: string | null;
 }
-export type AccessPreset = "config" | "read-only" | "auto" | "full";
+/** One of a provider's access options (see agents.ts); "config" = whatever its own settings say. */
+export type AccessPreset = string;
 export type Theme = "dark" | "light" | "system";
 
 export interface ProjectConf {
@@ -66,6 +75,8 @@ export interface FocusSplit {
 export interface Draft {
   cwd: string;
   projectKey: string;
+  /** Agent the thread will start with (unset: the default from Settings). */
+  provider?: ProviderId;
   /** For forks into a fresh worktree, the eventual thread is grouped under this project. */
   createdAt: number;
 }
@@ -105,7 +116,12 @@ export interface UIState {
   focusedWindow: string | null;
   /** Canvas windows picked with Shift+click (or a Shift+drag marquee); dragging one moves them all. */
   selectedWindows: string[];
-  composer: { model: string | null; effort: string | null; access: AccessPreset; speed?: string };
+  /** Last-used new-thread settings (Codex's, from before there were providers). */
+  composer: ComposerPrefs;
+  /** Last-used new-thread settings per provider. */
+  composerBy?: Partial<Record<ProviderId, ComposerPrefs>>;
+  /** Agent of the model last picked for a new thread: the next one starts with it. */
+  lastAgent?: ProviderId;
   code: CodeLayout;
   inbox: InboxState;
   paletteOpen: boolean;
@@ -168,7 +184,7 @@ export type AppKind = "inbox" | "code";
 export const isApp = (id: string) => id.startsWith("app:");
 export const appId = (kind: AppKind) => `app:${kind}`;
 export const appKind = (id: string) => id.slice(4) as AppKind;
-/** A real Codex thread (not a draft, a file view, or an app window). */
+/** A real agent thread (not a draft, a file view, or an app window). */
 export const isThread = (id: string) => !isDraft(id) && !isFile(id) && !isApp(id);
 export const newId = uid;
 

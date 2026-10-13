@@ -8,6 +8,8 @@ export interface SelectOption<T extends string = string> {
   description?: string;
   icon?: React.ReactNode;
   disabled?: boolean;
+  /** Options sharing a group are listed together under its name (keep them adjacent). */
+  group?: string;
 }
 
 interface Props<T extends string> {
@@ -110,6 +112,12 @@ function SelectMenu<T extends string>({
   const [active, setActive] = useState(() => Math.max(0, options.findIndex((o) => o.value === value)));
   const [pos, setPos] = useState<{ left: number; top: number; maxHeight: number; above: boolean } | null>(null);
   const typed = useRef({ text: "", at: 0 });
+  /**
+   * Whether the highlight came from the keyboard (or opening), so it should be scrolled into view.
+   * Never for the mouse: scrolling a half-visible option under the pointer moves the next one under
+   * it, which the browser hovers in turn, and the list runs away.
+   */
+  const follow = useRef(true);
 
   const place = useCallback(() => {
     const r = anchor.getBoundingClientRect();
@@ -131,11 +139,13 @@ function SelectMenu<T extends string>({
   useLayoutEffect(place, [place]);
 
   useEffect(() => {
+    if (!follow.current) return;
     menu.current?.querySelector<HTMLElement>(".sel-opt.active")?.scrollIntoView({ block: "nearest" });
   }, [active, pos]);
 
   useEffect(() => {
     const move = (dir: 1 | -1, from = active) => {
+      follow.current = true;
       for (let i = 1; i <= options.length; i++) {
         const idx = (from + dir * i + options.length) % options.length;
         if (!options[idx].disabled) return setActive(idx);
@@ -167,7 +177,10 @@ function SelectMenu<T extends string>({
         const now = Date.now();
         typed.current = { text: (now - typed.current.at < 700 ? typed.current.text : "") + e.key.toLowerCase(), at: now };
         const hit = options.findIndex((o) => !o.disabled && o.label.toLowerCase().startsWith(typed.current.text));
-        if (hit >= 0) setActive(hit);
+        if (hit >= 0) {
+          follow.current = true;
+          setActive(hit);
+        }
       }
     };
     const onDown = (e: PointerEvent) => {
@@ -199,14 +212,23 @@ function SelectMenu<T extends string>({
         minWidth: Math.max(minWidth ?? 0, anchor.getBoundingClientRect().width),
       }}
     >
-      {options.map((o, i) => (
+      {options.map((o, i) => [
+        o.group && o.group !== options[i - 1]?.group ? (
+          <div key={`group:${o.group}`} className="sel-group" role="presentation">
+            {o.group}
+          </div>
+        ) : null,
         <div
           key={o.value}
           role="option"
           aria-selected={o.value === value}
           aria-disabled={o.disabled}
           className={`sel-opt ${i === active ? "active" : ""} ${o.value === value ? "selected" : ""} ${o.disabled ? "disabled" : ""}`}
-          onPointerMove={() => i !== active && !o.disabled && setActive(i)}
+          onPointerMove={() => {
+            if (i === active || o.disabled) return;
+            follow.current = false;
+            setActive(i);
+          }}
           onClick={() => !o.disabled && onPick(o.value)}
         >
           <span className="sel-opt-icon">{o.icon}</span>
@@ -215,8 +237,8 @@ function SelectMenu<T extends string>({
             {o.description && <span className="sel-opt-desc">{o.description}</span>}
           </span>
           <span className="sel-opt-check">{o.value === value && <Check size={13} />}</span>
-        </div>
-      ))}
+        </div>,
+      ])}
     </div>,
     document.body,
   );

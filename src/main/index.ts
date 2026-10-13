@@ -5,12 +5,15 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import { tmpdir } from "node:os";
-import { IPC, type EditCommand, type UpdaterSettings } from "../shared/bridge";
+import { IPC, type EditCommand, type ProviderId, type ProvidersSettings, type ProvidersSettingsPatch, type UpdaterSettings } from "../shared/bridge";
 import { IMAGE_SCHEME, RUNNABLE, imageType } from "../shared/files";
 import { AppServer, type LaunchTarget } from "./codex/appServer";
 import { CodexUpdater } from "./codex/updater";
 import { AppUpdater } from "./appUpdate";
 import { findSystemCodex, probeVersion } from "./codex/platform";
+import { ClaudeEngine } from "./claude/engine";
+import { findSystemClaude, openLoginTerminal, probeClaudeVersion } from "./claude/platform";
+import { ClaudeUpdater } from "./claude/updater";
 import { createWorktree, gitInfo } from "./git";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
@@ -76,9 +79,97 @@ const send = (channel: string, payload: unknown) => {
 };
 
 const appServer = new AppServer(
-  (lines) => send(IPC.codexMessages, lines),
-  (status) => send(IPC.codexStatus, status),
+  (lines) => send(IPC.agentMessages, { provider: "codex", lines }),
+  (status) => send(IPC.agentStatus, status),
 );
+
+const claude = new ClaudeEngine(
+  join(userData, "claude-state.json"),
+  app.getVersion(),
+  (lines) => send(IPC.agentMessages, { provider: "claude", lines }),
+  (status) => send(IPC.agentStatus, status),
+);
+
+const claudeUpdater = new ClaudeUpdater({
+  binary: () => claude.status.binaryPath,
+  version: () => claude.status.version,
+  busy: () => claude.busy,
+  closeIdle: () => claude.closeIdle(),
+  changed: (update) => claude.setUpdate(update),
+  updated: () => bootClaude(),
+});
+
+// ---------------------------------------------------------------------------
+// Providers: which agent engines are on, and where Claude Code is found.
+// ---------------------------------------------------------------------------
+
+const providersFile = join(userData, "providers.json");
+const DEFAULT_PROVIDERS: ProvidersSettings = {
+  enabled: { codex: true, claude: true },
+  claude: { source: "system", customPath: null, autoUpdate: true },
+};
+
+function loadProviders(): ProvidersSettings {
+  try {
+    const raw = JSON.parse(readFileSync(providersFile, "utf8"));
+    return {
+      enabled: { ...DEFAULT_PROVIDERS.enabled, ...raw.enabled },
+      claude: { ...DEFAULT_PROVIDERS.claude, ...raw.claude },
+    };
+  } catch {
+    return DEFAULT_PROVIDERS;
+  }
+}
+
+let providers = loadProviders();
+
+async function setProviders(patch: ProvidersSettingsPatch): Promise<ProvidersSettings> {
+  const prev = providers;
+  providers = {
+    ...prev,
+    ...patch,
+    enabled: { ...prev.enabled, ...patch.enabled },
+    claude: { ...prev.claude, ...patch.claude },
+  };
+  await writeFile(providersFile, JSON.stringify(providers, null, 2));
+  send(IPC.providersState, providers);
+  if (prev.enabled.codex !== providers.enabled.codex) {
+    if (providers.enabled.codex) void bootCodex();
+    else {
+      updater.stop();
+      await appServer.disable();
+    }
+  }
+  const claudeMoved = prev.claude.source !== providers.claude.source || prev.claude.customPath !== providers.claude.customPath;
+  if (prev.enabled.claude !== providers.enabled.claude || claudeMoved) void bootClaude().then(() => scheduleClaudeUpdates());
+  else if (prev.claude.autoUpdate !== providers.claude.autoUpdate) scheduleClaudeUpdates();
+  return providers;
+}
+
+/** Find the user's own Claude Code (Ret never installs it) and point the engine at it. */
+/** Keep the user's Claude Code current (it updates itself only when used interactively). */
+function scheduleClaudeUpdates() {
+  if (providers.enabled.claude && claude.status.state === "running") claudeUpdater.schedule(providers.claude.autoUpdate);
+  else claudeUpdater.stop();
+}
+
+async function bootClaude() {
+  if (!providers.enabled.claude) {
+    claude.disable();
+    return;
+  }
+  const c = providers.claude;
+  const custom = c.source === "custom" && c.customPath && existsSync(c.customPath) ? c.customPath : null;
+  const binary = custom ?? (c.source === "system" ? await findSystemClaude() : null);
+  if (!binary) {
+    claude.setMissing(
+      c.source === "custom" ? "The Claude Code path in Settings doesn't exist." : "Claude Code isn't installed. Install it from claude.com/claude-code, then restart it here.",
+    );
+    return;
+  }
+  // The version decides whether an update is due, so it's known before the engine goes live.
+  claude.start({ binary, version: await probeClaudeVersion(binary), source: custom ? "custom" : "system" });
+}
 
 let autoApplying = false;
 const updater = new CodexUpdater(join(userData, "codex"), join(userData, "codex-settings.json"), (state) => {
@@ -144,7 +235,7 @@ async function doLaunch(target: LaunchTarget | null, restart: boolean) {
     void probeVersion(target.binary).then((version) => {
       if (appServer.status.binaryPath !== target.binary) return;
       appServer.status = { ...appServer.status, version };
-      send(IPC.codexStatus, appServer.status);
+      send(IPC.agentStatus, appServer.status);
       updater.setRunning(version, target.source === "managed");
     });
   }
@@ -171,11 +262,22 @@ async function ensureDaemon(binary: string): Promise<string | null> {
 }
 
 async function applyStaged() {
+  if (!providers.enabled.codex) return;
   await launch(await resolveTarget(), true);
 }
 
 async function boot() {
+  void bootClaude().then(() => scheduleClaudeUpdates());
   await updater.init();
+  await bootCodex();
+}
+
+async function bootCodex() {
+  if (!providers.enabled.codex) {
+    updater.stop();
+    await appServer.disable();
+    return;
+  }
   const target = await resolveTarget();
   await launch(target);
   const s = updater.settings;
@@ -194,7 +296,8 @@ async function boot() {
 let pageLoads = 0;
 async function onPageLoad() {
   if (++pageLoads === 1) return;
-  await launch(await resolveTarget(), true);
+  claude.reconnect();
+  if (providers.enabled.codex) await launch(await resolveTarget(), true);
 }
 
 function loadWindowState() {
@@ -307,9 +410,21 @@ function createWindow() {
 }
 
 function registerIpc() {
-  ipcMain.on(IPC.codexSend, (_e, line: string) => appServer.send(line));
-  ipcMain.handle(IPC.codexGetStatus, () => appServer.status);
-  ipcMain.handle(IPC.codexRestart, async () => launch(await resolveTarget(), true));
+  ipcMain.on(IPC.agentSend, (_e, provider: ProviderId, line: string) => (provider === "claude" ? claude.send(line) : appServer.send(line)));
+  ipcMain.handle(IPC.agentGetStatus, (_e, provider: ProviderId) => (provider === "claude" ? claude.status : appServer.status));
+  ipcMain.handle(IPC.agentRestart, async (_e, provider: ProviderId) => {
+    if (provider === "claude") return bootClaude();
+    if (providers.enabled.codex) return launch(await resolveTarget(), true);
+  });
+  ipcMain.handle(IPC.agentUpdate, (_e, provider: ProviderId) => {
+    if (provider === "claude") return claudeUpdater.check({ install: true });
+    return updater.check({ install: true }).then(() => {});
+  });
+  ipcMain.handle(IPC.agentLogin, (_e, provider: ProviderId) => {
+    if (provider === "claude" && claude.status.binaryPath) openLoginTerminal(claude.status.binaryPath);
+  });
+  ipcMain.handle(IPC.providersGet, () => providers);
+  ipcMain.handle(IPC.providersSet, (_e, patch: ProvidersSettingsPatch) => setProviders(patch));
 
   ipcMain.handle(IPC.updaterGet, () => updater.snapshot());
   ipcMain.handle(IPC.updaterCheck, async () => {
@@ -456,5 +571,7 @@ app.on("before-quit", (e) => {
   if (quitting) return;
   quitting = true;
   e.preventDefault();
+  claudeUpdater.stop();
+  claude.stop();
   void appServer.stop().finally(() => app.quit());
 });

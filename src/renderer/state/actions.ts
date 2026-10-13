@@ -1,11 +1,12 @@
 import { bridge } from "../bridge";
-import { rpc } from "../rpc/client";
-import type { SandboxMode, SandboxPolicy, ServerRequest, Thread, ThreadItem, UserInput } from "../protocol";
-import type { AskForApproval } from "../protocol/generated/v2";
-import { useConn } from "./conn";
+import { clients, rpcFor } from "../rpc/client";
+import { PROVIDER_IDS, type ProviderId, type ProvidersSettings } from "@shared/bridge";
+import type { ServerRequest, Thread, ThreadItem, UserInput } from "@shared/protocol";
+import { PROVIDERS, accessFor, pickProvider } from "../agents";
+import { enabledProviders, patchProvider, signedIn, useConn, type ProviderConn } from "./conn";
 import { guarded, toast } from "./toasts";
 import { coveredLeft } from "../components/canvas/viewport";
-import { explicitKeys, normPath, projectKeyFor, threadTitle } from "./projects";
+import { normPath, projectIndex, projectKeyFor, threadTitle, type Workspace } from "./projects";
 import { fillComposer } from "./composerDrafts";
 import { backfillLineage, lineageKnown } from "./lineage";
 import {
@@ -14,6 +15,7 @@ import {
   enqueueNotification,
   flushNow,
   mergeThread,
+  ownerOf,
   patchLive,
   removePendingRequest,
   setThreadHooks,
@@ -24,7 +26,7 @@ import {
   type QueuedMessage,
   type ThreadSettings,
 } from "./threads";
-import { activeBoard, appId, appKind, fileId, isApp, isDraft, isFile, isThread, newId, updateBoard, useUI, type AccessPreset, type CanvasWin, type FocusSplit, type UIState, type ViewMode } from "./ui";
+import { activeBoard, appId, appKind, fileId, isApp, isDraft, isFile, isThread, newId, updateBoard, useUI, type CanvasWin, type FocusSplit, type UIState, type ViewMode } from "./ui";
 import { onFsChanged, useFiles } from "./files";
 
 // ---------------------------------------------------------------------------
@@ -38,51 +40,16 @@ export function bootstrap() {
   if (booted) return;
   booted = true;
 
-  bridge.codex.onStatus((codex) => useConn.setState({ codex }));
-  void bridge.codex.getStatus().then((codex) => useConn.setState({ codex }));
+  bridge.agents.onStatus((status) => patchProvider(status.provider, { status }));
+  for (const p of PROVIDER_IDS) void bridge.agents.getStatus(p).then((status) => patchProvider(p, { status }));
+  bridge.agents.onSettings(applyProviderSettings);
+  void bridge.agents.getSettings().then(applyProviderSettings);
   bridge.updater.onState((updater) => useConn.setState({ updater }));
   void bridge.updater.getState().then((updater) => useConn.setState({ updater }));
   bridge.appUpdate.onState((appUpdate) => useConn.setState({ appUpdate }));
   void bridge.appUpdate.getState().then((appUpdate) => useConn.setState({ appUpdate }));
 
-  rpc.onNotification((method, params) => {
-    switch (method) {
-      case "account/updated":
-        void loadAccount();
-        return;
-      case "account/login/completed":
-        useConn.setState((s) => ({
-          login: params.success ? null : s.login ? { ...s.login, error: params.error ?? "Login failed" } : null,
-        }));
-        void loadAccount();
-        return;
-      case "account/rateLimits/updated":
-        useConn.setState((s) => ({
-          rateLimits: s.rateLimits ? { ...s.rateLimits, rateLimits: params.rateLimits ?? s.rateLimits.rateLimits } : s.rateLimits,
-        }));
-        return;
-      case "fs/changed":
-        onFsChanged(params);
-        return;
-      case "item/started":
-      case "item/completed":
-        if (params?.item?.type === "userMessage" && params.item.clientId) clearOptimistic(params.threadId, params.item.clientId);
-        break;
-    }
-    enqueueNotification(method, params);
-  });
-
-  rpc.setServerRequestHandler((req: ServerRequest) => {
-    if (SERVER_REQUESTS_WE_REFUSE.has(req.method)) {
-      rpc.respondError(req.id, -32601, `${req.method} is not supported by Ret`);
-      return;
-    }
-    addPendingRequest(req);
-    const threadId = (req.params as any)?.threadId;
-    if (threadId && !useThreads.getState().visible[threadId]) {
-      bridge.notify("Codex needs your input", threadTitle(useThreads.getState().threads[threadId]));
-    }
-  });
+  for (const p of PROVIDER_IDS) wireProvider(p);
 
   setThreadHooks({
     onTurnCompleted: (threadId, turn) => {
@@ -91,33 +58,9 @@ export function bootstrap() {
       const visible = useThreads.getState().visible[threadId];
       if (!visible || !document.hasFocus()) {
         const title = threadTitle(useThreads.getState().threads[threadId]);
-        bridge.notify(turn.status === "failed" ? "Turn failed" : "Codex finished", title);
+        bridge.notify(turn.status === "failed" ? "Turn failed" : `${PROVIDERS[ownerOf(threadId)].name} finished`, title);
       }
     },
-  });
-
-  rpc.onReady((info) => {
-    useConn.setState({ info });
-    // A fresh connection knows nothing about our subscriptions. Threads that were mid-turn
-    // are re-fetched: the turn either died with the old process or (shared daemon) is still
-    // running and gets rejoined by hydrateThread.
-    const wasRunning: string[] = [];
-    useThreads.setState((s) => {
-      const live: Record<string, LiveThread> = {};
-      for (const [id, lt] of Object.entries(s.live)) {
-        if (lt.activeTurnId) wasRunning.push(id);
-        live[id] = lt.activeTurnId ? { ...emptyLive() } : { ...lt, subscribed: false };
-      }
-      return { live, requests: {} };
-    });
-    void loadAccount();
-    void loadModels();
-    void loadConfigDefaults();
-    void loadRateLimits();
-    void loadThreadList().then(() => {
-      const visible = useThreads.getState().visible;
-      for (const id of wasRunning) if (visible[id]) void hydrateThread(id);
-    });
   });
 
   let lastRefresh = 0;
@@ -125,7 +68,99 @@ export function bootstrap() {
     if (Date.now() - lastRefresh < 30_000) return;
     lastRefresh = Date.now();
     void loadThreadList();
-    void loadRateLimits();
+    for (const p of enabledProviders()) void loadRateLimits(p);
+  });
+}
+
+/** Providers turned on or off: a disabled provider's threads leave the sidebar until it's back. */
+function applyProviderSettings(settings: ProvidersSettings) {
+  useConn.setState({ settings });
+  const off = PROVIDER_IDS.filter((p) => !settings.enabled[p]);
+  if (!off.length) return;
+  useThreads.setState((s) => {
+    const threads = Object.fromEntries(Object.entries(s.threads).filter(([id]) => !off.includes(s.owner[id] ?? "codex")));
+    return Object.keys(threads).length === Object.keys(s.threads).length ? s : { threads };
+  });
+}
+
+/** Connect one provider's engine to the stores. */
+function wireProvider(p: ProviderId) {
+  const rpc = clients[p];
+  rpc.onNotification((method, params) => {
+    switch (method) {
+      case "account/updated":
+        void loadAccount(p);
+        return;
+      case "account/login/completed":
+        patchProvider(p, (c) => ({
+          login: params.success ? null : c.login ? { ...c.login, error: params.error ?? "Login failed" } : null,
+        }));
+        void loadAccount(p);
+        return;
+      case "account/rateLimits/updated":
+        // Engines that track several limits (Claude's per-model buckets) send them all along.
+        patchProvider(p, (c) => ({
+          rateLimits: c.rateLimits
+            ? {
+                ...c.rateLimits,
+                rateLimits: params.rateLimits ?? c.rateLimits.rateLimits,
+                rateLimitsByLimitId: params.rateLimitsByLimitId ?? c.rateLimits.rateLimitsByLimitId,
+              }
+            : params.rateLimits
+              ? { rateLimits: params.rateLimits, rateLimitsByLimitId: params.rateLimitsByLimitId ?? null, ordinaryUsageAllowed: null, rateLimitResetCredits: null, accountId: null, rateLimitUpsell: null }
+              : null,
+        }));
+        return;
+      case "fs/changed":
+        onFsChanged(params);
+        return;
+      case "project/changed":
+        void loadWorkspaces(p);
+        return;
+      case "item/started":
+      case "item/completed":
+        if (params?.item?.type === "userMessage" && params.item.clientId) clearOptimistic(params.threadId, params.item.clientId);
+        break;
+    }
+    enqueueNotification(p, method, params);
+  });
+
+  rpc.setServerRequestHandler((req: ServerRequest) => {
+    if (SERVER_REQUESTS_WE_REFUSE.has(req.method)) {
+      rpc.respondError(req.id, -32601, `${req.method} is not supported by Ret`);
+      return;
+    }
+    addPendingRequest(p, req);
+    const threadId = (req.params as any)?.threadId;
+    if (threadId && !useThreads.getState().visible[threadId]) {
+      bridge.notify(`${PROVIDERS[p].name} needs your input`, threadTitle(useThreads.getState().threads[threadId]));
+    }
+  });
+
+  rpc.onReady((info) => {
+    patchProvider(p, { info });
+    // A fresh connection knows nothing about our subscriptions. Threads that were mid-turn
+    // are re-fetched: the turn either died with the old process or (shared daemon, Claude
+    // sessions) is still running and gets rejoined by hydrateThread.
+    const wasRunning: string[] = [];
+    useThreads.setState((s) => {
+      const live: Record<string, LiveThread> = { ...s.live };
+      for (const [id, lt] of Object.entries(s.live)) {
+        if ((s.owner[id] ?? "codex") !== p) continue;
+        if (lt.activeTurnId) wasRunning.push(id);
+        live[id] = lt.activeTurnId ? { ...emptyLive() } : { ...lt, subscribed: false };
+      }
+      const requests = Object.fromEntries(Object.entries(s.requests).filter(([, r]) => r.provider !== p));
+      return { live, requests };
+    });
+    void loadAccount(p);
+    void loadModels(p);
+    void loadConfigDefaults(p);
+    void loadRateLimits(p);
+    void loadThreadList(p).then(() => {
+      const visible = useThreads.getState().visible;
+      for (const id of wasRunning) if (visible[id]) void hydrateThread(id);
+    });
   });
 }
 
@@ -133,31 +168,31 @@ export function bootstrap() {
 // Account & models
 // ---------------------------------------------------------------------------
 
-export async function loadAccount() {
+export async function loadAccount(p: ProviderId) {
   try {
-    const account = await rpc.request("account/read", { refreshToken: false });
-    useConn.setState({ account, accountLoaded: true });
+    const account = (await clients[p].request("account/read", { refreshToken: false })) as ProviderConn["account"];
+    patchProvider(p, { account, accountLoaded: true });
   } catch (err) {
-    console.warn("account/read failed", err);
-    useConn.setState({ accountLoaded: true });
+    console.warn(`${p}: account/read failed`, err);
+    patchProvider(p, { accountLoaded: true });
   }
 }
 
-export async function loadRateLimits() {
+export async function loadRateLimits(p: ProviderId) {
   try {
-    const rateLimits = await rpc.request("account/rateLimits/read", undefined as never);
-    useConn.setState({ rateLimits });
+    const rateLimits = await clients[p].request("account/rateLimits/read", undefined as never);
+    patchProvider(p, { rateLimits });
   } catch {
     /* not available for api-key auth */
   }
 }
 
-/** Values from config.toml that new threads inherit, for showing what "no override" means. */
-export async function loadConfigDefaults() {
+/** Values from the provider's own config that new threads inherit, for showing what "no override" means. */
+export async function loadConfigDefaults(p: ProviderId) {
   try {
-    const res = (await rpc.request("config/read", {})) as { config?: Record<string, unknown> };
+    const res = (await clients[p].request("config/read", {})) as { config?: Record<string, unknown> };
     const c = res.config ?? {};
-    useConn.setState({
+    patchProvider(p, {
       defaults: {
         model: typeof c.model === "string" ? c.model : null,
         effort: typeof c.model_reasoning_effort === "string" ? c.model_reasoning_effort : null,
@@ -165,62 +200,149 @@ export async function loadConfigDefaults() {
       },
     });
   } catch (err) {
-    console.warn("config/read failed", err);
+    console.warn(`${p}: config/read failed`, err);
   }
 }
 
-export async function loadModels() {
+export async function loadModels(p: ProviderId) {
   try {
-    const res = await rpc.request("model/list", { limit: 100 });
-    useConn.setState({ models: res.data.filter((m) => !m.hidden) });
+    const res = await clients[p].request("model/list", { limit: 100 });
+    patchProvider(p, { models: res.data.filter((m) => !m.hidden) });
   } catch (err) {
-    console.warn("model/list failed", err);
+    console.warn(`${p}: model/list failed`, err);
   }
   try {
-    const res = (await rpc.request("collaborationMode/list", {})) as { data: ReturnType<typeof useConn.getState>["modes"] };
-    useConn.setState({ modes: res.data });
+    const res = (await clients[p].request("collaborationMode/list", {})) as { data: ProviderConn["modes"] };
+    patchProvider(p, { modes: res.data });
   } catch {
-    /* an older codex without collaboration modes */
+    /* an engine without collaboration modes */
   }
 }
 
-async function startLoginImpl(kind: "browser" | "device" = "browser") {
-  const res = await rpc.request("account/login/start", kind === "browser" ? { type: "chatgpt" } : { type: "chatgptDeviceCode" });
+/**
+ * Sign in. Codex signs in inside Ret (ChatGPT in the browser, or a device code); other
+ * providers sign in with their own CLI in a terminal, and Ret watches for it to finish.
+ */
+async function startLoginImpl(p: ProviderId, kind: "browser" | "device" = "browser") {
+  if (!PROVIDERS[p].inAppLogin) {
+    await bridge.agents.openLogin(p);
+    patchProvider(p, { login: { loginId: "terminal", kind: "terminal" } });
+    void watchTerminalLogin(p);
+    return;
+  }
+  const res = await clients[p].request("account/login/start", kind === "browser" ? { type: "chatgpt" } : { type: "chatgptDeviceCode" });
   if (res.type === "chatgpt") {
-    useConn.setState({ login: { loginId: res.loginId, kind, authUrl: res.authUrl } });
+    patchProvider(p, { login: { loginId: res.loginId, kind, authUrl: res.authUrl } });
     await bridge.shell.openExternal(res.authUrl);
   } else if (res.type === "chatgptDeviceCode") {
-    useConn.setState({
-      login: { loginId: res.loginId, kind, verificationUrl: res.verificationUrl, userCode: res.userCode },
-    });
+    patchProvider(p, { login: { loginId: res.loginId, kind, verificationUrl: res.verificationUrl, userCode: res.userCode } });
     await bridge.shell.openExternal(res.verificationUrl);
   }
 }
 
-export async function cancelLogin() {
-  const login = useConn.getState().login;
-  useConn.setState({ login: null });
-  if (login) await rpc.request("account/login/cancel", { loginId: login.loginId }).catch(() => {});
+/** Poll until the provider's CLI reports a sign-in (or the flow is cancelled, or it gives up). */
+async function watchTerminalLogin(p: ProviderId) {
+  const until = Date.now() + 5 * 60_000;
+  while (Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 3000));
+    if (useConn.getState().providers[p].login?.kind !== "terminal") return;
+    await loadAccount(p);
+    if (signedIn(useConn.getState().providers[p])) {
+      patchProvider(p, { login: null });
+      void loadModels(p);
+      void loadRateLimits(p);
+      return;
+    }
+  }
+  patchProvider(p, (c) => ({
+    login: c.login?.kind === "terminal" ? { ...c.login, error: "Still not signed in. Finish in the terminal, then check again." } : c.login,
+  }));
 }
 
-async function logoutImpl() {
-  await rpc.request("account/logout", undefined as never);
-  await loadAccount();
+export async function cancelLogin(p: ProviderId) {
+  const login = useConn.getState().providers[p].login;
+  patchProvider(p, { login: null });
+  if (login && login.kind !== "terminal") await clients[p].request("account/login/cancel", { loginId: login.loginId }).catch(() => {});
+}
+
+async function logoutImpl(p: ProviderId) {
+  await clients[p].request("account/logout", undefined as never);
+  await loadAccount(p);
 }
 
 // ---------------------------------------------------------------------------
 // Thread list & history
 // ---------------------------------------------------------------------------
 
-let listing: Promise<void> | null = null;
-export function loadThreadList(): Promise<void> {
-  if (listing) return listing;
-  listing = (async () => {
+const listing = new Map<ProviderId, Promise<void>>();
+/** Providers whose thread list has loaded (or failed) at least once: their threads' owners are known. */
+const listed = new Set<ProviderId>();
+const ownerWaiters = new Set<() => void>();
+useThreads.subscribe((s, prev) => {
+  if (s.owner !== prev.owner) for (const w of [...ownerWaiters]) w();
+});
+
+/**
+ * The provider a thread lives in. A thread restored from the last session (a tab, a canvas window)
+ * can ask before the thread lists say who owns it; then this waits for them rather than guessing.
+ */
+export async function ownerFor(threadId: string): Promise<ProviderId> {
+  const known = () => useThreads.getState().owner[threadId];
+  const settled = () => !!known() || enabledProviders().every((p) => listed.has(p));
+  if (!settled()) {
+    await new Promise<void>((resolve) => {
+      const timer = window.setTimeout(done, 30_000);
+      function done() {
+        ownerWaiters.delete(check);
+        clearTimeout(timer);
+        resolve();
+      }
+      function check() {
+        if (settled()) done();
+      }
+      ownerWaiters.add(check);
+    });
+  }
+  return known() ?? "codex";
+}
+/** Refresh the thread list from every enabled provider (or just `only`), and the workspaces that group it. */
+export function loadThreadList(only?: ProviderId): Promise<void> {
+  const ps = only ? [only] : enabledProviders();
+  for (const p of ps) void loadWorkspaces(p);
+  return Promise.all(ps.map(listProvider)).then(() => {});
+}
+
+/**
+ * The engine's named workspaces (the ChatGPT and Codex apps' projects). Their apps run engines
+ * of their own, so a change made there only shows up on the next refresh.
+ */
+async function loadWorkspaces(p: ProviderId) {
+  if (!PROVIDERS[p].workspaces) return;
+  try {
+    const all: Workspace[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 10; page++) {
+      const res: import("@shared/protocol/generated/v2").ProjectListResponse = await clients[p].request("project/list", { cursor, limit: 100 });
+      all.push(...res.data.map((w) => ({ id: w.id, name: w.name, roots: w.roots.map((r) => r.path) })));
+      cursor = res.nextCursor;
+      if (!cursor) break;
+    }
+    const cur = useThreads.getState().workspaces;
+    if (JSON.stringify(cur) !== JSON.stringify(all)) useThreads.setState({ workspaces: all });
+  } catch (err) {
+    console.warn(`${p}: project/list failed`, err);
+  }
+}
+
+function listProvider(p: ProviderId): Promise<void> {
+  const inflight = listing.get(p);
+  if (inflight) return inflight;
+  const run = (async () => {
     const all: Thread[] = [];
     let cursor: string | null = null;
     try {
       for (let page = 0; page < 20; page++) {
-        const res: import("../protocol").ThreadListResponse = await rpc.request("thread/list", {
+        const res: import("@shared/protocol").ThreadListResponse = await clients[p].request("thread/list", {
           limit: 100,
           cursor,
           sortKey: "updated_at",
@@ -229,25 +351,34 @@ export function loadThreadList(): Promise<void> {
         all.push(...res.data);
         cursor = res.nextCursor;
         if (!cursor) break;
-        if (page === 0) upsertThreads(all); // paint the sidebar after the first page
+        if (page === 0) upsertThreads(p, all); // paint the sidebar after the first page
       }
-      // Replace rather than merge so archived/deleted threads disappear.
-      const live = useThreads.getState().threads;
+      // Replace this provider's threads rather than merge, so archived/deleted ones disappear.
+      const st = useThreads.getState();
+      const mine = (id: string) => (st.owner[id] ?? "codex") === p;
       const next: Record<string, Thread> = {};
-      for (const t of all) next[t.id] = mergeThread(live[t.id], { ...t, turns: [] });
+      const owner = { ...st.owner };
+      for (const [id, t] of Object.entries(st.threads)) if (!mine(id)) next[id] = t;
+      for (const t of all) {
+        next[t.id] = mergeThread(st.threads[t.id], { ...t, turns: [] });
+        owner[t.id] = p;
+      }
       // Keep threads we know about that the list doesn't return (ephemeral forks, brand-new threads).
-      for (const [id, t] of Object.entries(live)) if (!next[id] && (t.ephemeral || Date.now() / 1000 - t.createdAt < 120)) next[id] = t;
-      useThreads.setState({ threads: next, listLoaded: true });
+      for (const [id, t] of Object.entries(st.threads)) if (!next[id] && mine(id) && (t.ephemeral || Date.now() / 1000 - t.createdAt < 120)) next[id] = t;
+      useThreads.setState({ threads: next, owner, listLoaded: true });
       // The list leaves out fork lineage; fill it in so forks nest and link to their parents.
       void backfillLineage(all.map((t) => t.id));
     } catch (err) {
-      console.error("thread/list failed", err);
+      console.error(`${p}: thread/list failed`, err);
       useThreads.setState({ listLoaded: true });
     } finally {
-      listing = null;
+      listing.delete(p);
+      listed.add(p);
+      for (const w of [...ownerWaiters]) w();
     }
   })();
-  return listing;
+  listing.set(p, run);
+  return run;
 }
 
 const HISTORY_PAGE = 12;
@@ -258,16 +389,17 @@ export async function hydrateThread(threadId: string) {
   if (lt?.hydrated || lt?.hydrating) return;
   patchLive(threadId, { hydrating: true, error: null });
   try {
-    const res = await rpc.request("thread/turns/list", {
+    const res = await rpcFor(await ownerFor(threadId)).request("thread/turns/list", {
       threadId,
       limit: HISTORY_PAGE,
       sortDirection: "desc",
       itemsView: "full",
     });
     mergeTurns(threadId, res.data, res.nextCursor, "replace");
-    const thread = useThreads.getState().threads[threadId];
-    // Running somewhere (another client, or before an app-server restart)? Subscribe for live events.
-    if (thread?.status.type === "active") void ensureSubscribed(threadId);
+    // Resume it in its engine: that's what reports the thread's own settings (model, effort, speed,
+    // access, Plan) for the composer, and subscribes to live events if it's running here. Not while
+    // another app is running it: watching it is all Ret does then.
+    if (!useThreads.getState().external[threadId]) void ensureSubscribed(threadId).catch(() => {});
   } catch (err) {
     patchLive(threadId, { hydrating: false, error: (err as Error).message });
   }
@@ -278,7 +410,7 @@ export async function loadOlder(threadId: string) {
   if (!lt?.olderCursor || lt.loadingOlder) return;
   patchLive(threadId, { loadingOlder: true });
   try {
-    const res = await rpc.request("thread/turns/list", {
+    const res = await rpcFor(await ownerFor(threadId)).request("thread/turns/list", {
       threadId,
       cursor: lt.olderCursor,
       limit: HISTORY_PAGE,
@@ -299,7 +431,7 @@ export async function loadOlder(threadId: string) {
  */
 export function mergeTurns(
   threadId: string,
-  turnsDesc: import("../protocol").Turn[],
+  turnsDesc: import("@shared/protocol").Turn[],
   cursor: string | null,
   mode: "replace" | "prepend" | "tail",
 ) {
@@ -363,8 +495,9 @@ export function ensureSubscribed(threadId: string): Promise<void> {
   const existing = resuming.get(threadId);
   if (existing) return existing;
   const p = (async () => {
-    const res = await rpc.request("thread/resume", { threadId, excludeTurns: true });
-    upsertThreads([res.thread]);
+    const p = await ownerFor(threadId);
+    const res = await rpcFor(p).request("thread/resume", { threadId, excludeTurns: true });
+    upsertThreads(p, [res.thread]);
     patchLive(threadId, {
       subscribed: true,
       settings: settingsFrom(res),
@@ -378,27 +511,6 @@ export function ensureSubscribed(threadId: string): Promise<void> {
 // ---------------------------------------------------------------------------
 // Turns
 // ---------------------------------------------------------------------------
-
-function accessOverrides(preset: AccessPreset): {
-  approvalPolicy?: AskForApproval;
-  sandbox?: SandboxMode;
-  sandboxPolicy?: SandboxPolicy;
-} {
-  switch (preset) {
-    case "read-only":
-      return { approvalPolicy: "on-request", sandbox: "read-only", sandboxPolicy: { type: "readOnly", networkAccess: false } };
-    case "auto":
-      return {
-        approvalPolicy: "on-request",
-        sandbox: "workspace-write",
-        sandboxPolicy: { type: "workspaceWrite", writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
-      };
-    case "full":
-      return { approvalPolicy: "never", sandbox: "danger-full-access", sandboxPolicy: { type: "dangerFullAccess" } };
-    default:
-      return {};
-  }
-}
 
 export interface Attachment {
   path: string;
@@ -441,7 +553,8 @@ function clearOptimistic(threadId: string, clientId: string) {
 export interface TurnOverrides {
   model?: string | null;
   effort?: string | null;
-  access?: AccessPreset;
+  /** One of the provider's access options (see agents.ts). Undefined keeps the thread's. */
+  access?: string;
   /** Service tier id: "default" (standard), "priority" (Fast), "ultrafast". Undefined keeps the thread's. */
   speed?: string;
   /** Collaboration mode: "plan" thinks it through, asks questions, and proposes a plan first. Undefined keeps the thread's. */
@@ -452,9 +565,9 @@ export interface TurnOverrides {
  * The collaboration mode to send with a turn. A mode carries its own model and effort (and wins
  * over the turn's), so it gets the ones you picked, or the mode's suggestions, or the thread's.
  */
-function collaborationFor(threadId: string, prefs: TurnOverrides) {
+function collaborationFor(threadId: string, provider: ProviderId, prefs: TurnOverrides) {
   if (!prefs.mode) return undefined;
-  const conn = useConn.getState();
+  const conn = useConn.getState().providers[provider];
   const preset = conn.modes.find((m) => m.mode === prefs.mode);
   const live = useThreads.getState().live[threadId]?.settings;
   const model =
@@ -480,7 +593,6 @@ export async function sendMessage(
   how: "auto" | "steer" | "queue" = "auto",
 ): Promise<string> {
   const ui = useUI.getState();
-  const access = accessOverrides(prefs.access ?? "config");
   const input = buildInput(text, attachments);
   if (!input.length) return target;
 
@@ -497,18 +609,20 @@ export async function sendMessage(
   }
 
   let threadId = target;
+  const provider = isDraft(target) ? draftProvider(target) : await ownerFor(target);
+  const agent = PROVIDERS[provider];
+  const access = prefs.access ? accessFor(provider, prefs.access) : undefined;
   if (isDraft(target)) {
     const draft = ui.drafts[target];
     if (!draft) throw new Error("Draft no longer exists");
-    const res = await rpc.request("thread/start", {
+    const res = await rpcFor(provider).request("thread/start", {
       cwd: draft.cwd,
       model: prefs.model ?? null,
       ...(prefs.speed ? { serviceTier: prefs.speed } : {}),
-      approvalPolicy: access.approvalPolicy,
-      sandbox: access.sandbox,
+      ...agent.threadAccess(access ?? "config"),
     });
     threadId = res.thread.id;
-    upsertThreads([res.thread]);
+    upsertThreads(provider, [res.thread]);
     useThreads.setState((s) => ({
       live: {
         ...s.live,
@@ -533,22 +647,22 @@ export async function sendMessage(
   const clientId = crypto.randomUUID();
   addOptimistic(threadId, clientId, input);
   try {
+    const collaboration = collaborationFor(threadId, provider, prefs);
     const start = () =>
-      rpc.request("turn/start", {
+      rpcFor(provider).request("turn/start", {
         threadId,
         input,
         clientUserMessageId: clientId,
         model: prefs.model ?? null,
         effort: prefs.effort ?? null,
         ...(prefs.speed ? { serviceTier: prefs.speed } : {}),
-        ...(collaborationFor(threadId, prefs) ? { collaborationMode: collaborationFor(threadId, prefs) } : {}),
-        approvalPolicy: access.approvalPolicy,
-        sandboxPolicy: access.sandboxPolicy,
+        ...(collaboration ? { collaborationMode: collaboration } : {}),
+        ...(access ? agent.turnAccess(access) : {}),
       });
     if (lt?.activeTurnId && how === "steer") {
       const expected = lt.activeTurnId;
       try {
-        await rpc.request("turn/steer", { threadId, input, expectedTurnId: expected, clientUserMessageId: clientId });
+        await rpcFor(provider).request("turn/steer", { threadId, input, expectedTurnId: expected, clientUserMessageId: clientId });
       } catch (err) {
         // Sent just as the turn finished: steering has nothing to join, so start a new turn instead.
         flushNow();
@@ -583,7 +697,14 @@ function settingsFrom(res: {
     sandbox: res.sandbox,
     cwd: res.cwd,
     mode: res.collaborationMode?.mode ?? null,
+    access: typeof (res as unknown as { access?: unknown }).access === "string" ? (res as unknown as { access: string }).access : null,
   };
+}
+
+/** The provider a draft will start its thread with. */
+export function draftProvider(draftId: string): ProviderId {
+  const ui = useUI.getState();
+  return pickProvider(enabledProviders(), ui.drafts[draftId]?.provider, ui.lastAgent);
 }
 
 /**
@@ -655,23 +776,23 @@ export function resendUnanswered(threadId: string, item: Extract<ThreadItem, { t
 export async function interrupt(threadId: string) {
   const lt = useThreads.getState().live[threadId];
   if (!lt?.activeTurnId) return;
-  await rpc.request("turn/interrupt", { threadId, turnId: lt.activeTurnId }).catch((err) => patchLive(threadId, { error: err.message }));
+  await rpcFor(ownerOf(threadId)).request("turn/interrupt", { threadId, turnId: lt.activeTurnId }).catch((err) => patchLive(threadId, { error: err.message }));
 }
 
 export function respondToRequest(key: string, result: unknown) {
   const req = useThreads.getState().requests[key];
   if (!req) return;
-  rpc.respond(req.id, result);
+  clients[req.provider].respond(req.id, result);
   removePendingRequest(key);
 }
 
 async function renameThreadImpl(threadId: string, name: string) {
-  await rpc.request("thread/name/set", { threadId, name });
+  await rpcFor(ownerOf(threadId)).request("thread/name/set", { threadId, name });
   useThreads.setState((s) => (s.threads[threadId] ? { threads: { ...s.threads, [threadId]: { ...s.threads[threadId], name } } } : s));
 }
 
 async function archiveThreadImpl(threadId: string) {
-  await rpc.request("thread/archive", { threadId });
+  await rpcFor(ownerOf(threadId)).request("thread/archive", { threadId });
   closeEverywhere(threadId);
   useThreads.setState((s) => {
     const threads = { ...s.threads };
@@ -682,7 +803,7 @@ async function archiveThreadImpl(threadId: string) {
 
 async function compactThreadImpl(threadId: string) {
   await ensureSubscribed(threadId);
-  await rpc.request("thread/compact/start", { threadId });
+  await rpcFor(ownerOf(threadId)).request("thread/compact/start", { threadId });
 }
 
 // ---------------------------------------------------------------------------
@@ -699,16 +820,17 @@ export interface ForkOptions {
 }
 
 async function forkThreadImpl(threadId: string, opts: ForkOptions = {}): Promise<string> {
-  const source = useThreads.getState().threads[threadId];
+  const { threads, workspaces } = useThreads.getState();
+  const source = threads[threadId];
   if (!source) throw new Error("Unknown thread");
   const ui = useUI.getState();
-  const confKeys = explicitKeys(ui.projects);
-  const projectKey = projectKeyFor(source, useThreads.getState().threads, confKeys, ui.threadProject);
+  const projectKey = projectKeyFor(source, threads, projectIndex(ui.projects, workspaces), ui.threadProject);
 
   const worktree = opts.worktree ? await bridge.git.createWorktree(source.cwd, threadTitle(source)) : undefined;
   const cwd = worktree?.path;
 
-  const res = await rpc.request("thread/fork", {
+  const provider = ownerOf(threadId);
+  const res = await rpcFor(provider).request("thread/fork", {
     threadId,
     lastTurnId: opts.atTurnId ?? null,
     cwd: cwd ?? null,
@@ -716,7 +838,7 @@ async function forkThreadImpl(threadId: string, opts: ForkOptions = {}): Promise
   });
   const fork = res.thread;
   lineageKnown(fork.id);
-  upsertThreads([fork]);
+  upsertThreads(provider, [fork]);
   useThreads.setState((s) => ({
     live: { ...s.live, [fork.id]: { ...emptyLive(), subscribed: true, settings: settingsFrom(res) } },
   }));
@@ -751,24 +873,31 @@ export function newThreadNear(fromThreadId: string | null) {
   const ui = useUI.getState();
   if (fromThreadId && isDraft(fromThreadId)) {
     const d = ui.drafts[fromThreadId];
-    if (d) newThread(d.projectKey, d.cwd);
+    if (d) newThread(d.projectKey, d.cwd, { provider: d.provider });
     return;
   }
-  const t = fromThreadId ? useThreads.getState().threads[fromThreadId] : undefined;
+  const { threads, workspaces } = useThreads.getState();
+  const t = fromThreadId ? threads[fromThreadId] : undefined;
   if (!t) {
     useUI.setState({ paletteOpen: true });
     return;
   }
-  const confKeys = explicitKeys(ui.projects);
-  const key = projectKeyFor(t, useThreads.getState().threads, confKeys, ui.threadProject);
-  newThread(key, ui.projects[key]?.path ?? t.cwd);
+  const key = projectKeyFor(t, threads, projectIndex(ui.projects, workspaces), ui.threadProject);
+  newThread(key, ui.projects[key]?.path ?? t.cwd, { provider: ownerOf(t.id) });
 }
 
-export function newThread(projectKey: string, cwd: string, opts: OpenOptions = {}) {
+/** A new, not-yet-started thread. Its provider defaults to Settings' choice; the composer can change it. */
+export function newThread(projectKey: string, cwd: string, opts: OpenOptions & { provider?: ProviderId } = {}) {
   const id = `draft:${newId()}`;
-  useUI.setState((s) => ({ drafts: { ...s.drafts, [id]: { cwd, projectKey, createdAt: Date.now() } } }));
+  const provider = opts.provider;
+  useUI.setState((s) => ({ drafts: { ...s.drafts, [id]: { cwd, projectKey, createdAt: Date.now(), ...(provider ? { provider } : {}) } } }));
   openThread(id, opts);
   return id;
+}
+
+/** Switch a draft to another provider (before its first message). */
+export function setDraftProvider(draftId: string, provider: ProviderId) {
+  useUI.setState((s) => (s.drafts[draftId] ? { drafts: { ...s.drafts, [draftId]: { ...s.drafts[draftId], provider } } } : s));
 }
 
 /** Point a not-yet-started thread at a different project folder. */
@@ -1102,7 +1231,7 @@ useThreads.subscribe((s, prev) => {
         const lt = st.live[id];
         const busy = lt?.activeTurnId || Object.values(st.requests).some((r) => r.threadId === id);
         if (st.visible[id] || !lt || busy) return;
-        if (lt.subscribed) void rpc.request("thread/unsubscribe", { threadId: id }).catch(() => {});
+        if (lt.subscribed) void rpcFor(ownerOf(id)).request("thread/unsubscribe", { threadId: id }).catch(() => {});
         // Drop the cached transcript too; reopening re-fetches it in one page.
         useThreads.setState((cur) => {
           if (cur.visible[id] || !cur.live[id]) return cur;

@@ -811,11 +811,58 @@ body.resizing .transcript {
 }
 
 .sidebar-foot {
+  position: relative;
   border-top: 1px solid var(--line);
   padding: 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+/* Plan usage: hidden until the footer is hovered (or focused), then it slides up over the list. */
+.usage-pop {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 100%;
+  z-index: 5;
+  /* The gap above the footer is part of the popover, so moving up onto it keeps it open. */
+  padding-bottom: 6px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  transition:
+    opacity 0.16s var(--ease) 0.12s,
+    transform 0.16s var(--ease) 0.12s,
+    visibility 0s linear 0.28s;
+}
+.sidebar-foot:hover .usage-pop,
+.sidebar-foot:focus-within .usage-pop {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition:
+    opacity 0.16s var(--ease) 0.06s,
+    transform 0.16s var(--ease) 0.06s,
+    visibility 0s linear 0.06s;
+}
+.usage-pop:has(.usage-pop-panel:empty) {
+  display: none;
+}
+.usage-pop-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow-lg);
+}
+.usage-low {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .usage {
   display: flex;
@@ -875,6 +922,26 @@ body.resizing .transcript {
   color: var(--text-3);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+.account-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.account-line .plan {
+  flex: none;
+}
+.account-provider {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.engine-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  min-width: 0;
 }
 .codex-badge {
   display: flex;
@@ -1186,6 +1253,7 @@ body.resizing .transcript {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  align-items: flex-start;
   gap: 6px;
   margin-bottom: 6px;
 }
@@ -1213,8 +1281,13 @@ body.resizing .transcript {
   max-height: 180px;
   object-fit: contain;
 }
+/* The width cap sits on the frame: a percentage in the img's own max-width is ignored when the
+   frame sizes itself to the image, leaving the frame wider than the picture. */
+.user-images.single .thread-img.md {
+  max-width: 360px;
+}
 .user-images.single .thread-img.md img {
-  max-width: min(360px, 100%);
+  max-width: 100%;
   max-height: 300px;
 }
 .thread-img.sm {
@@ -3463,6 +3536,29 @@ body.resizing .transcript {
   white-space: nowrap;
   max-width: 420px;
 }
+.hidden-email {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  text-align: left;
+}
+.hidden-email > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hidden-email > .masked {
+  color: var(--text-3);
+  letter-spacing: 0.04em;
+}
+.hidden-email > svg {
+  flex: none;
+  color: var(--text-3);
+}
+.hidden-email:hover > svg {
+  color: var(--text);
+}
 .shortcuts {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3493,6 +3589,22 @@ body.resizing .transcript {
 }
 .login p {
   margin: 0 0 12px;
+}
+.login-provider {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.login-provider + .login-provider {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+  margin-top: 6px;
+}
+.login-provider h3 {
+  margin: 0;
+  font-size: 14px;
 }
 .login-pending {
   display: flex;
@@ -3761,6 +3873,18 @@ body.resizing .transcript {
     opacity: 0;
     transform: scale(0.97) translateY(3px);
   }
+}
+.sel-group {
+  padding: 8px 8px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.sel-group:not(:first-child) {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
 }
 .sel-opt {
   display: flex;
@@ -4688,6 +4812,14 @@ body.resizing .sidebar-layer {
     background 0.22s var(--ease) 0.3s,
     box-shadow 0.22s var(--ease) 0.3s;
 }
+/* A margin above and below that still counts as the rail, so overshooting an end while sweeping
+   doesn't drop the hover (it picks the end tick). Behind the ticks, so it never takes their clicks. */
+.turn-rail::before {
+  content: "";
+  position: absolute;
+  inset: -18px 0;
+  z-index: -1;
+}
 .turn-rail:hover,
 .turn-rail:focus-within {
   background: color-mix(in srgb, var(--bg-1) 86%, transparent);
@@ -4713,6 +4845,10 @@ body.resizing .sidebar-layer {
   transition:
     transform 0.09s ease-out,
     height 0.09s ease-out;
+}
+/* While the pointer sweeps the rail, ticks sit exactly where the fisheye puts them. */
+.turn-rail[data-tracking] .rail-tick {
+  transition: none;
 }
 .rail-tick > span {
   display: block;

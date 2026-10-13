@@ -5,7 +5,8 @@
       "name": "ret-web",
       "runtimeExecutable": "node",
       "runtimeArgs": ["scripts/dev-web.mjs"],
-      "port": 5199
+      "port": 5199,
+      "autoPort": true
     }
   ]
 }

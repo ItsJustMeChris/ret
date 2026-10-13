@@ -9,7 +9,8 @@ import { useConn } from "../state/conn";
 import { threadTitle } from "../state/projects";
 import { plainText, timeAgo } from "../lib/format";
 import { STATE_LABEL, useRunsElsewhere, useThreadState } from "./StatusDot";
-import type { CodexStatus, UpdaterState } from "../../shared/bridge";
+import type { EngineStatus, ProviderId, UpdaterState } from "../../shared/bridge";
+import { PROVIDERS } from "../agents";
 
 const DELAY = 500;
 /** After a card closes, moving onto another card target within this window shows it at once. */
@@ -21,14 +22,14 @@ export const CARD_TARGETS = "[data-card], a[href], [data-path], .md code";
 
 type Card =
   | { kind: "thread"; id: string; forks: number }
-  | { kind: "codex" }
+  | { kind: "engine"; provider: ProviderId }
   | { kind: "url"; href: string; note: string | null }
   | { kind: "file"; path: string; line?: number; col?: number; cwd: string | null; clickable: boolean };
 
 /** What card, if any, an element under the pointer should show. */
 function classify(el: HTMLElement): Card | null {
   if (el.dataset.card === "thread" && el.dataset.id) return { kind: "thread", id: el.dataset.id, forks: Number(el.dataset.forks) || 0 };
-  if (el.dataset.card === "codex") return { kind: "codex" };
+  if (el.dataset.card === "engine") return { kind: "engine", provider: (el.dataset.provider as ProviderId) ?? "codex" };
   const cwd = el.closest("[data-cwd]")?.getAttribute("data-cwd") ?? null;
   if (el.dataset.path) {
     const n = (v?: string) => Number(v) || undefined;
@@ -131,8 +132,8 @@ export function HoverCardHost() {
   const body =
     c.kind === "thread" ? (
       <ThreadCard id={c.id} forks={c.forks} />
-    ) : c.kind === "codex" ? (
-      <CodexCard />
+    ) : c.kind === "engine" ? (
+      <EngineCard provider={c.provider} />
     ) : c.kind === "url" ? (
       <UrlCard href={c.href} note={c.note} />
     ) : (
@@ -292,6 +293,7 @@ function FileCard({ path, line, col, cwd, clickable }: { path: string; line?: nu
 
 const ORIGINATORS: Record<string, string> = {
   ret: "Ret",
+  claude_code: "Claude Code",
   "Codex Desktop": "Codex app",
   codex_work_desktop: "Codex app",
   "codex-tui": "Codex CLI",
@@ -324,12 +326,13 @@ function ThreadCard({ id, forks }: { id: string; forks: number }) {
   const t = useThreads((s) => s.threads[id]);
   const state = useThreadState(id);
   const elsewhere = useRunsElsewhere(id);
+  const owner = useThreads((s) => s.owner[id] ?? "codex");
   if (!t) return null;
 
   // An unnamed thread's title is just its first message, so the message alone leads.
   const named = !!t.name?.trim();
   const preview = previewText(t.preview ?? "");
-  const status = elsewhere ? "Running in another Codex app" : state === "idle" ? null : STATE_LABEL[state];
+  const status = elsewhere ? `Running in another ${PROVIDERS[owner].name} app` : state === "idle" ? null : STATE_LABEL[state];
   const origin = originLabel(t.originator, t.source);
   const branch = t.gitInfo?.branch;
   const meta = [status, `Updated ${timeAgo(t.updatedAt) === "now" ? "just now" : `${timeAgo(t.updatedAt)} ago`}`, origin].filter(Boolean);
@@ -364,17 +367,30 @@ function ThreadCard({ id, forks }: { id: string; forks: number }) {
 }
 
 // ---------------------------------------------------------------------------
-// Codex card
+// Engine card (one per provider)
 // ---------------------------------------------------------------------------
 
 type Tone = "ok" | "info" | "warn" | "bad" | "muted";
 
-/** One status for the badge and its card, most urgent first. */
-export function codexStatus(codex: CodexStatus, up: UpdaterState | null): { label: string; tone: Tone; short: string | null } {
+/**
+ * One status for a provider's badge and its card, most urgent first. Only Codex has a
+ * Ret-managed copy, so `up` (its updater) is null for the others.
+ */
+export function engineStatus(codex: EngineStatus, up: UpdaterState | null): { label: string; tone: Tone; short: string | null } {
+  if (codex.state === "disabled") return { label: "Off", tone: "muted", short: "off" };
   if (codex.state === "missing") return { label: "Not found", tone: "bad", short: "not found" };
   if (codex.state === "error") return { label: "Error", tone: "bad", short: "error" };
   if (codex.state === "starting") return { label: "Starting…", tone: "muted", short: null };
   if (codex.state === "stopped") return { label: "Stopped", tone: "warn", short: "stopped" };
+  const u = up ? null : codex.update;
+  if (u) {
+    // A provider updated through its own updater (Claude Code), rather than Codex's managed copy.
+    if (u.phase === "updating") return { label: "Updating…", tone: "info", short: "updating" };
+    if (u.phase === "waiting") return { label: "Update waiting for idle", tone: "info", short: "update ready" };
+    if (u.phase === "error") return { label: "Update failed", tone: "warn", short: "update failed" };
+    if (u.latest && codex.version && isNewer(u.latest, codex.version)) return { label: "Update available", tone: "warn", short: "update available" };
+    if (u.checkedAt) return { label: "Up to date", tone: "ok", short: null };
+  }
   if (up?.phase === "downloading") {
     const pct = up.progress != null ? `${Math.round(up.progress * 100)}%` : "";
     return { label: `Downloading ${pct}`.trim(), tone: "info", short: pct || "updating" };
@@ -420,25 +436,29 @@ function displayPath(p: string, max = 84): string {
   return `${head}${sep}…${sep}${tail}`;
 }
 
-function CodexCard() {
-  const codex = useConn((s) => s.codex);
-  const up = useConn((s) => s.updater);
+function EngineCard({ provider }: { provider: ProviderId }) {
+  const codex = useConn((s) => s.providers[provider].status);
+  const updater = useConn((s) => s.updater);
+  const up = provider === "codex" ? updater : null;
   if (!codex) return null;
-  const st = codexStatus(codex, up);
+  const st = engineStatus(codex, up);
   const local = !!codex.binaryPath && !/^wss?:/.test(codex.binaryPath);
   const rows: [string, ReactNode][] = [];
   if (codex.source) rows.push(["Source", SOURCE[codex.source] ?? codex.source]);
-  rows.push(["Engine", codex.engine === "shared" ? "Shared Codex daemon" : "Ret's own app-server"]);
+  if (provider === "codex") rows.push(["Engine", codex.engine === "shared" ? "Shared Codex daemon" : "Ret's own app-server"]);
   if (codex.binaryPath) rows.push([local ? "Location" : "Connection", <span className="mono hc-path">{displayPath(codex.binaryPath)}</span>]);
   if (up?.staged) rows.push(["Next", <span><span className="mono">{up.staged}</span> installs when Ret is idle</span>]);
   else if (st.label === "Update available") rows.push(["Latest", <span className="mono">{up!.latest}</span>]);
   if (up?.lastCheckedAt) rows.push(["Checked", timeAgo(up.lastCheckedAt / 1000) === "now" ? "just now" : `${timeAgo(up.lastCheckedAt / 1000)} ago`]);
-  const error = codex.error ?? (up?.phase === "error" ? up.error : null);
+  const own = up ? null : codex.update;
+  if (own?.latest && st.label === "Update available") rows.push(["Latest", <span className="mono">{own.latest}</span>]);
+  if (own?.checkedAt) rows.push(["Checked", timeAgo(own.checkedAt / 1000) === "now" ? "just now" : `${timeAgo(own.checkedAt / 1000)} ago`]);
+  const error = codex.error ?? (up?.phase === "error" ? up.error : own?.phase === "error" ? own.error : null);
 
   return (
     <div className="hc-codex">
       <div className="hc-codex-head">
-        <span className="hc-codex-name">Codex</span>
+        <span className="hc-codex-name">{PROVIDERS[provider].name}</span>
         {codex.version && <span className="mono hc-version">{codex.version}</span>}
         <span className={`hc-pill ${st.tone}`}>{st.label}</span>
       </div>
@@ -456,7 +476,7 @@ function CodexCard() {
         ))}
       </dl>
       {error && <div className="hc-error">{error}</div>}
-      <div className="hc-hint">Click for Codex settings</div>
+      <div className="hc-hint">Click for {PROVIDERS[provider].name} settings</div>
     </div>
   );
 }

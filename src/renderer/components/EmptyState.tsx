@@ -9,9 +9,10 @@ import { ThreadTime } from "./ThreadTime";
 
 export function EmptyState() {
   const threads = useThreads((s) => s.threads);
+  const workspaces = useThreads((s) => s.workspaces);
   const projects = useUI((s) => s.projects);
   const threadProject = useUI((s) => s.threadProject);
-  const tree = useMemo(() => buildProjects(threads, projects, threadProject).slice(0, 6), [threads, projects, threadProject]);
+  const tree = useMemo(() => buildProjects(threads, projects, threadProject, workspaces).slice(0, 6), [threads, projects, threadProject, workspaces]);
   const recent = useMemo(
     () =>
       Object.values(threads)
@@ -24,7 +25,7 @@ export function EmptyState() {
     <div className="empty-state">
       <div className="empty-inner">
         <div className="brand-mark">ret</div>
-        <p className="muted">A fast workbench for Codex. Pick up a thread, start one in a project, or lay several out on the canvas.</p>
+        <p className="muted">A fast workbench for coding agents. Pick up a thread, start one in a project, or lay several out on the canvas.</p>
         <div className="empty-actions">
           <button className="btn" onClick={() => useUI.setState({ paletteOpen: true })}>
             <Command size={14} /> Search everything <kbd>Ctrl K</kbd>

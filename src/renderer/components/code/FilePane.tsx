@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { Check, Copy, ExternalLink, FileCode2, FileWarning, FolderOpen, LoaderCircle, Pencil, RotateCw, Save } from "lucide-react";
 import type * as Monaco from "monaco-editor/editor/editor.api.js";
-import { rpc } from "../../rpc/client";
+import { fsClient } from "../../rpc/client";
 import { bridge, isDesktop } from "../../bridge";
 import { copyText, openFileRef, revealLabel } from "../../lib/files";
 import { shortPath } from "../../lib/format";
@@ -24,7 +24,7 @@ async function readText(path: string): Promise<{ text: string } | { binary: true
     if (st.isDir) throw new Error("That's a folder");
     if (st.size && st.size > MAX_BYTES) return { large: st.size };
   }
-  const res = (await rpc.request("fs/readFile", { path })) as { dataBase64: string };
+  const res = (await fsClient().request("fs/readFile", { path })) as { dataBase64: string };
   const raw = atob(res.dataBase64);
   if (raw.length > MAX_BYTES) return { large: raw.length };
   const bytes = new Uint8Array(raw.length);
@@ -37,7 +37,7 @@ async function writeText(path: string, text: string) {
   const bytes = new TextEncoder().encode(text);
   let bin = "";
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  await rpc.request("fs/writeFile", { path, dataBase64: btoa(bin) });
+  await fsClient().request("fs/writeFile", { path, dataBase64: btoa(bin) });
 }
 
 const fmtSize = (n: number) => (n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`);
@@ -94,7 +94,8 @@ export const FilePane = memo(function FilePane({ id, chrome, focused, onHeaderPo
   const [confirmReload, setConfirmReload] = useState(false);
   /** The file changed on disk while you had unsaved edits: its new text, waiting on your call. */
   const [external, setExternal] = useState<string | null>(null);
-  const generation = useConn((s) => s.codex?.generation);
+  // Re-arm the watch whenever an engine reconnects (file access goes through whichever is up).
+  const generation = useConn((s) => Object.values(s.providers).map((c) => c.status?.generation ?? 0).join(":"));
   const flash = useRef<Monaco.editor.IEditorDecorationsCollection | null>(null);
   const dirty = useFiles((s) => !!s.dirty[id]);
   const target = useFiles((s) => s.targets[id]);

@@ -37,6 +37,7 @@ export class AppServer {
   private target: LaunchTarget | null = null;
 
   status: CodexStatus = {
+    provider: "codex",
     state: "stopped",
     generation: 0,
     version: null,
@@ -64,6 +65,13 @@ export class AppServer {
 
   setMissing(error: string) {
     this.setStatus({ state: "missing", error, binaryPath: null, version: null, source: null });
+  }
+
+  /** Turned off in Settings: stop the process and stay down. */
+  async disable() {
+    this.target = null;
+    await this.stop();
+    this.setStatus({ state: "disabled", error: null, binaryPath: null, version: null, source: null });
   }
 
   start(target: LaunchTarget) {

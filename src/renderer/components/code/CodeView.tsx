@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { ChevronRight, File as FileIcon, FileCode2, Folder, FolderOpen, MessageSquarePlus, RefreshCw, X } from "lucide-react";
-import { rpc } from "../../rpc/client";
+import { fsClient } from "../../rpc/client";
 import { useThreads } from "../../state/threads";
 import { useUI, filePath, isDraft, isFile } from "../../state/ui";
 import { useFiles } from "../../state/files";
-import { buildProjects, explicitKeys, projectKeyFor, recencyOf, threadTitle } from "../../state/projects";
+import { buildProjects, projectIndex, projectKeyFor, recencyOf, threadTitle } from "../../state/projects";
 import { closeCodeTab, newThread, openFile } from "../../state/actions";
 import { timeAgo } from "../../lib/format";
 import { ThreadPane } from "../thread/ThreadPane";
@@ -24,7 +24,7 @@ const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCas
 
 /**
  * Code mode: the project's files on the left, open files in the middle (Monaco), and one of the
- * project's threads on the right to talk to. Files Codex touches in that thread are marked in the
+ * project's threads on the right to talk to. Files the agent touches in that thread are marked in the
  * tree, and open files reload as it edits them.
  */
 export function CodeView() {
@@ -33,6 +33,7 @@ export function CodeView() {
   const threadProject = useUI((s) => s.threadProject);
   const drafts = useUI((s) => s.drafts);
   const threads = useThreads((s) => s.threads);
+  const workspaces = useThreads((s) => s.workspaces);
 
   // Coming in with nothing to talk to: pick up where Focus mode was, else the latest thread.
   useEffect(() => {
@@ -44,7 +45,7 @@ export function CodeView() {
     if (chat && chat !== ui.code.chat) useUI.setState((s) => ({ code: { ...s.code, chat } }));
   }, [threads]);
 
-  const list = useMemo(() => buildProjects(threads, projects, threadProject), [threads, projects, threadProject]);
+  const list = useMemo(() => buildProjects(threads, projects, threadProject, workspaces), [threads, projects, threadProject, workspaces]);
 
   // The project shown: picked explicitly, else the chat thread's.
   const project = useMemo(() => {
@@ -57,9 +58,9 @@ export function CodeView() {
     }
     const t = threads[chat];
     if (!t) return null;
-    const key = projectKeyFor(t, threads, explicitKeys(projects), threadProject);
+    const key = projectKeyFor(t, threads, projectIndex(projects, workspaces), threadProject);
     return list.find((p) => p.key === key) ?? null;
-  }, [code.project, code.chat, list, drafts, threads, projects, threadProject]);
+  }, [code.project, code.chat, list, drafts, threads, projects, threadProject, workspaces]);
   const root = project?.path ?? null;
 
   // What the chat thread has changed, for the tree's markers.
@@ -115,7 +116,7 @@ export function CodeView() {
           <div className="code-empty big">
             <FileCode2 size={28} />
             <strong>Open a file from the explorer</strong>
-            <span>…or click one Codex mentions in the chat. Files reload as it edits them.</span>
+            <span>…or click one the agent mentions in the chat. Files reload as it edits them.</span>
           </div>
         )}
       </section>
@@ -225,7 +226,7 @@ function Tree({ root, changed, chat }: { root: string; changed: Map<string, Chan
   const read = async (dir: string) => {
     setDirs((d) => ({ ...d, [dir]: d[dir] && d[dir] !== "loading" ? d[dir] : "loading" }));
     try {
-      const res = (await rpc.request("fs/readDirectory", { path: dir })) as { entries: { fileName: string; isDirectory: boolean }[] };
+      const res = (await fsClient().request("fs/readDirectory", { path: dir })) as { entries: { fileName: string; isDirectory: boolean }[] };
       const entries = res.entries
         .map((e) => ({ name: e.fileName, dir: e.isDirectory }))
         .sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }) : a.dir ? -1 : 1));
@@ -242,7 +243,7 @@ function Tree({ root, changed, chat }: { root: string; changed: Map<string, Chan
     for (const dir of Object.keys(useUI.getState().code.expanded)) if (norm(dir).startsWith(norm(root) + "/")) void read(dir);
   }, [root]);
 
-  // Codex added or removed files: refresh the folders they're in.
+  // The agent added or removed files: refresh the folders they're in.
   const changeKey = [...changed.keys()].join("\n");
   useEffect(() => {
     const parents = new Set<string>();

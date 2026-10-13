@@ -41,7 +41,8 @@ export function onFsChanged(params: { watchId: string; changedPaths: string[] })
 
 /** Watch `path`; returns a function that stops watching. Quietly does nothing if watching isn't available. */
 export async function watchPath(path: string, onChange: (paths: string[]) => void): Promise<() => void> {
-  const { rpc } = await import("../rpc/client");
+  const { fsClient } = await import("../rpc/client");
+  const rpc = fsClient();
   const watchId = `ret-${Math.random().toString(36).slice(2, 10)}`;
   watchers.set(watchId, onChange);
   try {

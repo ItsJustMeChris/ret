@@ -18,7 +18,7 @@ import {
   FilePen,
   Layers,
 } from "lucide-react";
-import type { FileUpdateChange, ThreadItem } from "../../protocol";
+import type { FileUpdateChange, ThreadItem } from "@shared/protocol";
 import { useThreads } from "../../state/threads";
 import { changeStats, duration, shortPath, unwrapCommand } from "../../lib/format";
 import { highlight } from "../../lib/markdown";

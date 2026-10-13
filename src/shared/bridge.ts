@@ -1,20 +1,64 @@
 // Contract between the Electron main process and the renderer.
 // The renderer only ever sees `window.ret`, which implements RetBridge.
 
-export type CodexSource = "managed" | "system" | "custom";
+/**
+ * Agent backends Ret can drive. Each one is an *engine* in the main process that speaks the
+ * app-server JSON-RPC protocol (src/shared/protocol) to the renderer: Codex natively, the others
+ * through an adapter that translates their own protocol into it.
+ */
+export type ProviderId = "codex" | "claude";
+export const PROVIDER_IDS: readonly ProviderId[] = ["codex", "claude"];
 
-export interface CodexStatus {
-  state: "starting" | "running" | "stopped" | "error" | "missing";
-  /** Increments every time a fresh app-server process is spawned. The renderer
+export type CodexSource = "managed" | "system" | "custom";
+/** Where an engine's binary comes from. Only Codex has a managed (Ret-installed) copy. */
+export type EngineSource = CodexSource;
+
+export interface EngineStatus {
+  provider: ProviderId;
+  /** "disabled" = turned off in Settings. */
+  state: "starting" | "running" | "stopped" | "error" | "missing" | "disabled";
+  /** Increments every time the engine gets a fresh connection. The renderer
    * re-runs `initialize` and re-subscribes to threads when this changes. */
   generation: number;
   version: string | null;
   binaryPath: string | null;
-  source: CodexSource | null;
+  source: EngineSource | null;
+  /** Codex only: Ret's own app-server, or the shared daemon the Codex desktop app uses. */
   engine: "dedicated" | "shared";
   error: string | null;
   stderrTail: string[];
+  /** Keeping the provider's own install current (Claude Code; Codex has its UpdaterState). */
+  update?: EngineUpdate | null;
 }
+
+export interface EngineUpdate {
+  /** waiting = a newer version is out, held until no thread is running. */
+  phase: "idle" | "checking" | "waiting" | "updating" | "error";
+  latest: string | null;
+  error: string | null;
+  checkedAt: number | null;
+  /** Installs updates on its own (Settings switch). */
+  auto: boolean;
+}
+
+/** @deprecated The Codex engine's status; use EngineStatus. */
+export type CodexStatus = EngineStatus;
+
+/** Which providers are on, and where the ones without a managed copy find their binary. */
+export interface ProvidersSettings {
+  enabled: Record<ProviderId, boolean>;
+  claude: {
+    source: "system" | "custom";
+    customPath: string | null;
+    /** Run Claude Code's own updater when a new version is out (its model list comes from it). */
+    autoUpdate: boolean;
+  };
+}
+
+export type ProvidersSettingsPatch = Partial<Omit<ProvidersSettings, "enabled" | "claude">> & {
+  enabled?: Partial<Record<ProviderId, boolean>>;
+  claude?: Partial<ProvidersSettings["claude"]>;
+};
 
 export interface UpdaterSettings {
   /** managed = Ret downloads and auto-updates its own copy of codex. */
@@ -80,13 +124,22 @@ export interface GitInfo {
 export interface RetBridge {
   platform: string;
   appVersion: string;
-  codex: {
-    send(line: string): void;
-    onMessages(cb: (lines: string[]) => void): () => void;
-    onStatus(cb: (status: CodexStatus) => void): () => void;
-    getStatus(): Promise<CodexStatus>;
-    restart(): Promise<void>;
+  /** One JSON-RPC pipe per provider's engine. */
+  agents: {
+    send(provider: ProviderId, line: string): void;
+    onMessages(cb: (provider: ProviderId, lines: string[]) => void): () => void;
+    onStatus(cb: (status: EngineStatus) => void): () => void;
+    getStatus(provider: ProviderId): Promise<EngineStatus>;
+    restart(provider: ProviderId): Promise<void>;
+    getSettings(): Promise<ProvidersSettings>;
+    onSettings(cb: (settings: ProvidersSettings) => void): () => void;
+    setSettings(patch: ProvidersSettingsPatch): Promise<ProvidersSettings>;
+    /** Opens a terminal running the provider's own sign-in. Ret never sees the credentials. */
+    openLogin(provider: ProviderId): Promise<void>;
+    /** Check for a newer version of the provider and install it (through its own updater). */
+    update(provider: ProviderId): Promise<void>;
   };
+  /** Codex's self-updater (the managed copy of codex). */
   updater: {
     getState(): Promise<UpdaterState>;
     onState(cb: (state: UpdaterState) => void): () => void;
@@ -141,11 +194,16 @@ export interface RetBridge {
 export type EditCommand = "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll" | "replaceMisspelling" | "addToDictionary";
 
 export const IPC = {
-  codexSend: "codex:send",
-  codexMessages: "codex:messages",
-  codexStatus: "codex:status",
-  codexGetStatus: "codex:getStatus",
-  codexRestart: "codex:restart",
+  agentSend: "agent:send",
+  agentMessages: "agent:messages",
+  agentStatus: "agent:status",
+  agentGetStatus: "agent:getStatus",
+  agentRestart: "agent:restart",
+  agentLogin: "agent:login",
+  agentUpdate: "agent:update",
+  providersGet: "providers:get",
+  providersSet: "providers:set",
+  providersState: "providers:state",
   updaterGet: "updater:get",
   updaterState: "updater:state",
   updaterCheck: "updater:check",

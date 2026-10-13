@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { FilePen, Globe, KeyRound, MessageCircleQuestion, ShieldAlert, SquareTerminal } from "lucide-react";
+import { FilePen, Globe, KeyRound, MessageCircleQuestion, ShieldAlert, SquareTerminal, Wrench } from "lucide-react";
 import { useThreads, type PendingRequest } from "../../state/threads";
+import { PROVIDERS } from "../../agents";
 import { respondToRequest } from "../../state/actions";
 import { bridge } from "../../bridge";
 import { Select } from "../ui/Select";
@@ -116,6 +117,31 @@ export function RequestCard({ req, compact }: { req: PendingRequest; compact?: b
         </div>
       );
     }
+    case "item/tool/requestApproval": {
+      // A provider's own tool (fetching a page, an MCP tool…) that it asks before using.
+      const args = p.arguments && typeof p.arguments === "object" ? (p.arguments as Record<string, unknown>) : null;
+      const shown = args ? Object.entries(args).filter(([, v]) => v != null && v !== "") : [];
+      return (
+        <div className="approval">
+          <div className="approval-title">
+            <Wrench size={14} /> {p.title ?? `Use ${p.server ? `${p.server} · ` : ""}${p.tool}?`}
+          </div>
+          {p.description && !compact && <div className="approval-reason">{p.description}</div>}
+          {shown.length > 0 && !compact && (
+            <pre className="approval-cmd">{shown.map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`).join("\n").slice(0, 2000)}</pre>
+          )}
+          {p.reason && !compact && <div className="approval-reason">{p.reason}</div>}
+          <Buttons
+            choices={[
+              { label: "Allow", kind: "primary", onClick: () => send({ decision: "accept" }) },
+              { label: "Always this session", onClick: () => send({ decision: "acceptForSession" }) },
+              { label: "Decline", kind: "ghost", onClick: () => send({ decision: "decline" }) },
+              { label: "Stop turn", kind: "danger", onClick: () => send({ decision: "cancel" }) },
+            ]}
+          />
+        </div>
+      );
+    }
     case "item/tool/requestUserInput":
       return <UserInputCard req={req} />;
     case "mcpServer/elicitation/request":
@@ -151,7 +177,7 @@ export function RequestCard({ req, compact }: { req: PendingRequest; compact?: b
 }
 
 /**
- * Codex stopped to ask (the request_user_input tool, in Plan mode): one or more questions, each
+ * The agent stopped to ask (Codex's request_user_input, Claude Code's AskUserQuestion): one or more questions, each
  * with suggested answers and/or room to write your own. Skipping tells it you'd rather not say.
  * Shown where there's no composer (glance windows); thread panes answer in the QuestionDock.
  */
@@ -166,12 +192,13 @@ function UserInputCard({ req }: { req: PendingRequest }) {
       answers: Object.fromEntries(questions.map((q) => [q.id, { answers: values[q.id]?.trim() ? [values[q.id].trim()] : [] }])),
     });
   const single = questions.length === 1 && !!questions[0].options?.length && !questions[0].isOther;
+  const name = PROVIDERS[req.provider].name;
   return (
     <div className="approval asking">
       <div className="approval-title">
-        <MessageCircleQuestion size={14} /> {questions.length > 1 ? `Codex has ${questions.length} questions` : "Codex has a question"}
+        <MessageCircleQuestion size={14} /> {questions.length > 1 ? `${name} has ${questions.length} questions` : `${name} has a question`}
       </div>
-      {!blocking && <div className="approval-reason">Codex keeps working meanwhile; answer whenever you're ready.</div>}
+      {!blocking && <div className="approval-reason">{name} keeps working meanwhile; answer whenever you're ready.</div>}
       {questions.map((q, n) => (
         <div key={q.id} className="question">
           {q.header && <div className="q-header">{q.header}</div>}
@@ -215,7 +242,7 @@ function UserInputCard({ req }: { req: PendingRequest }) {
             Answer
           </button>
         )}
-        <button className="btn ghost" title="Let Codex carry on without an answer" onClick={() => reply({})}>
+        <button className="btn ghost" title={`Let ${name} carry on without an answer`} onClick={() => reply({})}>
           Skip
         </button>
       </div>

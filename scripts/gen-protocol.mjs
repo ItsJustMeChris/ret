@@ -5,7 +5,7 @@
 import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 
-const out = "src/renderer/protocol/generated";
+const out = "src/shared/protocol/generated";
 const bin = process.env.CODEX_BIN || "codex";
 rmSync(out, { recursive: true, force: true });
 execFileSync(bin, ["app-server", "generate-ts", "--experimental", "--out", out], { stdio: "inherit", shell: process.platform === "win32" });

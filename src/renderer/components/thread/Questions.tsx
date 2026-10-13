@@ -1,5 +1,6 @@
 import { MessageCircleQuestion, Play } from "lucide-react";
-import { useThreads } from "../../state/threads";
+import { ownerOf, useThreads } from "../../state/threads";
+import { PROVIDERS } from "../../agents";
 import { focusComposer, sendFromComposer } from "../../state/composerDrafts";
 import { openQuestionItems, reopenQuestion, useQuestionDismissed } from "./QuestionDock";
 
@@ -16,7 +17,7 @@ function useAnswerable(threadId: string, itemId: string): boolean {
 type Async = { title: string; options: string[] | null };
 
 /**
- * Questions on a Codex message (asked while it keeps working, or at the end of a reply). They're
+ * Questions on an agent's message (asked while it keeps working, or at the end of a reply). They're
  * answered in the dock on top of the composer; here they leave a pointer to it while open, and
  * afterwards a record, unless the message already lists the options itself (it usually does).
  */
@@ -41,7 +42,7 @@ export function ReplyQuestions({ threadId, itemId, text, questions }: { threadId
   return (
     <div className="questions past">
       <div className="questions-head">
-        <MessageCircleQuestion size={13} /> Codex asked
+        <MessageCircleQuestion size={13} /> {PROVIDERS[ownerOf(threadId)].name} asked
       </div>
       {questions.map((q, i) => (
         <div key={i} className="question">
@@ -62,7 +63,7 @@ export function ReplyQuestions({ threadId, itemId, text, questions }: { threadId
 }
 
 /**
- * Under a plan Codex proposed in Plan mode: carry it out (back in Default mode), or keep refining.
+ * Under a plan the agent proposed in Plan mode: carry it out (back in Default mode), or keep refining.
  */
 export function PlanActions({ threadId, itemId }: { threadId: string; itemId: string }) {
   const live = useAnswerable(threadId, itemId);

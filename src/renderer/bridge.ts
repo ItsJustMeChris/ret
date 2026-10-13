@@ -1,4 +1,4 @@
-import type { AppUpdateState, CodexStatus, RetBridge, UpdaterState } from "@shared/bridge";
+import type { AppUpdateState, EngineStatus, ProviderId, ProvidersSettings, RetBridge, UpdaterState } from "@shared/bridge";
 
 declare global {
   interface Window {
@@ -7,48 +7,64 @@ declare global {
 }
 
 /**
- * Browser fallback used by `npm run dev:web`: talks to `codex app-server --listen ws://…`
- * directly. Desktop-only features (folder picker, worktrees, updater) degrade gracefully.
+ * Browser fallback used by `npm run dev:web`: talks to each provider's engine over a WebSocket
+ * the dev server exposes (`codex app-server --listen`, and the Claude engine it hosts).
+ * Desktop-only features (folder picker, worktrees, updater) degrade gracefully.
  */
-function createWebBridge(url: string): RetBridge {
-  const messageSubs = new Set<(lines: string[]) => void>();
-  const statusSubs = new Set<(s: CodexStatus) => void>();
-  let socket: WebSocket | null = null;
-  let queue: string[] = [];
-  let status: CodexStatus = {
-    state: "starting",
-    generation: 0,
-    version: null,
-    binaryPath: url,
-    source: "system",
-    engine: "dedicated",
-    error: null,
-    stderrTail: [],
-  };
-  const setStatus = (patch: Partial<CodexStatus>) => {
-    status = { ...status, ...patch };
-    statusSubs.forEach((cb) => cb(status));
-  };
+function createWebBridge(base: string): RetBridge {
+  const messageSubs = new Set<(provider: ProviderId, lines: string[]) => void>();
+  const statusSubs = new Set<(s: EngineStatus) => void>();
+  const settingsSubs = new Set<(s: ProvidersSettings) => void>();
+  let settings: ProvidersSettings = { enabled: { codex: true, claude: true }, claude: { source: "system", customPath: null, autoUpdate: false } };
 
-  const connect = () => {
-    const ws = new WebSocket(url);
-    socket = ws;
-    ws.onopen = () => {
-      setStatus({ state: "running", generation: status.generation + 1, error: null });
-      queue.forEach((l) => ws.send(l));
-      queue = [];
+  /** One provider's engine over a WebSocket, reconnecting while it's enabled. */
+  const pipe = (provider: ProviderId, url: string) => {
+    let socket: WebSocket | null = null;
+    let queue: string[] = [];
+    let fails = 0;
+    let status: EngineStatus = { provider, state: "starting", generation: 0, version: null, binaryPath: url, source: "system", engine: "dedicated", error: null, stderrTail: [] };
+    const setStatus = (patch: Partial<EngineStatus>) => {
+      status = { ...status, ...patch };
+      statusSubs.forEach((cb) => cb(status));
     };
-    ws.onmessage = (ev) => {
-      const lines = String(ev.data).split("\n").filter(Boolean);
-      messageSubs.forEach((cb) => cb(lines));
+    const connect = () => {
+      if (!settings.enabled[provider]) return setStatus({ state: "disabled", error: null });
+      const ws = new WebSocket(url);
+      socket = ws;
+      ws.onopen = () => {
+        fails = 0;
+        setStatus({ state: "running", generation: status.generation + 1, error: null });
+        queue.forEach((l) => ws.send(l));
+        queue = [];
+      };
+      ws.onmessage = (ev) => {
+        const lines = String(ev.data).split("\n").filter(Boolean);
+        messageSubs.forEach((cb) => cb(provider, lines));
+      };
+      ws.onclose = () => {
+        if (socket !== ws) return;
+        socket = null;
+        fails++;
+        setStatus({ state: fails > 3 ? "missing" : "error", error: fails > 3 ? "Not served by this dev server" : "WebSocket closed" });
+        setTimeout(connect, Math.min(1000 * fails, 10_000));
+      };
     };
-    ws.onclose = () => {
-      if (socket !== ws) return;
-      setStatus({ state: "error", error: "WebSocket closed" });
-      setTimeout(connect, 1000);
+    connect();
+    return {
+      get status() {
+        return status;
+      },
+      send(line: string) {
+        if (socket?.readyState === WebSocket.OPEN) socket.send(line);
+        else queue.push(line);
+      },
+      restart() {
+        if (socket) socket.close();
+        else connect();
+      },
     };
   };
-  connect();
+  const pipes: Record<ProviderId, ReturnType<typeof pipe>> = { codex: pipe("codex", `${base}/codex-ws`), claude: pipe("claude", `${base}/claude-ws`) };
 
   const updater: UpdaterState = {
     settings: { source: "system", autoUpdate: false, channel: "latest", customPath: null, checkIntervalHours: 2, engine: "dedicated" },
@@ -66,11 +82,8 @@ function createWebBridge(url: string): RetBridge {
   return {
     platform: navigator.platform.toLowerCase().includes("win") ? "win32" : "web",
     appVersion: "web",
-    codex: {
-      send: (line) => {
-        if (socket?.readyState === WebSocket.OPEN) socket.send(line);
-        else queue.push(line);
-      },
+    agents: {
+      send: (provider, line) => pipes[provider].send(line),
       onMessages: (cb) => {
         messageSubs.add(cb);
         return () => messageSubs.delete(cb);
@@ -79,8 +92,20 @@ function createWebBridge(url: string): RetBridge {
         statusSubs.add(cb);
         return () => statusSubs.delete(cb);
       },
-      getStatus: async () => status,
-      restart: async () => socket?.close(),
+      getStatus: async (provider) => pipes[provider].status,
+      restart: async (provider) => pipes[provider].restart(),
+      getSettings: async () => settings,
+      onSettings: (cb) => {
+        settingsSubs.add(cb);
+        return () => settingsSubs.delete(cb);
+      },
+      setSettings: async (patch) => {
+        settings = { ...settings, ...patch, enabled: { ...settings.enabled, ...patch.enabled }, claude: { ...settings.claude, ...patch.claude } };
+        settingsSubs.forEach((cb) => cb(settings));
+        return settings;
+      },
+      openLogin: async () => {},
+      update: async () => {},
     },
     updater: {
       getState: async () => updater,
@@ -136,6 +161,6 @@ function createWebBridge(url: string): RetBridge {
   };
 }
 
-export const bridge: RetBridge = window.ret ?? createWebBridge(`ws://${location.host}/codex-ws`);
+export const bridge: RetBridge = window.ret ?? createWebBridge(`ws://${location.host}`);
 
 export const isDesktop = !!window.ret;

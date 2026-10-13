@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AppWindow, FolderPlus, GitFork, LayoutGrid, MessageSquarePlus, PanelLeft, RefreshCw, Rows3, Scan, Settings, FolderGit2, Code2, Inbox } from "lucide-react";
 import { useUI, activeBoard, isThread } from "../state/ui";
 import { useThreads } from "../state/threads";
+import { useConn } from "../state/conn";
 import { buildProjects, flattenNode, threadTitle } from "../state/projects";
 import { addProject, forkThread, newThread, openThread } from "../state/actions";
 import { timeAgo } from "../lib/format";
@@ -58,6 +59,7 @@ function PaletteInner() {
   const [sel, setSel] = useState(0);
   const list = useRef<HTMLDivElement>(null);
   const threads = useThreads((s) => s.threads);
+  const workspaces = useThreads((s) => s.workspaces);
   const projects = useUI((s) => s.projects);
   const threadProject = useUI((s) => s.threadProject);
   const close = () => useUI.setState({ paletteOpen: false });
@@ -65,7 +67,7 @@ function PaletteInner() {
   const entries = useMemo<Entry[]>(() => {
     const cur = currentThreadId();
     const curReal = cur && isThread(cur) ? cur : null;
-    const tree = buildProjects(threads, projects, threadProject);
+    const tree = buildProjects(threads, projects, threadProject, workspaces);
     const commands: Entry[] = [
       ...tree.slice(0, 30).map((p) => ({
         id: `new:${p.key}`,
@@ -91,7 +93,9 @@ function PaletteInner() {
       { id: "fit", kind: "command", title: "Canvas: fit all windows", icon: <Scan size={14} />, run: () => { useUI.setState({ mode: "canvas" }); requestAnimationFrame(() => fitAll()); } },
       { id: "tidy", kind: "command", title: "Canvas: tidy windows", icon: <LayoutGrid size={14} />, run: () => { useUI.setState({ mode: "canvas" }); requestAnimationFrame(tidy); } },
       { id: "sidebar", kind: "command", title: "Toggle sidebar", icon: <PanelLeft size={14} />, run: () => useUI.setState((s) => ({ sidebarOpen: !s.sidebarOpen })) },
-      { id: "update", kind: "command", title: "Check for codex updates", icon: <RefreshCw size={14} />, run: () => void bridge.updater.check() },
+      ...(useConn.getState().settings?.enabled.codex !== false
+        ? [{ id: "update", kind: "command" as const, title: "Check for Codex updates", icon: <RefreshCw size={14} />, run: () => void bridge.updater.check() }]
+        : []),
       ...(isDesktop
         ? [{ id: "appupdate", kind: "command" as const, title: "Check for Ret updates", icon: <RefreshCw size={14} />, run: () => void bridge.appUpdate.check() }]
         : []),
@@ -110,7 +114,7 @@ function PaletteInner() {
         run: () => openThread(t.id),
       }));
     return [...threadEntries, ...commands];
-  }, [threads, projects, threadProject]);
+  }, [threads, projects, threadProject, workspaces]);
 
   const results = useMemo(() => {
     const query = q.trim().toLowerCase();

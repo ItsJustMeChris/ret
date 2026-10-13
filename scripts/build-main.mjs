@@ -15,8 +15,14 @@ const common = {
   logLevel: "info",
 };
 
+// The Claude Agent SDK is an ES module that reads import.meta.url at load; give it the bundle's own URL.
+const main = {
+  define: { "import.meta.url": "__ret_import_meta_url" },
+  banner: { js: 'var __ret_import_meta_url = require("url").pathToFileURL(__filename).href;' },
+};
+
 const targets = [
-  { ...common, entryPoints: ["src/main/index.ts"], outfile: "dist/main/index.cjs" },
+  { ...common, ...main, entryPoints: ["src/main/index.ts"], outfile: "dist/main/index.cjs" },
   { ...common, entryPoints: ["src/preload/index.ts"], outfile: "dist/preload/index.cjs" },
 ];
 

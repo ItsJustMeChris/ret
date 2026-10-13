@@ -30,6 +30,7 @@ import { RequestCard } from "./Approvals";
 import { bridge, isDesktop } from "../../bridge";
 import { Menu, type MenuItem } from "../Menu";
 import { StatusDot } from "../StatusDot";
+import { PROVIDERS } from "../../agents";
 import { diffStats, compactNumber, plainText } from "../../lib/format";
 import { Markdown } from "../Markdown";
 import { Select, type SelectOption } from "../ui/Select";
@@ -402,10 +403,15 @@ function ThreadInfo({ threadId }: { threadId: string }) {
     ),
   );
   const worktree = useUI((s) => s.worktrees[threadId]);
+  const owner = useThreads((s) => s.owner[threadId] ?? "codex");
   if (!thread) return null;
   return (
     <section>
       <h4>Thread</h4>
+      <div className="kv-row">
+        <span>Agent</span>
+        <span>{PROVIDERS[owner].name}</span>
+      </div>
       <div className="kv-row">
         <span>Model</span>
         <span>
@@ -491,9 +497,10 @@ const PICK_FOLDER = "\u0000pick";
 
 function ProjectPicker({ threadId, projectKey, cwd }: { threadId: string; projectKey: string; cwd: string }) {
   const threads = useThreads((s) => s.threads);
+  const workspaces = useThreads((s) => s.workspaces);
   const projects = useUI((s) => s.projects);
   const threadProject = useUI((s) => s.threadProject);
-  const tree = useMemo(() => buildProjects(threads, projects, threadProject), [threads, projects, threadProject]);
+  const tree = useMemo(() => buildProjects(threads, projects, threadProject, workspaces), [threads, projects, threadProject, workspaces]);
   const options: SelectOption[] = tree.map((p) => ({ value: p.key, label: p.name, description: p.path, icon: <Folder size={13} /> }));
   if (!options.some((o) => o.value === projectKey)) {
     options.unshift({ value: projectKey, label: baseName(cwd), description: cwd, icon: <Folder size={13} /> });

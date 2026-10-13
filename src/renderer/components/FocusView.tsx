@@ -6,7 +6,7 @@ import { FilePane } from "./code/FilePane";
 import { useThreads } from "../state/threads";
 import { closePane, closeTab, newThreadNear, openThread, setSplitRatio } from "../state/actions";
 import { threadTitle } from "../state/projects";
-import type { Thread } from "../protocol";
+import type { Thread } from "@shared/protocol";
 import { StatusDot } from "./StatusDot";
 import { ThreadPane } from "./thread/ThreadPane";
 import { EmptyState } from "./EmptyState";

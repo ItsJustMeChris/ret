@@ -1,7 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Check, CheckCheck, Inbox as InboxIcon } from "lucide-react";
-import { useThreads, type PendingRequest } from "../../state/threads";
+import { markSeen, useThreads, type PendingRequest } from "../../state/threads";
+import { PROVIDERS } from "../../agents";
 import { useUI } from "../../state/ui";
 import { buildProjects, recencyOf, threadTitle, type ThreadNode } from "../../state/projects";
 import { plainText, timeAgo, unwrapCommand } from "../../lib/format";
@@ -14,7 +15,7 @@ const SECTIONS: { key: Section; title: string; hint: string }[] = [
   { key: "attention", title: "Needs you", hint: "Waiting on an answer or an approval" },
   { key: "unread", title: "Ready to review", hint: "Finished while you were elsewhere" },
   { key: "error", title: "Failed", hint: "Stopped with an error" },
-  { key: "running", title: "Working", hint: "In progress here or in another Codex app" },
+  { key: "running", title: "Working", hint: "In progress here or in another app" },
 ];
 
 /** What a pending request is asking, in a line. */
@@ -31,9 +32,11 @@ function askFor(req: PendingRequest | undefined): string | null {
     case "item/permissions/requestApproval":
       return "Grant extra permissions?";
     case "item/tool/requestUserInput":
-      return p.questions?.[0]?.question ?? "Codex has a question";
+      return p.questions?.[0]?.question ?? `${PROVIDERS[req.provider].name} has a question`;
     case "mcpServer/elicitation/request":
       return `${p.serverName ?? "A tool"} needs input: ${p.message ?? ""}`;
+    case "item/tool/requestApproval":
+      return p.title ?? `Use ${p.tool ?? "a tool"}?`;
   }
   return "Needs your input";
 }
@@ -61,6 +64,7 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
   const projects = useUI((s) => s.projects);
   const threadProject = useUI((s) => s.threadProject);
   const threads = useThreads((s) => s.threads);
+  const workspaces = useThreads((s) => s.workspaces);
 
   // Each thread's state, recomputed when anything relevant moves.
   const states = useThreads(
@@ -93,7 +97,7 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
 
   const projectName = useMemo(() => {
     const map = new Map<string, string>();
-    for (const p of buildProjects(threads, projects, threadProject)) {
+    for (const p of buildProjects(threads, projects, threadProject, workspaces)) {
       const walk = (nodes: ThreadNode[]) => {
         for (const n of nodes) {
           map.set(n.thread.id, p.name);
@@ -103,7 +107,7 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
       walk(p.roots);
     }
     return map;
-  }, [threads, projects, threadProject]);
+  }, [threads, projects, threadProject, workspaces]);
 
   const sections = useMemo(() => {
     const by: Record<Section, string[]> = { attention: [], unread: [], error: [], running: [] };
@@ -127,12 +131,7 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
   const select = (id: string) => useUI.setState((s) => ({ inbox: { ...s.inbox, selected: id } }));
   const clear = (id: string) => {
     forget(id);
-    useThreads.setState((s) => {
-      if (!s.unread[id]) return s;
-      const unread = { ...s.unread };
-      delete unread[id];
-      return { unread };
-    });
+    markSeen(id);
   };
   const clearRef = useRef(clear);
   clearRef.current = clear;
@@ -236,7 +235,7 @@ const InboxRow = memo(function InboxRow({
 }) {
   const thread = useThreads((s) => s.threads[id]);
   const req = useThreads((s) => Object.values(s.requests).find((r) => r.threadId === id));
-  // The latest thing Codex said, if the thread is loaded; else what you asked.
+  // The latest thing the agent said, if the thread is loaded; else what you asked.
   const said = useThreads((s) => {
     const lt = s.live[id];
     if (!lt) return null;

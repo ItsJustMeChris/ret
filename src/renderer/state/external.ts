@@ -1,9 +1,12 @@
 import { bridge } from "../bridge";
-import { rpc } from "../rpc/client";
-import type { Thread } from "../protocol";
+import { clients } from "../rpc/client";
+import { PROVIDER_IDS, type ProviderId } from "@shared/bridge";
+import { PROVIDERS } from "../agents";
+import { useConn } from "./conn";
+import type { Thread } from "@shared/protocol";
 import { mergeTurns } from "./actions";
 import { threadTitle } from "./projects";
-import { mergeThread, useThreads, type ExternalRun } from "./threads";
+import { upsertThreads, useThreads, type ExternalRun } from "./threads";
 import { backfillLineage } from "./lineage";
 
 /**
@@ -14,18 +17,22 @@ import { backfillLineage } from "./lineage";
  * running *here*), while the thread's `updatedAt` keeps moving as the owner works.
  * Polling that (≈10 ms per pass) lets Ret show those threads as running,
  * live-refresh them while you watch, and notify you when they finish.
+ *
+ * Claude Code's engine answers the same way: a session another claude process is busy
+ * with (per Claude Code's session registry) has its last turn unfinished.
  */
 
 const POLL_FOCUSED_MS = 3000;
 const POLL_BLURRED_MS = 12_000;
-/** An unfinished turn counts as running elsewhere only while its thread keeps changing. */
-const ACTIVE_S = 10 * 60;
 const TAIL_TURNS = 3;
 
 const lastSeen = new Map<string, number>();
 let timer = 0;
 let polling = false;
 let started = false;
+
+/** Providers whose threads can be seen running in other apps, and are on and connected. */
+const watched = () => PROVIDER_IDS.filter((p) => PROVIDERS[p].external && clients[p].info && useConn.getState().settings?.enabled[p] !== false);
 
 export function startExternalWatcher() {
   if (started) return;
@@ -35,10 +42,13 @@ export function startExternalWatcher() {
     void poll();
   };
   window.addEventListener("focus", kick);
-  rpc.onReady(() => {
-    lastSeen.clear();
-    kick();
-  });
+  for (const p of PROVIDER_IDS) {
+    if (!PROVIDERS[p].external) continue;
+    clients[p].onReady(() => {
+      for (const [id, owner] of Object.entries(useThreads.getState().owner)) if (owner === p) lastSeen.delete(id);
+      kick();
+    });
+  }
 }
 
 function schedule() {
@@ -50,7 +60,7 @@ async function poll() {
   if (polling) return;
   polling = true;
   try {
-    if (rpc.info) await pass();
+    await Promise.all(watched().map((p) => pass(p).catch((err) => console.warn(`${p}: external activity poll failed`, err))));
   } catch (err) {
     console.warn("external activity poll failed", err);
   } finally {
@@ -59,8 +69,8 @@ async function poll() {
   }
 }
 
-async function pass() {
-  const res = await rpc.request("thread/list", { limit: 40, sortKey: "updated_at", useStateDbOnly: true });
+async function pass(p: ProviderId) {
+  const res = await clients[p].request("thread/list", { limit: 40, sortKey: "updated_at", useStateDbOnly: true });
   const now = Date.now() / 1000;
   const st = useThreads.getState();
 
@@ -70,11 +80,7 @@ async function pass() {
     return !cur || cur.updatedAt !== t.updatedAt || cur.status.type !== t.status.type || cur.name !== t.name;
   });
   if (changed.length) {
-    useThreads.setState((s) => {
-      const threads = { ...s.threads };
-      for (const t of changed) threads[t.id] = mergeThread(threads[t.id], t);
-      return { threads };
-    });
+    upsertThreads(p, changed);
     // The list doesn't say which of the new ones are forks; look that up.
     const fresh = changed.filter((t) => !st.threads[t.id]).map((t) => t.id);
     if (fresh.length) void backfillLineage(fresh);
@@ -90,7 +96,8 @@ async function pass() {
       if (marked) setExternal(t.id, null);
       continue;
     }
-    if (now - t.updatedAt > ACTIVE_S) {
+    const quiet = PROVIDERS[p].externalQuietS;
+    if (quiet != null && now - t.updatedAt > quiet) {
       // Stopped changing: finished without us seeing it, or the other process died mid-turn.
       if (marked) setExternal(t.id, null);
       continue;
@@ -98,11 +105,11 @@ async function pass() {
     const moved = prev !== undefined && prev !== t.updatedAt;
     if (prev === undefined || moved || marked) checks.push({ thread: t, moved });
   }
-  await Promise.all(checks.map(({ thread, moved }) => check(thread, moved)));
+  await Promise.all(checks.map(({ thread, moved }) => check(p, thread, moved)));
 }
 
-async function check(t: Thread, moved: boolean) {
-  const res = await rpc.request("thread/turns/list", { threadId: t.id, limit: 1, sortDirection: "desc", itemsView: "notLoaded" });
+async function check(p: ProviderId, t: Thread, moved: boolean) {
+  const res = await clients[p].request("thread/turns/list", { threadId: t.id, limit: 1, sortDirection: "desc", itemsView: "notLoaded" });
   const last = res.data[0];
   const st = useThreads.getState();
   const was = st.external[t.id];
@@ -111,16 +118,16 @@ async function check(t: Thread, moved: boolean) {
 
   if (isUnfinished(last)) {
     setExternal(t.id, { turnId: last.id, lastActivity: t.updatedAt });
-    if (!was || moved) refresh(t.id);
+    if (!was || moved) refresh(p, t.id);
   } else if (was) {
     setExternal(t.id, null);
-    refresh(t.id);
+    refresh(p, t.id);
     const visible = !!useThreads.getState().visible[t.id];
     if (!useThreads.getState().attended[t.id]) {
       useThreads.setState((s) => ({ unread: { ...s.unread, [t.id]: true } }));
     }
     if (!visible || !document.hasFocus()) {
-      bridge.notify(last?.status === "failed" ? "Turn failed elsewhere" : "Codex finished elsewhere", threadTitle(t));
+      bridge.notify(last?.status === "failed" ? "Turn failed elsewhere" : `${PROVIDERS[p].name} finished elsewhere`, threadTitle(t));
     }
   }
 }
@@ -141,7 +148,7 @@ function setExternal(threadId: string, run: ExternalRun | null) {
 }
 
 /** Bring a thread's transcript up to date: re-fetch the newest turns if it's on screen, else drop the stale cache. */
-function refresh(threadId: string) {
+function refresh(p: ProviderId, threadId: string) {
   const st = useThreads.getState();
   const lt = st.live[threadId];
   if (!lt?.hydrated) return;
@@ -153,7 +160,7 @@ function refresh(threadId: string) {
     });
     return;
   }
-  void rpc
+  void clients[p]
     .request("thread/turns/list", { threadId, limit: TAIL_TURNS, sortDirection: "desc", itemsView: "full" })
     .then((res) => mergeTurns(threadId, res.data, null, "tail"))
     .catch((err) => console.warn("tail refresh failed", err));

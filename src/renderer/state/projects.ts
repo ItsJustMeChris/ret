@@ -1,4 +1,4 @@
-import type { Thread } from "../protocol";
+import type { Thread } from "@shared/protocol";
 import type { ProjectConf } from "./ui";
 
 const caseInsensitive = /win/i.test(navigator.platform);
@@ -15,8 +15,24 @@ export function baseName(p: string): string {
   return parts[parts.length - 1] || p;
 }
 
-/** Codex desktop drops ad-hoc chats into ~/Documents/Codex/<date>/<slug>; fold those into one project. */
-const SCRATCH = /^(.*\/documents\/codex)\/\d{4}-\d{2}-\d{2}(\/|$)/i;
+/**
+ * Desktop apps drop ad-hoc chats into folders of their own; fold each app's into one project.
+ * Codex: ~/Documents/Codex/<date>/<slug>. Claude: <app data>/Claude/scratch-workspaces/…, and
+ * Claude Code's own temp folders.
+ */
+const SCRATCH: { re: RegExp; name: string }[] = [
+  { re: /^(.*\/documents\/codex)\/\d{4}-\d{2}-\d{2}(\/|$)/i, name: "Codex chats" },
+  { re: /^(.*\/claude\/scratch-workspaces)(\/|$)/i, name: "Claude chats" },
+  { re: /^(.*\/(?:temp|tmp)\/claude)(\/|$)/i, name: "Claude scratch" },
+];
+
+function scratchOf(cwd: string): { key: string; name: string } | null {
+  for (const r of SCRATCH) {
+    const m = r.re.exec(cwd);
+    if (m) return { key: m[1], name: r.name };
+  }
+  return null;
+}
 
 export interface ThreadNode {
   thread: Thread;
@@ -37,11 +53,48 @@ export interface ProjectNode {
   recency: number;
 }
 
-/** Longest-first keys of explicitly added projects (the only ones that capture subdirectories). */
-export function explicitKeys(projects: Record<string, ProjectConf>): string[] {
-  return Object.keys(projects)
-    .filter((k) => projects[k].explicit)
-    .sort((a, b) => b.length - a.length);
+/**
+ * A named set of folders an agent app keeps (the ChatGPT and Codex apps' projects). Its folder
+ * names often aren't its name ("HOI4 2" for "HOI4"), and one can span several folders.
+ */
+export interface Workspace {
+  id: string;
+  name: string;
+  /** The first is where its threads start. */
+  roots: string[];
+}
+
+/**
+ * Which project a folder belongs to. Explicitly added projects and workspace roots capture their
+ * subdirectories too; a workspace's roots all lead to one project, keyed by its first root.
+ */
+export interface ProjectIndex {
+  /** Longest first, so the innermost wins; Ret's own projects win ties. */
+  dirs: { dir: string; key: string }[];
+  /** Workspace id → project key, for threads their engine assigned outright. */
+  byWorkspace: Record<string, string>;
+  /** Project key → the workspace behind it. */
+  workspaces: Map<string, Workspace>;
+}
+
+function explicitKeys(projects: Record<string, ProjectConf>): string[] {
+  return Object.keys(projects).filter((k) => projects[k].explicit);
+}
+
+export function projectIndex(projects: Record<string, ProjectConf>, workspaces: Workspace[]): ProjectIndex {
+  const dirs = explicitKeys(projects).map((k) => ({ dir: k, key: k }));
+  const byWorkspace: Record<string, string> = {};
+  const byKey = new Map<string, Workspace>();
+  for (const w of workspaces) {
+    if (!w.roots.length) continue;
+    const key = normPath(w.roots[0]);
+    if (byKey.has(key)) continue;
+    byKey.set(key, w);
+    byWorkspace[w.id] = key;
+    for (const r of w.roots) dirs.push({ dir: normPath(r), key });
+  }
+  dirs.sort((a, b) => b.dir.length - a.dir.length);
+  return { dirs, byWorkspace, workspaces: byKey };
 }
 
 export const recencyOf = (t: Thread) => t.recencyAt ?? t.updatedAt ?? t.createdAt;
@@ -56,7 +109,7 @@ export function threadTitle(t: Thread | undefined): string {
 export function projectKeyFor(
   thread: Thread,
   byId: Record<string, Thread>,
-  confKeys: string[],
+  index: ProjectIndex,
   threadProject: Record<string, string>,
 ): string {
   let root = thread;
@@ -69,10 +122,11 @@ export function projectKeyFor(
     seen.add(root.id);
     root = parent;
   }
+  const assigned = root.projectId ? index.byWorkspace[root.projectId] : undefined;
+  if (assigned) return assigned;
   const cwd = normPath(root.cwd);
-  for (const k of confKeys) if (cwd === k || cwd.startsWith(k + "/")) return k;
-  const m = SCRATCH.exec(cwd);
-  return m ? m[1] : cwd;
+  for (const { dir, key } of index.dirs) if (cwd === dir || cwd.startsWith(dir + "/")) return key;
+  return scratchOf(cwd)?.key ?? cwd;
 }
 
 /**
@@ -83,11 +137,12 @@ export function buildProjects(
   threads: Record<string, Thread>,
   projects: Record<string, ProjectConf>,
   threadProject: Record<string, string>,
+  workspaces: Workspace[],
 ): ProjectNode[] {
-  const confKeys = explicitKeys(projects);
+  const index = projectIndex(projects, workspaces);
   const list = Object.values(threads);
   const keyOf = new Map<string, string>();
-  for (const t of list) keyOf.set(t.id, projectKeyFor(t, threads, confKeys, threadProject));
+  for (const t of list) keyOf.set(t.id, projectKeyFor(t, threads, index, threadProject));
 
   const nodes = new Map<string, ThreadNode>();
   for (const t of list) nodes.set(t.id, { thread: t, children: [], recency: recencyOf(t), forkCount: 0 });
@@ -115,7 +170,7 @@ export function buildProjects(
   };
 
   const out: ProjectNode[] = [];
-  const keys = new Set([...groups.keys(), ...confKeys]);
+  const keys = new Set([...groups.keys(), ...explicitKeys(projects)]);
   for (const key of keys) {
     const conf = projects[key] ?? null;
     if (conf?.hidden) continue;
@@ -123,11 +178,12 @@ export function buildProjects(
     roots.forEach(finalize);
     roots.sort((a, b) => b.recency - a.recency);
     const sample = roots[0]?.thread;
-    const path = conf?.path ?? (sample ? displayPathFor(key, sample.cwd) : key);
+    const ws = index.workspaces.get(key);
+    const path = conf?.path ?? ws?.roots[0] ?? (sample ? displayPathFor(key, sample.cwd) : key);
     out.push({
       key,
       path,
-      name: conf?.name ?? (SCRATCH.test(normPath(sample?.cwd ?? "")) && !conf ? "Codex chats" : baseName(path)),
+      name: conf?.name ?? ws?.name ?? (!conf ? scratchOf(normPath(sample?.cwd ?? ""))?.name : undefined) ?? baseName(path),
       conf,
       roots,
       threadCount: roots.reduce((n, r) => n + 1 + r.forkCount, 0),

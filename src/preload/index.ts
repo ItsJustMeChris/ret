@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "electron";
-import { IPC, type RetBridge } from "../shared/bridge";
+import { IPC, type ProviderId, type RetBridge } from "../shared/bridge";
 
 function subscribe<T>(channel: string, cb: (payload: T) => void) {
   const handler = (_e: IpcRendererEvent, payload: T) => cb(payload);
@@ -12,12 +12,17 @@ function subscribe<T>(channel: string, cb: (payload: T) => void) {
 const bridge: RetBridge = {
   platform: process.platform,
   appVersion: process.argv.find((a) => a.startsWith("--ret-version="))?.slice(14) ?? "0.0.0",
-  codex: {
-    send: (line) => ipcRenderer.send(IPC.codexSend, line),
-    onMessages: (cb) => subscribe(IPC.codexMessages, cb),
-    onStatus: (cb) => subscribe(IPC.codexStatus, cb),
-    getStatus: () => ipcRenderer.invoke(IPC.codexGetStatus),
-    restart: () => ipcRenderer.invoke(IPC.codexRestart),
+  agents: {
+    send: (provider, line) => ipcRenderer.send(IPC.agentSend, provider, line),
+    onMessages: (cb) => subscribe<{ provider: ProviderId; lines: string[] }>(IPC.agentMessages, (m) => cb(m.provider, m.lines)),
+    onStatus: (cb) => subscribe(IPC.agentStatus, cb),
+    getStatus: (provider) => ipcRenderer.invoke(IPC.agentGetStatus, provider),
+    restart: (provider) => ipcRenderer.invoke(IPC.agentRestart, provider),
+    getSettings: () => ipcRenderer.invoke(IPC.providersGet),
+    onSettings: (cb) => subscribe(IPC.providersState, cb),
+    setSettings: (patch) => ipcRenderer.invoke(IPC.providersSet, patch),
+    openLogin: (provider) => ipcRenderer.invoke(IPC.agentLogin, provider),
+    update: (provider) => ipcRenderer.invoke(IPC.agentUpdate, provider),
   },
   updater: {
     getState: () => ipcRenderer.invoke(IPC.updaterGet),

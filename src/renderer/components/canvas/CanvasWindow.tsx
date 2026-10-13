@@ -1,10 +1,10 @@
-import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, Minimize2, X, GitFork, FolderGit2, Copy } from "lucide-react";
 import { activeBoard, updateBoard, useUI, isApp, isDraft, isFile, isThread, filePath, type CanvasWin } from "../../state/ui";
 import { FilePane, FileTile } from "../code/FilePane";
 import { AppPane, AppTile } from "./AppPane";
 import { copyText } from "../../lib/files";
-import { markAttended, useThreads } from "../../state/threads";
+import { markAttended, markSeen, useThreads } from "../../state/threads";
 import { closeWindow, focusWindow, forkThread, renameThread } from "../../state/actions";
 import { threadTitle } from "../../state/projects";
 import { ThreadPane, threadMoreItems } from "../thread/ThreadPane";
@@ -128,6 +128,11 @@ export const CanvasWindow = memo(function CanvasWindow({ win, card, focused }: {
     markAttended(win.threadId, 1);
     return () => markAttended(win.threadId, -1);
   }, [focused, win.threadId]);
+  // ...and it stays seen: whatever marks it as new activity while you're on it, it never shimmers
+  // for a click (before paint, so not even for a frame).
+  useLayoutEffect(() => {
+    if (focused && state === "unread") markSeen(win.threadId);
+  }, [focused, state, win.threadId]);
 
   const commit = useCallback(
     (r: Rect) => updateBoard((b) => ({ ...b, windows: b.windows.map((w) => (w.id === win.id ? { ...w, ...r, prev: undefined } : w)) })),

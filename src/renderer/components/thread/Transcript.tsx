@@ -1,9 +1,10 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { ChevronRight, CircleAlert, FileDiff, GitFork, LoaderCircle } from "lucide-react";
-import { useThreads } from "../../state/threads";
+import { ownerOf, useThreads } from "../../state/threads";
+import { PROVIDERS } from "../../agents";
 import { forkThread, loadOlder, resendUnanswered } from "../../state/actions";
-import type { ThreadItem } from "../../protocol";
+import type { ThreadItem } from "@shared/protocol";
 import { activitySummary, DiffView, isActivity, ItemView } from "./Items";
 import { ThreadImage } from "./ThreadImage";
 import { diffStats, duration } from "../../lib/format";
@@ -106,7 +107,7 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
           ))}
         </div>
       )}
-      {live && !pending && <Working since={turn.startedAt} elsewhere={elsewhere} />}
+      {live && !pending && <Working since={turn.startedAt} elsewhere={elsewhere ? PROVIDERS[ownerOf(ctx.threadId)].name : null} />}
       {!live && !pending && turn.status !== "interrupted" && <UnansweredNotice threadId={ctx.threadId} lastItemId={turn.itemIds[turn.itemIds.length - 1]} count={turn.itemIds.length} />}
       {turn.error && (
         <div className="turn-error">
@@ -118,7 +119,7 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
         <div className="turn-foot">
           {turn.status === "interrupted" && <span className="badge warn">interrupted</span>}
           {turn.stale && (
-            <span className="badge warn" title="This turn didn't finish in Ret's session. It may still be running in another Codex app, or it was cut off.">
+            <span className="badge warn" title={`This turn didn't finish in Ret's session. It may still be running in another ${PROVIDERS[ownerOf(ctx.threadId)].name} app, or it was cut off.`}>
               unfinished
             </span>
           )}
@@ -153,7 +154,8 @@ function UnansweredNotice({ threadId, lastItemId, count }: { threadId: string; l
   );
 }
 
-function Working({ since, elsewhere }: { since: number | null; elsewhere?: boolean }) {
+/** `elsewhere` names the agent when the turn runs in another of its apps. */
+function Working({ since, elsewhere }: { since: number | null; elsewhere?: string | null }) {
   const [, tick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 1000);
@@ -163,7 +165,7 @@ function Working({ since, elsewhere }: { since: number | null; elsewhere?: boole
   return (
     <div className="working">
       <span className="pulse" />
-      <Shimmer text={elsewhere ? "Working in another Codex app" : "Working"} />
+      <Shimmer text={elsewhere ? `Working in another ${elsewhere} app` : "Working"} />
       <span className="muted">{secs >= 1 ? duration(secs * 1000) : ""}</span>
     </div>
   );

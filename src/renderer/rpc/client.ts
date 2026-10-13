@@ -1,5 +1,7 @@
 import { bridge } from "../bridge";
-import type { InitializeResponse, Method, ParamsOf, ResultOf, ServerRequest } from "../protocol";
+import type { EngineStatus, ProviderId } from "@shared/bridge";
+import { PROVIDER_IDS } from "@shared/bridge";
+import type { InitializeResponse, Method, ParamsOf, ResultOf, ServerRequest } from "@shared/protocol";
 
 export class RpcError extends Error {
   constructor(
@@ -16,12 +18,12 @@ export type NotificationHandler = (method: string, params: any) => void;
 export type ServerRequestHandler = (req: ServerRequest) => void;
 
 /**
- * JSON-RPC client for `codex app-server`. Transport-agnostic: lines arrive
- * through the bridge (Electron IPC or WebSocket). Every time the bridge reports
- * a new process generation we fail outstanding requests and re-run the
- * initialize handshake; `onReady` listeners then rehydrate their state.
+ * JSON-RPC client for one provider's engine (`codex app-server`, or an engine that speaks its
+ * protocol). Transport-agnostic: lines arrive through the bridge (Electron IPC or WebSocket).
+ * Every time the bridge reports a new engine generation we fail outstanding requests and
+ * re-run the initialize handshake; `onReady` listeners then rehydrate their state.
  */
-class CodexClient {
+export class RpcClient {
   private nextId = 1;
   private pending = new Map<number | string, Pending>();
   private notificationHandlers = new Set<NotificationHandler>();
@@ -31,28 +33,27 @@ class CodexClient {
   private readyPromise: Promise<InitializeResponse> | null = null;
   private resolveReady: ((v: InitializeResponse) => void) | null = null;
   info: InitializeResponse | null = null;
+  status: EngineStatus | null = null;
 
-  constructor() {
-    bridge.codex.onMessages((lines) => this.handleLines(lines));
-    bridge.codex.onStatus((s) => {
-      if (s.state === "running" && s.generation !== this.generation) {
-        this.generation = s.generation;
-        void this.handshake();
-      } else if (s.state === "error" || s.state === "stopped" || s.state === "missing") {
-        // Until the next process finishes its handshake, new requests wait (see `request`).
-        this.info = null;
-        this.failAll(new Error(s.error ?? "codex app-server is not running"));
-      }
-    });
-    void bridge.codex.getStatus().then((s) => {
-      if (s.state === "running" && this.generation !== s.generation) {
-        this.generation = s.generation;
-        void this.handshake();
-      }
-    });
+  constructor(readonly provider: ProviderId) {
+    bridge.agents.onMessages((p, lines) => p === provider && this.handleLines(lines));
+    bridge.agents.onStatus((s) => s.provider === provider && this.onStatus(s));
+    void bridge.agents.getStatus(provider).then((s) => this.onStatus(s));
   }
 
-  /** Resolves once the current app-server process has completed `initialize`. */
+  private onStatus(s: EngineStatus) {
+    this.status = s;
+    if (s.state === "running" && s.generation !== this.generation) {
+      this.generation = s.generation;
+      void this.handshake();
+    } else if (s.state !== "running" && s.state !== "starting") {
+      // Until the next process finishes its handshake, new requests wait (see `request`).
+      this.info = null;
+      this.failAll(new Error(s.error ?? `${this.provider} is not running`));
+    }
+  }
+
+  /** Resolves once the current engine has completed `initialize`. */
   ready(): Promise<InitializeResponse> {
     if (this.info && !this.readyPromise) return Promise.resolve(this.info);
     if (!this.readyPromise) {
@@ -69,7 +70,7 @@ class CodexClient {
 
   private async handshake() {
     this.info = null;
-    this.failAll(new Error("codex app-server restarted"));
+    this.failAll(new Error(`${this.provider} restarted`));
     if (!this.readyPromise) this.readyPromise = new Promise((r) => (this.resolveReady = r));
     try {
       const info = await this.rawRequest<InitializeResponse>("initialize", {
@@ -83,12 +84,12 @@ class CodexClient {
       this.resolveReady = null;
       this.readyHandlers.forEach((cb) => cb(info));
     } catch (err) {
-      console.error("initialize failed", err);
+      console.error(`${this.provider}: initialize failed`, err);
     }
   }
 
   private write(msg: object) {
-    bridge.codex.send(JSON.stringify(msg));
+    bridge.agents.send(this.provider, JSON.stringify(msg));
   }
 
   private rawRequest<T>(method: string, params: unknown): Promise<T> {
@@ -101,10 +102,11 @@ class CodexClient {
 
   async request<M extends Method>(method: M, params: ParamsOf<M>): Promise<ResultOf<M>> {
     if (!this.info) {
-      // Ride out a restart (e.g. an update being applied), but don't hang if codex stays down.
+      const down = this.status && this.status.state !== "running" && this.status.state !== "starting";
+      // Ride out a restart (e.g. an update being applied), but don't hang if the engine stays down.
       let timer = 0;
       const timeout = new Promise<never>((_, reject) => {
-        timer = window.setTimeout(() => reject(new Error("codex is not running — check Settings")), 20_000);
+        timer = window.setTimeout(() => reject(new Error(`${this.provider} is not running — check Settings`)), down ? 3_000 : 20_000);
       });
       try {
         await Promise.race([this.ready(), timeout]);
@@ -113,6 +115,11 @@ class CodexClient {
       }
     }
     return this.rawRequest<ResultOf<M>>(method, params);
+  }
+
+  /** A request outside the typed protocol (provider extensions, or methods Ret doesn't type). */
+  call<T = unknown>(method: string, params: unknown): Promise<T> {
+    return this.request(method as Method, params as never) as Promise<T>;
   }
 
   respond(id: number | string, result: unknown) {
@@ -161,4 +168,15 @@ class CodexClient {
   }
 }
 
-export const rpc = new CodexClient();
+export const clients: Record<ProviderId, RpcClient> = Object.fromEntries(PROVIDER_IDS.map((p) => [p, new RpcClient(p)])) as Record<ProviderId, RpcClient>;
+
+export const rpcFor = (provider: ProviderId) => clients[provider];
+
+/**
+ * The engine that serves file access (`fs/*`) for Code mode and the file viewer: every engine
+ * does, so it's whichever is up — Codex first, as before.
+ */
+export function fsClient(): RpcClient {
+  const up = PROVIDER_IDS.map((p) => clients[p]).find((c) => c.info);
+  return up ?? PROVIDER_IDS.map((p) => clients[p]).find((c) => c.status?.state === "running" || c.status?.state === "starting") ?? clients.codex;
+}

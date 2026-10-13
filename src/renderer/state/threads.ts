@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { ProviderId } from "@shared/bridge";
 import type {
   ServerRequest,
   Thread,
@@ -7,8 +8,9 @@ import type {
   ThreadTokenUsage,
   Turn,
   TurnPlanStep,
-} from "../protocol";
-import type { TurnError, TurnStatus } from "../protocol/generated/v2";
+} from "@shared/protocol";
+import type { TurnError, TurnStatus } from "@shared/protocol/generated/v2";
+import type { Workspace } from "./projects";
 
 export interface TurnState {
   id: string;
@@ -34,6 +36,8 @@ export interface ThreadSettings {
   cwd: string | null;
   /** Collaboration mode: "plan" (think it through, ask questions, propose a plan) or "default". */
   mode?: "plan" | "default" | null;
+  /** The provider's own access choice, when it reports one (see agents.ts). */
+  access?: string | null;
 }
 
 export interface LiveThread {
@@ -56,9 +60,11 @@ export interface LiveThread {
 }
 
 export interface PendingRequest {
+  /** `<provider>:<id>`: request ids are only unique per engine. */
   key: string;
+  provider: ProviderId;
   id: number | string;
-  method: ServerRequest["method"];
+  method: ServerRequest["method"] | (string & {});
   params: any;
   threadId: string | null;
   receivedAt: number;
@@ -66,6 +72,8 @@ export interface PendingRequest {
 
 export interface ThreadsState {
   threads: Record<string, Thread>;
+  /** Which provider's engine each thread lives in. */
+  owner: Record<string, ProviderId>;
   listLoaded: boolean;
   live: Record<string, LiveThread>;
   requests: Record<string, PendingRequest>;
@@ -82,6 +90,8 @@ export interface ThreadsState {
   external: Record<string, ExternalRun>;
   /** Follow-ups typed while a turn runs; each is sent as its own turn when the current one ends. */
   queued: Record<string, QueuedMessage[]>;
+  /** Named workspaces the engines keep (see agents.ts), which the sidebar groups threads by. */
+  workspaces: Workspace[];
 }
 
 export interface QueuedMessage {
@@ -115,6 +125,7 @@ export const emptyLive = (): LiveThread => ({
 
 export const useThreads = create<ThreadsState>(() => ({
   threads: {},
+  owner: {},
   listLoaded: false,
   live: {},
   requests: {},
@@ -123,6 +134,7 @@ export const useThreads = create<ThreadsState>(() => ({
   attended: {},
   external: {},
   queued: {},
+  workspaces: [],
 }));
 
 export const stripTurns = (t: Thread): Thread => (t.turns?.length ? { ...t, turns: [] } : t);
@@ -251,13 +263,22 @@ export interface Hooks {
   onTurnCompleted?: (threadId: string, turn: Turn) => void;
 }
 
+/** The provider a thread belongs to (Codex until known: it was the only one). */
+export function ownerOf(threadId: string): ProviderId {
+  return useThreads.getState().owner[threadId] ?? "codex";
+}
+
 /** Applies a single server notification to the draft state. */
-function apply(d: Draft, method: string, p: any, hooks: Hooks) {
+function apply(d: Draft, provider: ProviderId, method: string, p: any, hooks: Hooks) {
   switch (method) {
     case "thread/started": {
       const t: Thread = p.thread;
       d.threads = own(d.threads);
       d.threads[t.id] = mergeThread(d.threads[t.id], t);
+      if (d.owner[t.id] !== provider) {
+        d.owner = own(d.owner);
+        d.owner[t.id] = provider;
+      }
       break;
     }
     case "thread/status/changed": {
@@ -269,6 +290,9 @@ function apply(d: Draft, method: string, p: any, hooks: Hooks) {
     }
     case "thread/name/updated":
       setThread(d, p.threadId, { name: p.threadName ?? null });
+      break;
+    case "thread/project/updated":
+      setThread(d, p.threadId, { projectId: p.projectId ?? null });
       break;
     case "thread/archived":
     case "thread/deleted": {
@@ -296,6 +320,7 @@ function apply(d: Draft, method: string, p: any, hooks: Hooks) {
           sandbox: ts.sandboxPolicy,
           cwd: ts.cwd ?? null,
           mode: ts.collaborationMode?.mode ?? null,
+          access: typeof ts.access === "string" ? ts.access : null,
         };
       }
       break;
@@ -389,7 +414,7 @@ function apply(d: Draft, method: string, p: any, hooks: Hooks) {
       break;
     }
     case "serverRequest/resolved": {
-      const key = String(p.requestId);
+      const key = `${provider}:${p.requestId}`;
       if (!d.requests[key]) break;
       d.requests = own(d.requests);
       delete d.requests[key];
@@ -422,7 +447,7 @@ function apply(d: Draft, method: string, p: any, hooks: Hooks) {
 // per animation frame (with a timer fallback for hidden windows), so a burst
 // of token deltas across many threads costs one store update and one render.
 // ---------------------------------------------------------------------------
-let queue: { method: string; params: any }[] = [];
+let queue: { provider: ProviderId; method: string; params: any }[] = [];
 let scheduled = false;
 let hooks: Hooks = {};
 
@@ -437,9 +462,9 @@ function flush() {
   queue = [];
   fresh = new WeakSet();
   const d: Draft = { ...useThreads.getState() };
-  for (const { method, params } of batch) {
+  for (const { provider, method, params } of batch) {
     try {
-      apply(d, method, params, hooks);
+      apply(d, provider, method, params, hooks);
     } catch (err) {
       console.error("reducer failed for", method, err);
     }
@@ -447,8 +472,8 @@ function flush() {
   useThreads.setState(d, true);
 }
 
-export function enqueueNotification(method: string, params: any) {
-  queue.push({ method, params });
+export function enqueueNotification(provider: ProviderId, method: string, params: any) {
+  queue.push({ provider, method, params });
   if (scheduled) return;
   scheduled = true;
   let done = false;
@@ -466,12 +491,12 @@ export function flushNow() {
   if (scheduled) flush();
 }
 
-export function addPendingRequest(req: ServerRequest) {
+export function addPendingRequest(provider: ProviderId, req: ServerRequest) {
   const p: any = req.params;
   const threadId: string | null = p?.threadId ?? p?.conversationId ?? null;
-  const key = String(req.id);
+  const key = `${provider}:${req.id}`;
   useThreads.setState((s) => ({
-    requests: { ...s.requests, [key]: { key, id: req.id, method: req.method, params: p, threadId, receivedAt: Date.now() } },
+    requests: { ...s.requests, [key]: { key, provider, id: req.id, method: req.method, params: p, threadId, receivedAt: Date.now() } },
   }));
 }
 
@@ -493,11 +518,15 @@ export function patchLive(threadId: string, patch: Partial<LiveThread> | ((lt: L
   });
 }
 
-export function upsertThreads(list: Thread[]) {
+export function upsertThreads(provider: ProviderId, list: Thread[]) {
   useThreads.setState((s) => {
     const threads = { ...s.threads };
-    for (const t of list) threads[t.id] = mergeThread(threads[t.id], t);
-    return { threads };
+    const owner = { ...s.owner };
+    for (const t of list) {
+      threads[t.id] = mergeThread(threads[t.id], t);
+      owner[t.id] = provider;
+    }
+    return { threads, owner };
   });
 }
 
@@ -523,5 +552,15 @@ export function markAttended(threadId: string, delta: 1 | -1) {
       return { attended, unread };
     }
     return { attended };
+  });
+}
+
+/** Clear a thread's "new activity" mark. */
+export function markSeen(threadId: string) {
+  useThreads.setState((s) => {
+    if (!s.unread[threadId]) return s;
+    const unread = { ...s.unread };
+    delete unread[threadId];
+    return { unread };
   });
 }

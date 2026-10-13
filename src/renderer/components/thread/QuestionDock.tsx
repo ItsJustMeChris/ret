@@ -2,11 +2,12 @@ import { useState } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { ChevronLeft, CornerDownLeft, MessageCircleQuestion, X } from "lucide-react";
-import { useThreads, type ThreadsState } from "../../state/threads";
+import { ownerOf, useThreads, type ThreadsState } from "../../state/threads";
+import { PROVIDERS } from "../../agents";
 import { respondToRequest } from "../../state/actions";
 import { Markdown } from "../Markdown";
 
-/** One question as the dock shows it, whichever way Codex asked it. */
+/** One question as the dock shows it, whichever way the agent asked it. */
 interface DockQuestion {
   id: string;
   header: string | null;
@@ -116,7 +117,7 @@ const fresh = (source: string | null): FlowState => ({ source, step: 0, answers:
 export type QuestionFlow = NonNullable<ReturnType<typeof useQuestionFlow>>;
 
 /**
- * Walks through what Codex asked, one question at a time: a pick (click, or its number key) or a
+ * Walks through what the agent asked, one question at a time: a pick (click, or its number key) or a
  * written answer moves to the next, and the last sends them all. Message questions go back as your
  * next message (steering the turn if it's still running), request questions as the tool's answer.
  */
@@ -178,6 +179,8 @@ export function useQuestionFlow(
     running,
     rows,
     otherRow,
+    /** Who's asking ("Codex", "Claude Code"). */
+    agent: PROVIDERS[ownerOf(threadId)].name,
     hl: state.hl,
     other: state.other,
     previous: state.answers[step] as string | undefined,
@@ -221,13 +224,13 @@ export function useQuestionFlow(
 
 /** The question, docked at the top of the composer: numbered picks, with the box below for "Other". */
 export function QuestionDock({ flow, compact }: { flow: QuestionFlow; compact?: boolean }) {
-  const { ask, q, step, total } = flow;
+  const { ask, q, step, total, agent: name } = flow;
   const meanwhile = ask.kind === "request" ? !ask.blocking : flow.running;
   return (
-    <div className="ask-dock" role="group" aria-label="Codex is asking">
+    <div className="ask-dock" role="group" aria-label={`${name} is asking`}>
       <div className="ask-head">
         <MessageCircleQuestion size={13} />
-        <span>Codex is asking</span>
+        <span>{name} is asking</span>
         {total > 1 && (
           <span className="ask-step">
             {step + 1} of {total}
@@ -242,7 +245,7 @@ export function QuestionDock({ flow, compact }: { flow: QuestionFlow; compact?: 
             </button>
           )}
           {ask.kind === "request" ? (
-            <button onClick={flow.skip} title="Let Codex carry on without an answer">
+            <button onClick={flow.skip} title={`Let ${name} carry on without an answer`}>
               Skip
             </button>
           ) : (

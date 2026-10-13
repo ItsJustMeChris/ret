@@ -1,5 +1,5 @@
-import { rpc } from "../rpc/client";
-import { useThreads } from "./threads";
+import { rpcFor } from "../rpc/client";
+import { ownerOf, useThreads } from "./threads";
 
 /**
  * Fork lineage. `thread/list`, which fills the sidebar, never says which thread a fork came
@@ -20,7 +20,7 @@ export async function backfillLineage(ids: string[]): Promise<void> {
     while (next < todo.length) {
       const id = todo[next++];
       try {
-        const res = await rpc.request("thread/read", { threadId: id, includeTurns: false });
+        const res = await rpcFor(ownerOf(id)).request("thread/read", { threadId: id, includeTurns: false });
         const t = res.thread;
         if (t.forkedFromId || t.parentThreadId) found[id] = { forkedFromId: t.forkedFromId, parentThreadId: t.parentThreadId };
         known.add(id);

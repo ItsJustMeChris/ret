@@ -120,6 +120,12 @@ export class CodexUpdater {
     return null;
   }
 
+  /** No more background checks (Codex was turned off). */
+  stop() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
   schedule() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
