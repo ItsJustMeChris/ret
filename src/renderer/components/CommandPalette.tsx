@@ -62,12 +62,13 @@ function PaletteInner() {
   const workspaces = useThreads((s) => s.workspaces);
   const projects = useUI((s) => s.projects);
   const threadProject = useUI((s) => s.threadProject);
+  const checkouts = useUI((s) => s.checkouts);
   const close = () => useUI.setState({ paletteOpen: false });
 
   const entries = useMemo<Entry[]>(() => {
     const cur = currentThreadId();
     const curReal = cur && isThread(cur) ? cur : null;
-    const tree = buildProjects(threads, projects, threadProject, workspaces);
+    const tree = buildProjects(threads, projects, threadProject, workspaces, checkouts);
     const commands: Entry[] = [
       ...tree.slice(0, 30).map((p) => ({
         id: `new:${p.key}`,
@@ -114,7 +115,7 @@ function PaletteInner() {
         run: () => openThread(t.id),
       }));
     return [...threadEntries, ...commands];
-  }, [threads, projects, threadProject, workspaces]);
+  }, [threads, projects, threadProject, workspaces, checkouts]);
 
   const results = useMemo(() => {
     const query = q.trim().toLowerCase();

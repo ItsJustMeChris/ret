@@ -75,13 +75,15 @@ export interface ProjectIndex {
   byWorkspace: Record<string, string>;
   /** Project key → the workspace behind it. */
   workspaces: Map<string, Workspace>;
+  /** Worktree folder → the same place in its main checkout. */
+  checkouts: Record<string, string>;
 }
 
 function explicitKeys(projects: Record<string, ProjectConf>): string[] {
   return Object.keys(projects).filter((k) => projects[k].explicit);
 }
 
-export function projectIndex(projects: Record<string, ProjectConf>, workspaces: Workspace[]): ProjectIndex {
+export function projectIndex(projects: Record<string, ProjectConf>, workspaces: Workspace[], checkouts: Record<string, string>): ProjectIndex {
   const dirs = explicitKeys(projects).map((k) => ({ dir: k, key: k }));
   const byWorkspace: Record<string, string> = {};
   const byKey = new Map<string, Workspace>();
@@ -94,7 +96,7 @@ export function projectIndex(projects: Record<string, ProjectConf>, workspaces: 
     for (const r of w.roots) dirs.push({ dir: normPath(r), key });
   }
   dirs.sort((a, b) => b.dir.length - a.dir.length);
-  return { dirs, byWorkspace, workspaces: byKey };
+  return { dirs, byWorkspace, workspaces: byKey, checkouts };
 }
 
 export const recencyOf = (t: Thread) => t.recencyAt ?? t.updatedAt ?? t.createdAt;
@@ -124,7 +126,7 @@ export function projectKeyFor(
   }
   const assigned = root.projectId ? index.byWorkspace[root.projectId] : undefined;
   if (assigned) return assigned;
-  const cwd = normPath(root.cwd);
+  const cwd = normPath(index.checkouts[root.cwd] ?? root.cwd);
   for (const { dir, key } of index.dirs) if (cwd === dir || cwd.startsWith(dir + "/")) return key;
   return scratchOf(cwd)?.key ?? cwd;
 }
@@ -138,8 +140,9 @@ export function buildProjects(
   projects: Record<string, ProjectConf>,
   threadProject: Record<string, string>,
   workspaces: Workspace[],
+  checkouts: Record<string, string>,
 ): ProjectNode[] {
-  const index = projectIndex(projects, workspaces);
+  const index = projectIndex(projects, workspaces, checkouts);
   const list = Object.values(threads);
   const keyOf = new Map<string, string>();
   for (const t of list) keyOf.set(t.id, projectKeyFor(t, threads, index, threadProject));
@@ -179,7 +182,7 @@ export function buildProjects(
     roots.sort((a, b) => b.recency - a.recency);
     const sample = roots[0]?.thread;
     const ws = index.workspaces.get(key);
-    const path = conf?.path ?? ws?.roots[0] ?? (sample ? displayPathFor(key, sample.cwd) : key);
+    const path = conf?.path ?? ws?.roots[0] ?? (sample ? displayPathFor(key, checkouts[sample.cwd] ?? sample.cwd) : key);
     out.push({
       key,
       path,

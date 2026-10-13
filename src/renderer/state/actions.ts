@@ -343,7 +343,20 @@ export async function ownerFor(threadId: string): Promise<ProviderId> {
 export function loadThreadList(only?: ProviderId): Promise<void> {
   const ps = only ? [only] : enabledProviders();
   for (const p of ps) void loadWorkspaces(p);
-  return Promise.all(ps.map(listProvider)).then(() => {});
+  return Promise.all(ps.map(listProvider)).then(() => void resolveCheckouts());
+}
+
+/** Folders already asked about this session, worktree or not. */
+const askedCheckouts = new Set<string>();
+
+/** Find the threads running in linked git worktrees, so they group with their main checkout. */
+async function resolveCheckouts() {
+  const known = useUI.getState().checkouts;
+  const cwds = [...new Set(Object.values(useThreads.getState().threads).map((t) => t.cwd))].filter((c) => c && !known[c] && !askedCheckouts.has(c));
+  if (!cwds.length) return;
+  cwds.forEach((c) => askedCheckouts.add(c));
+  const found = await bridge.git.mainCheckouts(cwds).catch(() => ({}));
+  if (Object.keys(found).length) useUI.setState((s) => ({ checkouts: { ...s.checkouts, ...found } }));
 }
 
 /**
@@ -858,7 +871,7 @@ async function forkThreadImpl(threadId: string, opts: ForkOptions = {}): Promise
   const source = threads[threadId];
   if (!source) throw new Error("Unknown thread");
   const ui = useUI.getState();
-  const projectKey = projectKeyFor(source, threads, projectIndex(ui.projects, workspaces), ui.threadProject);
+  const projectKey = projectKeyFor(source, threads, projectIndex(ui.projects, workspaces, ui.checkouts), ui.threadProject);
 
   const worktree = opts.worktree ? await bridge.git.createWorktree(source.cwd, threadTitle(source)) : undefined;
   const cwd = worktree?.path;
@@ -916,7 +929,7 @@ export function newThreadNear(fromThreadId: string | null) {
     useUI.setState({ paletteOpen: true });
     return;
   }
-  const key = projectKeyFor(t, threads, projectIndex(ui.projects, workspaces), ui.threadProject);
+  const key = projectKeyFor(t, threads, projectIndex(ui.projects, workspaces, ui.checkouts), ui.threadProject);
   newThread(key, ui.projects[key]?.path ?? t.cwd, { provider: ownerOf(t.id) });
 }
 

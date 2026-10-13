@@ -96,6 +96,8 @@ export interface UIState {
   /** Explicit thread → project assignment (forks into worktrees live elsewhere on disk). */
   threadProject: Record<string, string>;
   worktrees: Record<string, WorktreeInfo>;
+  /** Folders in linked git worktrees → the same place in their main checkout, which they group with. */
+  checkouts: Record<string, string>;
   /** Fork-group folders that are expanded, keyed by root thread id. */
   expanded: Record<string, boolean>;
   /** Projects showing their full thread list instead of the most recent few. */
@@ -144,6 +146,7 @@ export const useUI = create<UIState>()(
       projects: {},
       threadProject: {},
       worktrees: {},
+      checkouts: {},
       expanded: {},
       showAll: {},
       drafts: {},

@@ -31,6 +31,7 @@ export function CodeView() {
   const code = useUI((s) => s.code);
   const projects = useUI((s) => s.projects);
   const threadProject = useUI((s) => s.threadProject);
+  const checkouts = useUI((s) => s.checkouts);
   const drafts = useUI((s) => s.drafts);
   const threads = useThreads((s) => s.threads);
   const workspaces = useThreads((s) => s.workspaces);
@@ -45,7 +46,7 @@ export function CodeView() {
     if (chat && chat !== ui.code.chat) useUI.setState((s) => ({ code: { ...s.code, chat } }));
   }, [threads]);
 
-  const list = useMemo(() => buildProjects(threads, projects, threadProject, workspaces), [threads, projects, threadProject, workspaces]);
+  const list = useMemo(() => buildProjects(threads, projects, threadProject, workspaces, checkouts), [threads, projects, threadProject, workspaces, checkouts]);
 
   // The project shown: picked explicitly, else the chat thread's.
   const project = useMemo(() => {
@@ -58,9 +59,9 @@ export function CodeView() {
     }
     const t = threads[chat];
     if (!t) return null;
-    const key = projectKeyFor(t, threads, projectIndex(projects, workspaces), threadProject);
+    const key = projectKeyFor(t, threads, projectIndex(projects, workspaces, checkouts), threadProject);
     return list.find((p) => p.key === key) ?? null;
-  }, [code.project, code.chat, list, drafts, threads, projects, threadProject, workspaces]);
+  }, [code.project, code.chat, list, drafts, threads, projects, threadProject, workspaces, checkouts]);
   const root = project?.path ?? null;
 
   // What the chat thread has changed, for the tree's markers.
