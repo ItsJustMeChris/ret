@@ -7,6 +7,9 @@ const DELAY = 450;
 /** Longer than this is a paragraph, not a tooltip. */
 const MAX_CHARS = 280;
 
+/** Marks an aria-label set here from a title (not one a component chose), which follows later titles. */
+const OWN_LABEL = "data-tip-label";
+
 /** Move a native `title` to `data-tip`, so only our styled tooltip ever shows. */
 function adopt(el: Element) {
   const native = el.getAttribute("title");
@@ -14,8 +17,18 @@ function adopt(el: Element) {
   el.removeAttribute("title");
   if (native) el.setAttribute("data-tip", native);
   else el.removeAttribute("data-tip");
-  // Icon-only buttons relied on title for their accessible name; keep it.
-  if (native && !el.hasAttribute("aria-label") && !el.textContent?.trim()) el.setAttribute("aria-label", native);
+  // Icon-only buttons relied on title for their accessible name; keep it, and keep it current
+  // (a status dot's title changes with its state).
+  if (el.hasAttribute(OWN_LABEL)) {
+    if (native) el.setAttribute("aria-label", native);
+    else {
+      el.removeAttribute("aria-label");
+      el.removeAttribute(OWN_LABEL);
+    }
+  } else if (native && !el.hasAttribute("aria-label") && !el.textContent?.trim()) {
+    el.setAttribute("aria-label", native);
+    el.setAttribute(OWN_LABEL, "");
+  }
 }
 
 const clip = (text: string) => (text.length > MAX_CHARS ? text.slice(0, MAX_CHARS).replace(/\s+\S*$/, "") + "…" : text);
