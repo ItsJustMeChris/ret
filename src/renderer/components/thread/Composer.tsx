@@ -360,8 +360,11 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
 
   return (
     <>
-    <ScreenDock threadId={threadId} compact={compact} />
-    <QueueTray threadId={threadId} />
+    {/* Docked on top, longest-lived first and the next message nearest the box. */}
+    <div className="composer-dock">
+      <ScreenDock threadId={threadId} compact={compact} />
+      <QueueTray threadId={threadId} />
+    </div>
     <div
       className={`composer ${running ? "running" : ""} ${elsewhere ? "elsewhere" : ""} ${compact ? "compact" : ""} ${planning ? "planning" : ""} ${ask ? "asking" : ""}`}
     >
