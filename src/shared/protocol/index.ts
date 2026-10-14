@@ -51,6 +51,8 @@ export interface ResultMap {
   "thread/read": v2.ThreadReadResponse;
   "thread/turns/list": v2.ThreadTurnsListResponse;
   "thread/loaded/list": v2.ThreadLoadedListResponse;
+  "thread/goal/get": v2.ThreadGoalGetResponse;
+  "thread/goal/set": v2.ThreadGoalSetResponse;
   "project/list": v2.ProjectListResponse;
   "turn/start": v2.TurnStartResponse;
   "model/list": v2.ModelListResponse;

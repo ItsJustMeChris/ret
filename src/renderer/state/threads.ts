@@ -10,7 +10,7 @@ import type {
   Turn,
   TurnPlanStep,
 } from "@shared/protocol";
-import type { TurnError, TurnStatus } from "@shared/protocol/generated/v2";
+import type { ThreadGoal, TurnError, TurnStatus } from "@shared/protocol/generated/v2";
 import type { Workspace } from "./projects";
 
 export interface TurnState {
@@ -95,6 +95,8 @@ export interface ThreadsState {
   background: Record<string, BackgroundTask[]>;
   /** Follow-ups typed while a turn runs; each is sent as its own turn when the current one ends. */
   queued: Record<string, QueuedMessage[]>;
+  /** The objective a thread keeps working toward across turns (Codex's `/goal`), while it has one. */
+  goals: Record<string, ThreadGoal>;
   /** Named workspaces the engines keep (see agents.ts), which the sidebar groups threads by. */
   workspaces: Workspace[];
 }
@@ -141,6 +143,7 @@ export const useThreads = create<ThreadsState>(() => ({
   external: {},
   background: {},
   queued: {},
+  goals: {},
   workspaces: [],
 }));
 
@@ -318,6 +321,16 @@ function apply(d: Draft, provider: ProviderId, method: string, p: any, hooks: Ho
       d.background = own(d.background);
       if (p.tasks?.length) d.background[p.threadId] = p.tasks;
       else delete d.background[p.threadId];
+      break;
+    }
+    case "thread/goal/updated":
+      d.goals = own(d.goals);
+      d.goals[p.threadId] = p.goal;
+      break;
+    case "thread/goal/cleared": {
+      if (!d.goals[p.threadId]) break;
+      d.goals = own(d.goals);
+      delete d.goals[p.threadId];
       break;
     }
     case "thread/project/updated":
@@ -548,6 +561,18 @@ export function patchLive(threadId: string, patch: Partial<LiveThread> | ((lt: L
     const prev = s.live[threadId] ?? emptyLive();
     const next = { ...prev, ...(typeof patch === "function" ? patch(prev) : patch) };
     return { live: { ...s.live, [threadId]: next } };
+  });
+}
+
+/** Record a thread's goal as fetched (null: it has none). */
+export function setGoal(threadId: string, goal: ThreadGoal | null) {
+  flushNow();
+  useThreads.setState((s) => {
+    if (!goal && !s.goals[threadId]) return s;
+    const goals = { ...s.goals };
+    if (goal) goals[threadId] = goal;
+    else delete goals[threadId];
+    return { goals };
   });
 }
 

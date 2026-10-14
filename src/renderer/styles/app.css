@@ -5083,6 +5083,111 @@ body.resizing .sidebar-dock {
   }
 }
 
+/* A thread's goal, docked on top of the composer (above any queued follow-ups) */
+.goal-bar {
+  width: calc(100% - 32px - 28px);
+  max-width: calc(860px - 28px);
+  margin: 6px auto 0;
+  padding: 4px;
+  border: 1px solid var(--line-2);
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  background: color-mix(in srgb, var(--bg-2) 65%, var(--bg));
+  animation: tray-in 0.2s var(--ease);
+}
+.goal-bar + .queue-tray {
+  margin-top: 0;
+  border-radius: 0;
+  border-top-color: var(--line);
+}
+.goal-bar + .composer {
+  margin-top: 0;
+}
+.goal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 0 4px 0 7px;
+  font-size: 12px;
+}
+.goal-icon {
+  flex: none;
+  color: var(--accent);
+}
+.goal-bar.paused .goal-icon,
+.goal-bar.usageLimited .goal-icon {
+  color: var(--text-3);
+}
+.goal-bar.blocked .goal-icon,
+.goal-bar.budgetLimited .goal-icon {
+  color: var(--amber);
+}
+.goal-bar.complete .goal-icon {
+  color: var(--green);
+}
+.goal-text {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  color: var(--text-3);
+}
+.goal-label {
+  font-weight: 500;
+  color: var(--text);
+}
+.goal-text:hover .goal-objective {
+  color: var(--text-2);
+}
+.goal-bar.expanded .goal-objective {
+  display: none;
+}
+.goal-time {
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.goal-actions {
+  flex: none;
+  display: flex;
+  gap: 1px;
+}
+.goal-detail {
+  padding: 2px 8px 6px 28px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.goal-full {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-2);
+}
+.goal-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+@container pane (width < 640px) {
+  .goal-bar {
+    width: calc(100% - 16px - 20px);
+    margin-top: 4px;
+  }
+}
+
 /* ==========================================================================
    Turn rail: jump between turns
    ========================================================================== */

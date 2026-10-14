@@ -18,6 +18,7 @@ import {
   ownerOf,
   patchLive,
   removePendingRequest,
+  setGoal,
   setThreadHooks,
   turnStateFrom,
   upsertThreads,
@@ -463,6 +464,7 @@ export async function hydrateThread(threadId: string) {
       itemsView: "full",
     });
     mergeTurns(threadId, res.data, res.nextCursor, "replace");
+    void loadGoal(threadId);
     // Resume it in its engine: that's what reports the thread's own settings (model, effort, speed,
     // access, Plan) for the composer, and subscribes to live events if it's running here. Not while
     // another app is running it: watching it is all Ret does then.
@@ -573,6 +575,31 @@ export function ensureSubscribed(threadId: string): Promise<void> {
   })().finally(() => resuming.delete(threadId));
   resuming.set(threadId, p);
   return p;
+}
+
+/**
+ * Fetch a thread's goal. Live events keep it current while the thread runs here; one running in
+ * another app only changes on disk, so that's re-read whenever its transcript is.
+ */
+export async function loadGoal(threadId: string) {
+  const p = await ownerFor(threadId);
+  if (!PROVIDERS[p].goals) return;
+  try {
+    const res = await rpcFor(p).request("thread/goal/get", { threadId });
+    setGoal(threadId, res.goal);
+  } catch (err) {
+    console.warn("goal fetch failed", err);
+  }
+}
+
+async function setGoalStatusImpl(threadId: string, status: "active" | "paused") {
+  const res = await rpcFor(ownerOf(threadId)).request("thread/goal/set", { threadId, status, origin: "user" });
+  setGoal(threadId, res.goal);
+}
+
+async function clearGoalImpl(threadId: string) {
+  await rpcFor(ownerOf(threadId)).request("thread/goal/clear", { threadId, origin: "user" });
+  setGoal(threadId, null);
 }
 
 // ---------------------------------------------------------------------------
@@ -1328,3 +1355,5 @@ export const renameThread = guarded("Couldn't rename thread", renameThreadImpl);
 export const archiveThread = guarded("Couldn't archive thread", archiveThreadImpl);
 export const compactThread = guarded("Couldn't compact context", compactThreadImpl);
 export const forkThread = guarded("Couldn't fork thread", forkThreadImpl);
+export const setGoalStatus = guarded("Couldn't update the goal", setGoalStatusImpl);
+export const clearGoal = guarded("Couldn't clear the goal", clearGoalImpl);
