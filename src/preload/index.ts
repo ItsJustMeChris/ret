@@ -65,6 +65,9 @@ const bridge: RetBridge = {
       }
     },
   },
+  apps: {
+    info: (appId) => ipcRenderer.invoke(IPC.appInfo, appId),
+  },
   copy: (text) => ipcRenderer.invoke(IPC.copy, text),
   edit: (command, arg) => ipcRenderer.send(IPC.edit, command, arg),
   onSpelling: (cb) => subscribe(IPC.spelling, cb),

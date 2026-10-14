@@ -8,6 +8,8 @@ import { bridge } from "../../bridge";
 import { Select } from "../ui/Select";
 import { Checkbox } from "../ui/Toggle";
 import { unwrapCommand } from "../../lib/format";
+import { appAskedFor, isPermissionAsk } from "../../state/computerUse";
+import { AppIcon, AppName } from "./ComputerUse";
 
 export function Approvals({ threadId }: { threadId: string }) {
   // Questions (request_user_input) are answered in the dock on top of the composer instead.
@@ -145,7 +147,7 @@ export function RequestCard({ req, compact }: { req: PendingRequest; compact?: b
     case "item/tool/requestUserInput":
       return <UserInputCard req={req} />;
     case "mcpServer/elicitation/request":
-      return <ElicitationCard req={req} />;
+      return isPermissionAsk(p) ? <PermissionAskCard req={req} compact={compact} /> : <ElicitationCard req={req} />;
     case "execCommandApproval":
     case "applyPatchApproval":
       return (
@@ -246,6 +248,56 @@ function UserInputCard({ req }: { req: PendingRequest }) {
           Skip
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A tool asking before it acts (Codex's computer use asking to use an app, an MCP tool asking to
+ * run): allow it once, for the rest of the session, or from now on.
+ */
+function PermissionAskCard({ req, compact }: { req: PendingRequest; compact?: boolean }) {
+  const p = req.params;
+  const meta = p._meta ?? {};
+  const persist: string[] = meta.persist;
+  const app = appAskedFor(p);
+  // The step waiting on this says what it's for ("Connect to Finder").
+  const step = useThreads((s) => (typeof meta.callId === "string" && req.threadId ? s.live[req.threadId]?.items[meta.callId] : undefined));
+  const purpose = step?.type === "mcpToolCall" && typeof (step.arguments as any)?.title === "string" ? (step.arguments as any).title : null;
+  const details: { display_name: string; name: string; value: unknown }[] = (meta.tool_params_display ?? []).filter((d: any) => !(app && d?.name === "app"));
+  const send = (action: "accept" | "decline", remember?: "session" | "always") =>
+    respondToRequest(req.key, { action, content: action === "accept" ? {} : null, _meta: remember ? { persist: remember } : null });
+  return (
+    <div className="approval">
+      <div className="approval-title">
+        {app ? (
+          <>
+            <AppIcon use={app} size={16} /> Let {PROVIDERS[req.provider].name} use <AppName use={app} />?
+          </>
+        ) : (
+          <>
+            <KeyRound size={14} /> {p.message}
+          </>
+        )}
+      </div>
+      {!compact && (purpose || details.length > 0) && (
+        <div className="approval-reason">
+          {purpose}
+          {details.map((d) => (
+            <div key={d.name}>
+              {d.display_name}: <code>{typeof d.value === "string" ? d.value : JSON.stringify(d.value)}</code>
+            </div>
+          ))}
+        </div>
+      )}
+      <Buttons
+        choices={[
+          { label: "Allow", kind: "primary", onClick: () => send("accept") },
+          ...(persist.includes("session") ? [{ label: "Allow for this session", onClick: () => send("accept", "session") }] : []),
+          ...(persist.includes("always") ? [{ label: "Always allow", onClick: () => send("accept", "always") }] : []),
+          { label: "Deny", kind: "ghost" as const, onClick: () => send("decline") },
+        ]}
+      />
     </div>
   );
 }

@@ -115,6 +115,12 @@ export interface WorktreeResult {
   repoRoot: string;
 }
 
+/** A desktop app an agent is using (computer use): its name and icon as a data URL, when installed here. */
+export interface AppInfo {
+  name: string | null;
+  icon: string | null;
+}
+
 export interface GitInfo {
   isRepo: boolean;
   root: string | null;
@@ -181,6 +187,10 @@ export interface RetBridge {
     /** Where a dropped/pasted File lives on disk; null when it has no path (e.g. dragged from a web page). */
     pathFor(file: File): string | null;
   };
+  apps: {
+    /** Looks up an app by the id computer use reports (a macOS bundle id, or a Windows executable path). */
+    info(appId: string): Promise<AppInfo>;
+  };
   /** Writes to the system clipboard (works regardless of page focus). */
   copy(text: string): Promise<void>;
   /** Native editing commands for the focused field (context menus). */
@@ -229,4 +239,5 @@ export const IPC = {
   edit: "edit:command",
   spelling: "edit:spelling",
   copy: "clipboard:write",
+  appInfo: "apps:info",
 } as const;

@@ -27,6 +27,7 @@ import { Transcript } from "./Transcript";
 import { Composer } from "./Composer";
 import { DiffView } from "./Items";
 import { RequestCard } from "./Approvals";
+import { ScreenGlance, useLiveScreen } from "./ComputerUse";
 import { bridge, isDesktop } from "../../bridge";
 import { Menu, type MenuItem } from "../Menu";
 import { StatusDot } from "../StatusDot";
@@ -308,10 +309,13 @@ function Glance({ threadId }: { threadId: string }) {
   });
   const preview = useThreads((s) => s.threads[threadId]?.preview);
   const req = useThreads((s) => Object.values(s.requests).find((r) => r.threadId === threadId));
+  const screen = useLiveScreen(threadId);
   return (
     <div className="glance">
       {req ? (
         <RequestCard req={req} compact />
+      ) : screen?.shot ? (
+        <ScreenGlance threadId={threadId} />
       ) : (
         <div className="glance-text">{plainText(last ?? preview ?? "", 600)}</div>
       )}

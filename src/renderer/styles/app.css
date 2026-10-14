@@ -4799,6 +4799,148 @@ body.resizing .sidebar-dock {
 .queue-tray + .composer {
   margin-top: 0;
 }
+
+/* Computer use: the app an agent is driving and its window, docked above the composer. */
+.screen-dock {
+  width: calc(100% - 32px - 28px);
+  max-width: calc(860px - 28px);
+  margin: 6px auto 0;
+  padding: 4px;
+  border: 1px solid var(--line-2);
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  background: color-mix(in srgb, var(--bg-2) 65%, var(--bg));
+  animation: tray-in 0.2s var(--ease);
+}
+.screen-dock + .composer {
+  margin-top: 0;
+}
+.screen-dock + .queue-tray {
+  margin-top: 0;
+  border-radius: 0;
+}
+.screen-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 0 6px 0 5px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  text-align: left;
+}
+.screen-head:not(:disabled):hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+.screen-head:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.screen-app {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 550;
+  color: var(--text);
+}
+.screen-window {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+}
+.screen-window::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--text-3);
+}
+.screen-step {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+  color: var(--text-3);
+}
+.screen-chev {
+  flex: none;
+  color: var(--text-3);
+  transform: rotate(-90deg);
+  transition: transform 0.15s var(--ease);
+}
+.screen-dock.open .screen-chev {
+  transform: none;
+}
+.screen-shot {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 0;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--bg);
+  cursor: zoom-in;
+}
+.screen-shot img {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+}
+.app-icon {
+  display: block;
+  flex: none;
+  object-fit: contain;
+}
+.tool-head .app-icon {
+  filter: saturate(0.85);
+}
+.cu-app {
+  color: var(--text);
+}
+.cu-step {
+  margin-left: 6px;
+}
+.cu-shot {
+  margin: 2px 0 8px;
+}
+.cu-window {
+  text-transform: none;
+  letter-spacing: normal;
+}
+.screen-glance {
+  position: relative;
+  height: calc(100% + 20px);
+  margin: -10px -12px;
+  background: var(--bg);
+}
+.screen-glance img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.screen-glance-label {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 5px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-2) 85%, transparent);
+  border: 1px solid var(--line-2);
+}
 .queue-row {
   display: flex;
   align-items: center;

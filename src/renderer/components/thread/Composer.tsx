@@ -10,6 +10,7 @@ import { bridge, isDesktop } from "../../bridge";
 import { toast } from "../../state/toasts";
 import { Select, type SelectOption } from "../ui/Select";
 import { QueueTray } from "./QueueTray";
+import { ScreenDock } from "./ComputerUse";
 import { composerDrafts as drafts, composerFocus, takeAttachments } from "../../state/composerDrafts";
 import { addFilesToThread } from "../../state/attach";
 import { QuestionDock, useQuestionFlow, type QuestionFlow } from "./QuestionDock";
@@ -359,6 +360,7 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
 
   return (
     <>
+    <ScreenDock threadId={threadId} compact={compact} />
     <QueueTray threadId={threadId} />
     <div
       className={`composer ${running ? "running" : ""} ${elsewhere ? "elsewhere" : ""} ${compact ? "compact" : ""} ${planning ? "planning" : ""} ${ask ? "asking" : ""}`}

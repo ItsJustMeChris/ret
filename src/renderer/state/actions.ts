@@ -27,6 +27,7 @@ import {
 } from "./threads";
 import { activeBoard, appId, appKind, fileId, isApp, isDraft, isFile, isThread, newId, updateBoard, useUI, type CanvasWin, type FocusSplit, type UIState, type ViewMode } from "./ui";
 import { onFsChanged, useFiles } from "./files";
+import { captureComputerUse, noteAppRequest } from "./computerUse";
 
 // ---------------------------------------------------------------------------
 // Boot: wire the transport into the stores.
@@ -119,6 +120,13 @@ function wireProvider(p: ProviderId) {
       case "item/started":
       case "item/completed":
         if (params?.item?.type === "userMessage" && params.item.clientId) clearOptimistic(params.threadId, params.item.clientId);
+        if (params?.item?.type === "mcpToolCall") params = { ...params, item: captureComputerUse(params.threadId, params.turnId, params.item) };
+        break;
+      case "turn/completed":
+        if (params?.turn?.items?.length) {
+          const items = params.turn.items.map((it: ThreadItem) => (it.type === "mcpToolCall" ? captureComputerUse(params.threadId, params.turn.id, it, false) : it));
+          params = { ...params, turn: { ...params.turn, items } };
+        }
         break;
     }
     enqueueNotification(p, method, params);
@@ -130,6 +138,7 @@ function wireProvider(p: ProviderId) {
       return;
     }
     addPendingRequest(p, req);
+    if (req.method === "mcpServer/elicitation/request") noteAppRequest(req.params.threadId, req.params.turnId ?? "", req.params);
     const threadId = (req.params as any)?.threadId;
     if (threadId && !useThreads.getState().visible[threadId]) {
       bridge.notify(`${PROVIDERS[p].name} needs your input`, threadTitle(useThreads.getState().threads[threadId]));
@@ -458,7 +467,7 @@ export function mergeTurns(
           if (!threadActive) state.stale = true;
         }
         turns[turn.id] = state;
-        for (const it of turn.items) items[it.id] = it;
+        for (const it of turn.items) items[it.id] = it.type === "mcpToolCall" ? captureComputerUse(threadId, turn.id, it, false) : it;
       }
       order.push(turn.id);
     }

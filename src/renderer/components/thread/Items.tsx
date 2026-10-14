@@ -26,6 +26,8 @@ import { Markdown } from "../Markdown";
 import { ThreadImage } from "./ThreadImage";
 import { PlanActions, ReplyQuestions } from "./Questions";
 import { Shimmer } from "../ui/Shimmer";
+import { appKey, appLabel, computerUseOf, outputText, useComputerUse, useScreens, type ComputerUse } from "../../state/computerUse";
+import { AppIcon, AppName } from "./ComputerUse";
 
 type Ctx = { threadId: string; cwd: string | null };
 
@@ -293,6 +295,49 @@ function McpTool({ item }: { item: Extract<ThreadItem, { type: "mcpToolCall" }> 
   );
 }
 
+/** A step of the agent using an app: the app, what the step was for, and the window it saw. */
+function ComputerUseTool({ item }: { item: Extract<ThreadItem, { type: "mcpToolCall" }> }) {
+  const use = useComputerUse(item)!;
+  const shot = useScreens((s) => s.shots[item.id]);
+  const code = (item.arguments as any)?.code;
+  const output = outputText(item);
+  const failed = item.status === "failed" || (item.result as any)?.isError === true;
+  return (
+    <Disclosure
+      icon={<AppIcon use={use} />}
+      label={
+        <>
+          <span className="cu-app">
+            <AppName use={use} />
+          </span>
+          {use.title && <span className="cu-step">{use.title}</span>}
+        </>
+      }
+      meta={
+        <>
+          {item.durationMs != null && <span>{duration(item.durationMs)}</span>}
+          <Status status={failed && item.status === "completed" ? "failed" : item.status} />
+        </>
+      }
+      tone={failed ? "error" : undefined}
+    >
+      {shot && (
+        <div className="cu-shot">
+          <ThreadImage src={shot} />
+        </div>
+      )}
+      {use.window && (
+        <div className="kv">
+          {use.kind === "browser" ? "Page" : "Window"} · <span className="cu-window">{use.window}</span>
+        </div>
+      )}
+      {typeof code === "string" && <pre className="output" dangerouslySetInnerHTML={{ __html: highlight(code, "js") }} />}
+      {item.error && <div className="error-text">{item.error.message}</div>}
+      {output && <pre className="output">{tail(output, 20_000)}</pre>}
+    </Disclosure>
+  );
+}
+
 function DynamicTool({ item }: { item: Extract<ThreadItem, { type: "dynamicToolCall" }> }) {
   return (
     <Disclosure
@@ -366,7 +411,14 @@ export function activitySummary(items: ThreadItem[]): string {
   let cmds = 0;
   let tools = 0;
   let web = 0;
+  const apps = new Map<string, ComputerUse>();
+  const known = useScreens.getState().uses;
   for (const it of items) {
+    const use = computerUseOf(it) && (known[it.id] ?? computerUseOf(it));
+    if (use) {
+      apps.set(appKey(use), use);
+      continue;
+    }
     if (it.type === "commandExecution") {
       const t = it.commandActions?.[0]?.type;
       if (t === "read") reads += it.commandActions.length;
@@ -375,7 +427,10 @@ export function activitySummary(items: ThreadItem[]): string {
     } else if (it.type === "mcpToolCall" || it.type === "dynamicToolCall" || it.type === "collabAgentToolCall") tools++;
     else if (it.type === "webSearch") web++;
   }
+  // Steps that never said which app count with the ones that did.
+  if (apps.size > 1) apps.delete("computer");
   const parts: string[] = [];
+  if (apps.size) parts.push(`used ${listOf([...new Set([...apps.values()].map((u) => appLabel(u)))])}`);
   if (reads) parts.push(`read ${reads} ${reads === 1 ? "file" : "files"}`);
   if (searches) parts.push(`${searches} ${searches === 1 ? "search" : "searches"}`);
   if (cmds) parts.push(`ran ${cmds} ${cmds === 1 ? "command" : "commands"}`);
@@ -384,6 +439,8 @@ export function activitySummary(items: ThreadItem[]): string {
   const s = parts.join(", ") || "thought";
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
+
+const listOf = (names: string[]) => (names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
 
 export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: string; ctx: Ctx; live: boolean }) {
   const item = useThreads((s) => s.live[ctx.threadId]?.items[itemId]);
@@ -400,7 +457,7 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
     case "fileChange":
       return <FileChange item={item} ctx={ctx} />;
     case "mcpToolCall":
-      return <McpTool item={item} />;
+      return computerUseOf(item) ? <ComputerUseTool item={item} /> : <McpTool item={item} />;
     case "dynamicToolCall":
       return <DynamicTool item={item} />;
     case "webSearch":

@@ -11,11 +11,25 @@ import { diffStats, duration } from "../../lib/format";
 import { Approvals } from "./Approvals";
 import { TurnRail } from "./TurnRail";
 import { Shimmer } from "../ui/Shimmer";
+import { appKey, computerUseOf, useAppInfosFor, useScreens } from "../../state/computerUse";
 
 type Ctx = { threadId: string; cwd: string | null };
 
 function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: boolean }) {
   const items = useThreads(useShallow((s) => ids.map((id) => s.live[ctx.threadId]?.items[id]).filter(Boolean) as ThreadItem[]));
+  // Each app the agent used shows as the last look it took at it.
+  const shots = useScreens(
+    useShallow((s) => {
+      const byApp = new Map<string, string>();
+      for (const it of items) {
+        const use = s.shots[it.id] && (s.uses[it.id] ?? computerUseOf(it));
+        if (use) byApp.set(appKey(use), s.shots[it.id]);
+      }
+      return [...byApp.values()];
+    }),
+  );
+  // The folded summary names the apps it used, so it needs their names before any row asks.
+  useAppInfosFor(useMemo(() => [...new Set(items.flatMap((it) => computerUseOf(it)?.appId ?? []))], [items]));
   const [open, setOpen] = useState(false);
   if (live) {
     // While the agent works, show the most recent steps live.
@@ -44,8 +58,11 @@ function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: bool
         <span>{activitySummary(items)}</span>
         {failed && <span className="badge err">failed step</span>}
       </button>
-      {!open && viewed.length > 0 && (
+      {!open && viewed.length + shots.length > 0 && (
         <div className="activity-thumbs">
+          {shots.map((src, i) => (
+            <ThreadImage key={`s${i}`} src={src} size="sm" />
+          ))}
           {viewed.slice(0, 6).map((path, i) => (
             <ThreadImage key={i} path={path} cwd={ctx.cwd} size="sm" />
           ))}
