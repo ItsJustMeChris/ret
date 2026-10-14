@@ -36,6 +36,9 @@
   --shadow-lg: 0 30px 80px -20px rgba(0, 0, 0, 1), 0 10px 24px rgba(0, 0, 0, 0.75);
   --grid-dot: rgba(255, 255, 255, 0.085);
   --code-bg: #0a0a0a;
+  /* Chart series, one per provider (checked for color-blind separation against --bg). */
+  --series-codex: #7383f7;
+  --series-claude: #d95926;
 }
 
 [data-theme="light"] {
@@ -63,6 +66,8 @@
   --shadow-lg: 0 30px 80px -20px rgba(20, 20, 50, 0.35), 0 8px 20px rgba(20, 20, 50, 0.1);
   --grid-dot: rgba(10, 10, 40, 0.11);
   --code-bg: #f3f3f7;
+  --series-codex: #4f5fe8;
+  --series-claude: #d95926;
 }
 
 /* ==========================================================================
@@ -1997,6 +2002,34 @@ body.resizing .transcript {
     transform: scale(0.7);
   }
 }
+
+/* Work left running after the turn (background shells, subagents, monitors): busy, but calmer than a turn. */
+.pulse.calm {
+  background: var(--green);
+  animation-duration: 2.6s;
+}
+.background-work {
+  padding: 2px 0 8px;
+}
+.background-task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px 2px 22px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.background-task svg {
+  flex: none;
+  color: var(--text-3);
+}
+.background-task-desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .turn-error,
 .setting-error {
   display: flex;
@@ -2515,6 +2548,7 @@ body.resizing .transcript {
 }
 .side-panel h4,
 .empty-grid h4,
+.tok h4,
 .modal h4 {
   margin: 0 0 8px;
   font-size: 11px;
@@ -2746,6 +2780,37 @@ body.resizing .transcript {
 }
 .canvas-viewport.space-pan .cwin {
   pointer-events: none;
+}
+
+/* Middle-click autoscroll (lib/autoscroll.ts): the mark it scrolls from, and the way it's going. */
+.autoscroll-mark {
+  position: fixed;
+  z-index: 10000;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow);
+  color: var(--text-2);
+  fill: currentColor;
+  pointer-events: none;
+}
+html.autoscrolling,
+html.autoscrolling * {
+  cursor: ns-resize !important;
+  user-select: none;
+}
+html.autoscrolling[data-autoscroll="up"],
+html.autoscrolling[data-autoscroll="up"] * {
+  cursor: n-resize !important;
+}
+html.autoscrolling[data-autoscroll="down"],
+html.autoscrolling[data-autoscroll="down"] * {
+  cursor: s-resize !important;
 }
 .canvas-world {
   position: absolute;
@@ -3675,6 +3740,145 @@ body.resizing .transcript {
   color: var(--text);
 }
 
+/* Token usage chart (home screen): a column per day, stacked by provider */
+.tok {
+  margin-top: 36px;
+}
+.tok-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-bottom: 12px;
+}
+.tok .tok-head h4 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.tok-readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.tok-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.tok-key i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.tok-key b {
+  font-weight: 600;
+  color: var(--text);
+  /* The numbers swap as the pointer moves; equal-width digits keep them from jittering. */
+  font-variant-numeric: tabular-nums;
+}
+.tok-plot {
+  position: relative;
+  height: 120px;
+  margin-left: 36px;
+  border-radius: 4px;
+}
+.tok-plot:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 4px;
+}
+.tok-gridline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--line);
+  transition: bottom 500ms var(--ease);
+}
+.tok-gridline.base {
+  background: var(--line-2);
+}
+.tok-gridline span {
+  position: absolute;
+  right: calc(100% + 8px);
+  top: -6px;
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tok-cols {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+.tok-col {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-radius: 4px 4px 0 0;
+}
+.tok-col.on {
+  background: var(--line);
+}
+/* A day's bar rises from the baseline when it first has tokens, then eases to each new total. */
+.tok-stack {
+  width: min(70%, 24px);
+  min-height: 2px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  border-radius: 4px 4px 0 0;
+  overflow: hidden;
+  transform-origin: bottom;
+  animation: tok-rise 600ms var(--ease) both;
+  transition: height 500ms var(--ease);
+}
+.tok-stack > div {
+  flex-basis: 0;
+  min-height: 0;
+  transition: flex-grow 500ms var(--ease);
+}
+@keyframes tok-rise {
+  from {
+    transform: scaleY(0);
+  }
+}
+.tok-col.on .tok-stack {
+  filter: brightness(1.15);
+}
+.tok-axis {
+  position: relative;
+  height: 14px;
+  margin: 6px 0 0 36px;
+  font-size: 10px;
+  color: var(--text-3);
+}
+.tok-axis span {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.tok-axis span.end {
+  right: 0;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tok-stack,
+  .tok-stack > div,
+  .tok-gridline {
+    animation: none;
+    transition: none;
+  }
+}
+
 /* Fork lineage in the side panel */
 .lineage {
   display: flex;
@@ -4365,6 +4569,14 @@ textarea::placeholder {
 }
 .status-dot.elsewhere::after {
   border-style: dashed;
+}
+/* Turn over, background work still running */
+.status-dot.running.background {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--green);
+}
+.status-dot.running.background::after {
+  animation-duration: 3.2s;
 }
 .composer-elsewhere {
   display: flex;

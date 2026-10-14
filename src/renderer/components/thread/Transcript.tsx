@@ -1,10 +1,11 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { ChevronRight, CircleAlert, FileDiff, GitFork, LoaderCircle } from "lucide-react";
+import { Bot, ChevronRight, CircleAlert, CircleDashed, FileDiff, GitFork, LoaderCircle, Radar, SquareTerminal, Workflow } from "lucide-react";
 import { ownerOf, useThreads } from "../../state/threads";
 import { PROVIDERS } from "../../agents";
 import { forkThread, loadOlder, resendUnanswered } from "../../state/actions";
-import type { ThreadItem } from "@shared/protocol";
+import type { BackgroundTask, ThreadItem } from "@shared/protocol";
+import { backgroundLabel, useBackgroundOnly } from "../StatusDot";
 import { activitySummary, DiffView, isActivity, ItemView } from "./Items";
 import { ThreadImage } from "./ThreadImage";
 import { diffStats, duration } from "../../lib/format";
@@ -90,6 +91,7 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
   );
   const [showDiff, setShowDiff] = useState(false);
   const elsewhere = useThreads((s) => s.external[ctx.threadId]?.turnId === turnId);
+  const background = useThreads((s) => s.background[ctx.threadId]?.length ?? 0);
   if (!turn) return null;
   const live = turn.status === "inProgress" && !turn.stale;
 
@@ -135,11 +137,17 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
       {!live && !pending && (
         <div className="turn-foot">
           {turn.status === "interrupted" && <span className="badge warn">interrupted</span>}
-          {turn.stale && (
-            <span className="badge warn" title={`This turn didn't finish in Ret's session. It may still be running in another ${PROVIDERS[ownerOf(ctx.threadId)].name} app, or it was cut off.`}>
-              unfinished
-            </span>
-          )}
+          {turn.stale &&
+            (background ? (
+              // Not cut off: the agent left work running and will be back.
+              <span className="badge" title={`${PROVIDERS[ownerOf(ctx.threadId)].name} is waiting on work it left running, and picks the thread up again when it's done.`}>
+                {background === 1 ? "1 background task" : `${background} background tasks`}
+              </span>
+            ) : (
+              <span className="badge warn" title={`This turn didn't finish in Ret's session. It may still be running in another ${PROVIDERS[ownerOf(ctx.threadId)].name} app, or it was cut off.`}>
+                unfinished
+              </span>
+            ))}
           {turn.durationMs != null && <span>{duration(turn.durationMs)}</span>}
           {stats && (stats.add > 0 || stats.del > 0) && (
             <button className="link" onClick={() => setShowDiff(!showDiff)}>
@@ -185,6 +193,44 @@ function Working({ since, elsewhere }: { since: number | null; elsewhere?: strin
       <Shimmer text={elsewhere ? `Working in another ${elsewhere} app` : "Working"} />
       <span className="muted">{secs >= 1 ? duration(secs * 1000) : ""}</span>
     </div>
+  );
+}
+
+const TASK_ICON: Record<BackgroundTask["kind"], typeof Bot> = { shell: SquareTerminal, agent: Bot, monitor: Radar, workflow: Workflow, task: CircleDashed };
+
+/**
+ * Work the agent left running when its turn ended: a background shell, subagent or monitor. It
+ * takes the thread up again once that finishes, so the thread is waiting, not done (or dead).
+ */
+function BackgroundWork({ threadId }: { threadId: string }) {
+  const count = useBackgroundOnly(threadId);
+  const tasks = useThreads((s) => s.background[threadId]);
+  const agent = useThreads((s) => PROVIDERS[s.owner[threadId] ?? "codex"].name);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!count) return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [count]);
+  if (!count || !tasks) return null;
+  return (
+    <section className="background-work">
+      <div className="working">
+        <span className="pulse calm" />
+        <span>{backgroundLabel(count)}</span>
+        <span className="muted">{agent} picks this up again when it's done</span>
+      </div>
+      {tasks.map((t) => {
+        const Icon = TASK_ICON[t.kind];
+        return (
+          <div key={t.id} className="background-task" title={`${t.kind} · ${t.id}`}>
+            <Icon size={12} />
+            <span className="background-task-desc">{t.description || "Background task"}</span>
+            <span className="muted">{duration(Math.max(0, Date.now() - t.startedAt))}</span>
+          </div>
+        );
+      })}
+    </section>
   );
 }
 
@@ -246,6 +292,7 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
         {lt.turnOrder.map((id) => (
           <Turn key={id} turnId={id} ctx={ctx} />
         ))}
+        <BackgroundWork threadId={threadId} />
         {lt.notice && <div className="notice">{lt.notice}</div>}
         {lt.error && (
           <div className="turn-error">

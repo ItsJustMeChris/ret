@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { ProviderId } from "@shared/bridge";
 import type {
+  BackgroundTask,
   ServerRequest,
   Thread,
   ThreadItem,
@@ -54,6 +55,8 @@ export interface LiveThread {
   activeTurnId: string | null;
   tokenUsage: ThreadTokenUsage | null;
   settings: ThreadSettings | null;
+  /** When each sleep (the agent's `clock.sleep`) seen here started and ended, in ms: its item carries neither. */
+  sleeps: Record<string, { startedAt: number | null; endedAt: number | null }>;
   /** Transient banner, e.g. "reconnecting… (retrying)". */
   notice: string | null;
   error: string | null;
@@ -88,6 +91,8 @@ export interface ThreadsState {
   attended: Record<string, number>;
   /** Threads whose latest turn is running in a different Codex process (VS Code, CLI, another app-server). */
   external: Record<string, ExternalRun>;
+  /** Work a thread left running after its turn (Claude Code's background shells, subagents, monitors), here or in another app. */
+  background: Record<string, BackgroundTask[]>;
   /** Follow-ups typed while a turn runs; each is sent as its own turn when the current one ends. */
   queued: Record<string, QueuedMessage[]>;
   /** Named workspaces the engines keep (see agents.ts), which the sidebar groups threads by. */
@@ -119,6 +124,7 @@ export const emptyLive = (): LiveThread => ({
   activeTurnId: null,
   tokenUsage: null,
   settings: null,
+  sleeps: {},
   notice: null,
   error: null,
 });
@@ -133,6 +139,7 @@ export const useThreads = create<ThreadsState>(() => ({
   visible: {},
   attended: {},
   external: {},
+  background: {},
   queued: {},
   workspaces: [],
 }));
@@ -234,6 +241,20 @@ function putItem(lt: LiveThread, turnId: string, item: ThreadItem) {
   }
 }
 
+/** A sleep's item says how long it may last, not whether it's over, so note when it starts and ends. */
+function markSleep(lt: LiveThread, id: string, started: boolean) {
+  lt.sleeps = own(lt.sleeps);
+  lt.sleeps[id] = started ? { startedAt: Date.now(), endedAt: null } : { startedAt: lt.sleeps[id]?.startedAt ?? null, endedAt: Date.now() };
+}
+
+/** The turn is over, so any sleep still open ended with it (interrupted, or its end never arrived). */
+function endSleeps(lt: LiveThread) {
+  const open = Object.keys(lt.sleeps).filter((id) => lt.sleeps[id].endedAt == null);
+  if (!open.length) return;
+  lt.sleeps = own(lt.sleeps);
+  for (const id of open) lt.sleeps[id] = { ...lt.sleeps[id], endedAt: Date.now() };
+}
+
 function mutItem<T extends ThreadItem["type"]>(
   lt: LiveThread,
   turnId: string,
@@ -291,6 +312,14 @@ function apply(d: Draft, provider: ProviderId, method: string, p: any, hooks: Ho
     case "thread/name/updated":
       setThread(d, p.threadId, { name: p.threadName ?? null });
       break;
+    case "thread/backgroundTasks/updated": {
+      // Ret's own (Claude Code engine): the thread's whole list, replacing the last one.
+      if (!p.tasks?.length && !d.background[p.threadId]) break;
+      d.background = own(d.background);
+      if (p.tasks?.length) d.background[p.threadId] = p.tasks;
+      else delete d.background[p.threadId];
+      break;
+    }
     case "thread/project/updated":
       setThread(d, p.threadId, { projectId: p.projectId ?? null });
       break;
@@ -350,6 +379,7 @@ function apply(d: Draft, provider: ProviderId, method: string, p: any, hooks: Ho
         lt.turnOrder.push(turn.id);
       }
       if (lt.activeTurnId === turn.id) lt.activeTurnId = null;
+      endSleeps(lt);
       lt.notice = null;
       setThread(d, p.threadId, { updatedAt: Math.floor(Date.now() / 1000), recencyAt: Math.floor(Date.now() / 1000) });
       if (!d.attended[p.threadId]) {
@@ -366,9 +396,12 @@ function apply(d: Draft, provider: ProviderId, method: string, p: any, hooks: Ho
       turnOf(liveOf(d, p.threadId), p.turnId).plan = { explanation: p.explanation, steps: p.plan };
       break;
     case "item/started":
-    case "item/completed":
-      putItem(liveOf(d, p.threadId), p.turnId, p.item);
+    case "item/completed": {
+      const lt = liveOf(d, p.threadId);
+      putItem(lt, p.turnId, p.item);
+      if (p.item?.type === "sleep") markSleep(lt, p.item.id, method === "item/started");
       break;
+    }
     case "item/agentMessage/delta": {
       const it = mutItem(liveOf(d, p.threadId), p.turnId, p.itemId, "agentMessage", () => ({
         type: "agentMessage",

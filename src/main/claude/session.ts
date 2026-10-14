@@ -12,7 +12,8 @@ import type {
   SDKRateLimitInfo,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { ThreadItem, ThreadStatus, ThreadTokenUsage, Turn, TurnPlanStep, UserInput } from "../../shared/protocol";
+import type { BackgroundTask, ThreadItem, ThreadStatus, ThreadTokenUsage, Turn, TurnPlanStep, UserInput } from "../../shared/protocol";
+import { kindOf, sameTasks } from "./background";
 import { agentMessage } from "./history";
 import { claudeEnv } from "./platform";
 import { blocksOf, localCommandOutput, planText, todoPlan, toolItem, type ToolResult, type ToolUse } from "./translate";
@@ -125,6 +126,8 @@ export class ClaudeSession {
   /** Model the session reports running (system/init), for the thread's settings. */
   runningModel: string | null = null;
   pendingRequests = new Set<AbortController>();
+  /** Work the process runs on after the turn (background shells, subagents, monitors); it wakes the session when done. */
+  background: BackgroundTask[] = [];
 
   constructor(
     readonly config: ThreadConfig,
@@ -210,6 +213,7 @@ export class ClaudeSession {
     this.applied = null;
     this.cancelRequests();
     if (this.turn) this.finishTurn(this.turn.interrupted ? "interrupted" : "failed", error ?? "Claude Code exited");
+    this.setBackground([]); // its background work went with it
     this.host.changed(this);
   }
 
@@ -229,6 +233,7 @@ export class ClaudeSession {
     } catch {
       /* already gone */
     }
+    this.setBackground([]);
     this.host.changed(this);
   }
 
@@ -237,12 +242,25 @@ export class ClaudeSession {
     this.pendingRequests.clear();
   }
 
+  /** Close the process after a quiet spell, but never while it runs background work (that would end it). */
   private armIdle() {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
-      if (!this.turn) this.close();
+      if (!this.turn && !this.background.length) this.close();
     }, IDLE_CLOSE_MS);
+  }
+
+  /**
+   * Claude Code's full set of live background tasks (`background_tasks_changed`, a level signal:
+   * replace, don't pair start/end events). Housekeeping ("ambient") tasks aren't work to show.
+   */
+  private setBackground(tasks: BackgroundTask[]) {
+    if (sameTasks(this.background, tasks)) return;
+    this.background = tasks;
+    this.host.notify("thread/backgroundTasks/updated", { threadId: this.config.id, tasks });
+    // Done with its background work: the process may now close after the usual quiet spell.
+    if (!tasks.length && !this.turn && this.query) this.armIdle();
   }
 
   /** Push changed model / effort / permission mode into the running process. */
@@ -419,6 +437,14 @@ export class ClaudeSession {
       case "status":
         if (this.turn) this.host.notify("warning", { threadId: this.config.id, message: msg.status === "compacting" ? "Compacting context…" : "" });
         return;
+      case "background_tasks_changed": {
+        const started = new Map(this.background.map((t) => [t.id, t.startedAt]));
+        const tasks: BackgroundTask[] = (msg.tasks ?? [])
+          .filter((t: any) => !t.ambient)
+          .map((t: any) => ({ id: String(t.task_id), kind: kindOf(t.task_type), description: String(t.description ?? ""), startedAt: started.get(String(t.task_id)) ?? Date.now() }));
+        this.setBackground(tasks);
+        return;
+      }
       case "compact_boundary": {
         const turn = this.ensureTurn();
         this.emitItem("item/completed", { type: "contextCompaction", id: msg.uuid ?? `${turn.id}:compact` });

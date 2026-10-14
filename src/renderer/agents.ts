@@ -39,6 +39,8 @@ export interface AgentProvider {
   externalQuietS: number | null;
   /** Keeps named workspaces of folders (`project/list`: the ChatGPT and Codex apps' projects) for the sidebar to group by. */
   workspaces: boolean;
+  /** Ret titles its threads (Codex leaves that to each client; Claude Code titles its own sessions). */
+  autoTitle: boolean;
   /** Where the provider's own settings live, for "inherit" labels. */
   configName: string;
   /** Which access choice a thread's reported settings amount to, when the engine doesn't name it. */
@@ -85,6 +87,7 @@ const codex: AgentProvider = {
   external: true,
   externalQuietS: 10 * 60,
   workspaces: true,
+  autoTitle: true,
   configName: "config.toml",
   accessOf: (approvalPolicy, sandbox) => {
     const type = (sandbox as { type?: string } | null)?.type;
@@ -114,6 +117,7 @@ const claude: AgentProvider = {
   // A session can sit busy for hours without writing (waiting on its subagents or teammates).
   externalQuietS: null,
   workspaces: false,
+  autoTitle: false,
   configName: "Claude Code settings",
 };
 

@@ -64,6 +64,7 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
   const selected = useUI((s) => s.inbox.selected);
   const projects = useUI((s) => s.projects);
   const threadProject = useUI((s) => s.threadProject);
+  const checkouts = useUI((s) => s.checkouts);
   const threads = useThreads((s) => s.threads);
   const workspaces = useThreads((s) => s.workspaces);
 
@@ -98,7 +99,7 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
 
   const projectName = useMemo(() => {
     const map = new Map<string, string>();
-    for (const p of buildProjects(threads, projects, threadProject, workspaces)) {
+    for (const p of buildProjects(threads, projects, threadProject, workspaces, checkouts)) {
       const walk = (nodes: ThreadNode[]) => {
         for (const n of nodes) {
           map.set(n.thread.id, p.name);
@@ -108,7 +109,7 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
       walk(p.roots);
     }
     return map;
-  }, [threads, projects, threadProject, workspaces]);
+  }, [threads, projects, threadProject, workspaces, checkouts]);
 
   const sections = useMemo(() => {
     const by: Record<Section, string[]> = { attention: [], unread: [], error: [], running: [] };

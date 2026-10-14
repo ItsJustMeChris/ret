@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import {
   Bot,
   Brain,
@@ -7,6 +7,7 @@ import {
   FileText,
   FolderOpen,
   Globe,
+  Hourglass,
   Image as ImageIcon,
   ListChecks,
   LoaderCircle,
@@ -364,6 +365,31 @@ function WebSearch({ item }: { item: Extract<ThreadItem, { type: "webSearch" }> 
   return <Disclosure icon={<Globe size={13} />} label={label} />;
 }
 
+/**
+ * The agent's `clock.sleep`. Only the latest step of a running turn can still be waiting; it counts
+ * down until it ends (early, if new input arrives), and then says how long it took.
+ */
+function Sleep({ item, threadId, live }: { item: Extract<ThreadItem, { type: "sleep" }>; threadId: string; live: boolean }) {
+  const seen = useThreads((s) => s.live[threadId]?.sleeps[item.id]);
+  const waiting = live && seen?.endedAt == null;
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!waiting) return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [waiting]);
+  // What was asked for is a round figure: "5m", not "5m 0s".
+  const requested = duration(item.durationMs).replace(/ 0[smh]$/, "");
+  if (waiting) {
+    const left = seen?.startedAt != null ? Math.ceil(Math.max(0, item.durationMs - (Date.now() - seen.startedAt)) / 1000) : null;
+    const meta = left == null ? `up to ${requested}` : left < 60 ? `${left}s left` : `${duration(left * 1000)} left`;
+    return <Disclosure icon={<LoaderCircle className="spin" size={13} />} label="Waiting" meta={meta} tone="muted" />;
+  }
+  // From history there's no telling how long it really ran (new input cuts a sleep short).
+  const took = seen?.startedAt != null && seen.endedAt != null ? duration(seen.endedAt - seen.startedAt) : `up to ${requested}`;
+  return <Disclosure icon={<Hourglass size={13} />} label="Waited" meta={took} tone="muted" />;
+}
+
 function Collab({ item }: { item: Extract<ThreadItem, { type: "collabAgentToolCall" }> }) {
   const verb: Record<string, string> = {
     spawnAgent: "Spawned agent",
@@ -411,6 +437,7 @@ export function activitySummary(items: ThreadItem[]): string {
   let cmds = 0;
   let tools = 0;
   let web = 0;
+  let waits = 0;
   const apps = new Map<string, ComputerUse>();
   const known = useScreens.getState().uses;
   for (const it of items) {
@@ -426,6 +453,7 @@ export function activitySummary(items: ThreadItem[]): string {
       else cmds++;
     } else if (it.type === "mcpToolCall" || it.type === "dynamicToolCall" || it.type === "collabAgentToolCall") tools++;
     else if (it.type === "webSearch") web++;
+    else if (it.type === "sleep") waits++;
   }
   // Steps that never said which app count with the ones that did.
   if (apps.size > 1) apps.delete("computer");
@@ -436,6 +464,7 @@ export function activitySummary(items: ThreadItem[]): string {
   if (cmds) parts.push(`ran ${cmds} ${cmds === 1 ? "command" : "commands"}`);
   if (tools) parts.push(`${tools} tool ${tools === 1 ? "call" : "calls"}`);
   if (web) parts.push(`${web} web ${web === 1 ? "lookup" : "lookups"}`);
+  if (waits) parts.push(waits === 1 ? "waited" : `waited ${waits} times`);
   const s = parts.join(", ") || "thought";
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
@@ -510,7 +539,7 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
     case "hookPrompt":
       return <div className="hook">{item.fragments.map((f) => f.text).join("\n")}</div>;
     case "sleep":
-      return <Disclosure icon={<LoaderCircle size={13} />} label="Waiting" tone="muted" />;
+      return <Sleep item={item} threadId={ctx.threadId} live={live} />;
     default:
       return null;
   }

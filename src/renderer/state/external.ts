@@ -129,6 +129,10 @@ async function check(p: ProviderId, t: Thread, moved: boolean) {
     if (!visible || !document.hasFocus()) {
       bridge.notify(last?.status === "failed" ? "Turn failed elsewhere" : `${PROVIDERS[p].name} finished elsewhere`, threadTitle(t));
     }
+  } else if (moved) {
+    // A turn came and went between two looks (say one a background task's end woke): nothing to
+    // announce, but a transcript on screen is behind, perhaps still showing it as unfinished.
+    refresh(p, t.id);
   }
 }
 

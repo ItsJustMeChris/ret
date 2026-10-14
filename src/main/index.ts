@@ -14,7 +14,7 @@ import { findSystemCodex, probeVersion } from "./codex/platform";
 import { ClaudeEngine } from "./claude/engine";
 import { findSystemClaude, openLoginTerminal, probeClaudeVersion } from "./claude/platform";
 import { ClaudeUpdater } from "./claude/updater";
-import { createWorktree, gitInfo } from "./git";
+import { createWorktree, gitInfo, mainCheckouts } from "./git";
 import { appInfo } from "./apps";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
@@ -509,6 +509,7 @@ function registerIpc() {
   });
 
   ipcMain.handle(IPC.gitInfo, (_e, p: string) => gitInfo(p));
+  ipcMain.handle(IPC.gitCheckouts, (_e, cwds: string[]) => mainCheckouts(cwds));
   ipcMain.handle(IPC.gitWorktree, (_e, cwd: string, label: string) => createWorktree(join(userData, "worktrees"), cwd, label));
 
   ipcMain.handle(IPC.saveImage, async (_e, data: ArrayBuffer, ext: string) => {

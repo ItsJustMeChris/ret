@@ -145,6 +145,7 @@ function createWebBridge(base: string): RetBridge {
       createWorktree: async () => {
         throw new Error("Worktrees need the desktop app");
       },
+      mainCheckouts: async () => ({}),
     },
     files: {
       saveImage: async () => {

@@ -180,6 +180,8 @@ export interface RetBridge {
   git: {
     info(path: string): Promise<GitInfo>;
     createWorktree(cwd: string, label: string): Promise<WorktreeResult>;
+    /** Folder → the same place in its main checkout, for those that are linked worktrees. */
+    mainCheckouts(cwds: string[]): Promise<Record<string, string>>;
   };
   files: {
     saveImage(data: ArrayBuffer, ext: string): Promise<string>;
@@ -229,6 +231,7 @@ export const IPC = {
   openPath: "shell:openPath",
   gitInfo: "git:info",
   gitWorktree: "git:worktree",
+  gitCheckouts: "git:checkouts",
   saveImage: "files:saveImage",
   notify: "app:notify",
   setTheme: "app:setTheme",

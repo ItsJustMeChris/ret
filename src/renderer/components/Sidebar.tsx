@@ -34,12 +34,12 @@ export function Sidebar() {
   const threads = useThreads((s) => s.threads);
   const workspaces = useThreads((s) => s.workspaces);
   const listLoaded = useThreads((s) => s.listLoaded);
-  const { projects, threadProject } = useUI(useShallow((s) => ({ projects: s.projects, threadProject: s.threadProject })));
+  const { projects, threadProject, checkouts } = useUI(useShallow((s) => ({ projects: s.projects, threadProject: s.threadProject, checkouts: s.checkouts })));
   const docked = useUI((s) => s.sidebarOpen);
   const [filter, setFilter] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
-  const tree = useMemo(() => buildProjects(threads, projects, threadProject, workspaces), [threads, projects, threadProject, workspaces]);
+  const tree = useMemo(() => buildProjects(threads, projects, threadProject, workspaces, checkouts), [threads, projects, threadProject, workspaces, checkouts]);
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -376,7 +376,7 @@ const ThreadRow = memo(function ThreadRow({
 }) {
   const t = node.thread;
   const active = useIsActive(t.id);
-  const worktree = useUI((s) => s.worktrees[t.id]);
+  const worktree = useUI((s) => !!s.worktrees[t.id] || !!s.checkouts[t.cwd]);
   const state: ThreadState = useThreadState(t.id);
   const [renaming, setRenaming] = useState(false);
 

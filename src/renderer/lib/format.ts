@@ -12,15 +12,27 @@ export function duration(ms: number | null | undefined): string {
   if (ms == null) return "";
   if (ms < 1000) return `${ms}ms`;
   const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
-  const m = Math.floor(s / 60);
-  return `${m}m ${Math.round(s % 60)}s`;
+  if (s < 59.5) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
+  // Two units from the largest that applies: 4m 12s, 2h 5m, 3d 4h.
+  const total = Math.round(s);
+  const d = Math.floor(total / 86_400);
+  const h = Math.floor((total % 86_400) / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  return `${m}m ${total % 60}s`;
 }
 
 export function compactNumber(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  return `${(n / 1_000_000_000).toFixed(1)}B`;
+}
+
+/** A date's local calendar day as YYYY-MM-DD, the form `account/usage/read` buckets days by. */
+export function localDay(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 /**

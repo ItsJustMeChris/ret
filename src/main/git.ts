@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdir } from "node:fs/promises";
-import { basename, join, relative, resolve } from "node:path";
+import { mkdir, stat } from "node:fs/promises";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import type { GitInfo, WorktreeResult } from "../shared/bridge";
 
 function git(cwd: string, args: string[]): Promise<string> {
@@ -20,6 +20,45 @@ export async function gitInfo(cwd: string): Promise<GitInfo> {
   } catch {
     return { isRepo: false, root: null, branch: null };
   }
+}
+
+/** Whether the nearest `.git` at or above `dir` is a file: a linked worktree's (or a submodule's). */
+async function inLinkedCheckout(dir: string): Promise<boolean> {
+  for (let d = resolve(dir); ; d = dirname(d)) {
+    const s = await stat(join(d, ".git")).catch(() => null);
+    if (s) return s.isFile();
+    if (dirname(d) === d) return false;
+  }
+}
+
+/**
+ * The same place in a linked worktree's main checkout, or null for any other folder. Asks git
+ * for the shared git dir the way the Codex app does, so its worktrees group the same way here.
+ */
+async function mainCheckout(cwd: string): Promise<string | null> {
+  if (!(await inLinkedCheckout(cwd))) return null;
+  try {
+    const [top, common] = (await git(cwd, ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"])).split("\n");
+    if (basename(common) !== ".git") return null; // a submodule, or a bare repo's worktree
+    const main = dirname(common);
+    if (resolve(main) === resolve(top)) return null;
+    const sub = relative(top, cwd);
+    return sub && !sub.startsWith("..") ? join(main, sub) : main;
+  } catch {
+    return null;
+  }
+}
+
+/** Main checkouts for those of `cwds` that are linked worktrees; the rest are left out. */
+export async function mainCheckouts(cwds: string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  await Promise.all(
+    cwds.map(async (cwd) => {
+      const main = await mainCheckout(cwd);
+      if (main) out[cwd] = main;
+    }),
+  );
+  return out;
 }
 
 function slugify(label: string) {

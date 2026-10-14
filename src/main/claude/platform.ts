@@ -89,6 +89,9 @@ export async function findSystemClaude(): Promise<string | null> {
   return null;
 }
 
+/** Where Claude Code keeps its state: transcripts (`projects/`), the session registry (`sessions/`). */
+export const claudeConfigDir = () => process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+
 /**
  * Environment for a claude process. Ret may itself have been started from inside a Claude Code
  * session (a terminal tab, a dev loop); that session's host variables would make the child think

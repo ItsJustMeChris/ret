@@ -8,6 +8,7 @@ import { guarded, toast } from "./toasts";
 import { normPath, projectIndex, projectKeyFor, threadTitle, type Workspace } from "./projects";
 import { fillComposer } from "./composerDrafts";
 import { backfillLineage, lineageKnown } from "./lineage";
+import { cancelTitle, isTitleThread, titleEvent, titleFromMessage } from "./titles";
 import {
   addPendingRequest,
   emptyLive,
@@ -70,6 +71,17 @@ export function bootstrap() {
     void loadThreadList();
     for (const p of enabledProviders()) void loadRateLimits(p);
   });
+
+  // Threads arrive from the list, the poll for work in other apps, and live events. However one
+  // comes, look at its folder soon after: a linked worktree groups with its main checkout.
+  let checkoutsTimer = 0;
+  useThreads.subscribe((s, prev) => {
+    if (s.threads === prev.threads || checkoutsTimer) return;
+    checkoutsTimer = window.setTimeout(() => {
+      checkoutsTimer = 0;
+      void resolveCheckouts();
+    }, 300);
+  });
 }
 
 /** Providers turned on or off: a disabled provider's threads leave the sidebar until it's back. */
@@ -87,6 +99,7 @@ function applyProviderSettings(settings: ProvidersSettings) {
 function wireProvider(p: ProviderId) {
   const rpc = clients[p];
   rpc.onNotification((method, params) => {
+    if (titleEvent(method, params)) return; // a hidden title thread's, not one of ours
     switch (method) {
       case "account/updated":
         void loadAccount(p);
@@ -111,6 +124,11 @@ function wireProvider(p: ProviderId) {
               : null,
         }));
         return;
+      case "account/usage/updated":
+        // Running totals from a read that's still going: the chart fills in as they come. Only
+        // for a read we're waiting on, whose answer ends the loading state.
+        if (usageReads.has(p)) patchProvider(p, (c) => ({ tokenUsage: { at: c.tokenUsage?.at ?? 0, days: usageDays(params.dailyUsageBuckets), loading: true } }));
+        return;
       case "fs/changed":
         onFsChanged(params);
         return;
@@ -120,6 +138,7 @@ function wireProvider(p: ProviderId) {
       case "item/started":
       case "item/completed":
         if (params?.item?.type === "userMessage" && params.item.clientId) clearOptimistic(params.threadId, params.item.clientId);
+        if (method === "item/completed" && params?.item?.type === "userMessage") titleFromMessage(p, params.threadId, params.item);
         if (params?.item?.type === "mcpToolCall") params = { ...params, item: captureComputerUse(params.threadId, params.turnId, params.item) };
         break;
       case "turn/completed":
@@ -137,9 +156,13 @@ function wireProvider(p: ProviderId) {
       rpc.respondError(req.id, -32601, `${req.method} is not supported by Ret`);
       return;
     }
+    const threadId = (req.params as any)?.threadId;
+    if (threadId && isTitleThread(threadId)) {
+      rpc.respondError(req.id, -32601, "A title thread can't ask for anything");
+      return;
+    }
     addPendingRequest(p, req);
     if (req.method === "mcpServer/elicitation/request") noteAppRequest(req.params.threadId, req.params.turnId ?? "", req.params);
-    const threadId = (req.params as any)?.threadId;
     if (threadId && !useThreads.getState().visible[threadId]) {
       bridge.notify(`${PROVIDERS[p].name} needs your input`, threadTitle(useThreads.getState().threads[threadId]));
     }
@@ -159,7 +182,9 @@ function wireProvider(p: ProviderId) {
         live[id] = lt.activeTurnId ? { ...emptyLive() } : { ...lt, subscribed: false };
       }
       const requests = Object.fromEntries(Object.entries(s.requests).filter(([, r]) => r.provider !== p));
-      return { live, requests };
+      // The engine tells a new connection what still runs in the background.
+      const background = Object.fromEntries(Object.entries(s.background).filter(([id]) => (s.owner[id] ?? "codex") !== p));
+      return { live, requests, background };
     });
     void loadAccount(p);
     void loadModels(p);
@@ -192,6 +217,36 @@ export async function loadRateLimits(p: ProviderId) {
     patchProvider(p, { rateLimits });
   } catch {
     /* not available for api-key auth */
+  }
+}
+
+/** `account/usage/read` buckets as day → tokens. Typed as bigint (ts-rs), but JSON brings numbers. */
+function usageDays(buckets: { startDate: string; tokens: number | bigint }[] | null | undefined): Record<string, number> {
+  const days: Record<string, number> = {};
+  for (const b of buckets ?? []) days[b.startDate] = Number(b.tokens);
+  return days;
+}
+
+/** Providers with an `account/usage/read` in flight. */
+const usageReads = new Set<ProviderId>();
+
+/**
+ * Tokens per day, for the home screen's chart. Reads again once what's held is older than
+ * `maxAgeMs`. Engines that take a while (Claude's transcripts) send running totals meanwhile.
+ */
+export async function loadTokenUsage(p: ProviderId, maxAgeMs = 0) {
+  const held = useConn.getState().providers[p].tokenUsage;
+  if (usageReads.has(p) || (held && Date.now() - held.at < maxAgeMs)) return;
+  usageReads.add(p);
+  patchProvider(p, (c) => ({ tokenUsage: { at: c.tokenUsage?.at ?? 0, days: c.tokenUsage?.days ?? {}, loading: true } }));
+  try {
+    const res = await clients[p].request("account/usage/read", {});
+    patchProvider(p, { tokenUsage: { at: Date.now(), days: usageDays(res.dailyUsageBuckets), loading: false } });
+  } catch {
+    // Not available for this engine or sign-in.
+    patchProvider(p, { tokenUsage: held?.at ? { ...held, loading: false } : null });
+  } finally {
+    usageReads.delete(p);
   }
 }
 
@@ -318,6 +373,19 @@ export function loadThreadList(only?: ProviderId): Promise<void> {
   const ps = only ? [only] : enabledProviders();
   for (const p of ps) void loadWorkspaces(p);
   return Promise.all(ps.map(listProvider)).then(() => {});
+}
+
+/** Folders already asked about this session, worktree or not. */
+const askedCheckouts = new Set<string>();
+
+/** Find the threads running in linked git worktrees, so they group with their main checkout. */
+async function resolveCheckouts() {
+  const known = useUI.getState().checkouts;
+  const cwds = [...new Set(Object.values(useThreads.getState().threads).map((t) => t.cwd))].filter((c) => c && !known[c] && !askedCheckouts.has(c));
+  if (!cwds.length) return;
+  cwds.forEach((c) => askedCheckouts.add(c));
+  const found = await bridge.git.mainCheckouts(cwds).catch(() => ({}));
+  if (Object.keys(found).length) useUI.setState((s) => ({ checkouts: { ...s.checkouts, ...found } }));
 }
 
 /**
@@ -795,6 +863,7 @@ export function respondToRequest(key: string, result: unknown) {
 }
 
 async function renameThreadImpl(threadId: string, name: string) {
+  cancelTitle(threadId);
   await rpcFor(ownerOf(threadId)).request("thread/name/set", { threadId, name });
   useThreads.setState((s) => (s.threads[threadId] ? { threads: { ...s.threads, [threadId]: { ...s.threads[threadId], name } } } : s));
 }
@@ -832,7 +901,7 @@ async function forkThreadImpl(threadId: string, opts: ForkOptions = {}): Promise
   const source = threads[threadId];
   if (!source) throw new Error("Unknown thread");
   const ui = useUI.getState();
-  const projectKey = projectKeyFor(source, threads, projectIndex(ui.projects, workspaces), ui.threadProject);
+  const projectKey = projectKeyFor(source, threads, projectIndex(ui.projects, workspaces, ui.checkouts), ui.threadProject);
 
   const worktree = opts.worktree ? await bridge.git.createWorktree(source.cwd, threadTitle(source)) : undefined;
   const cwd = worktree?.path;
@@ -890,7 +959,7 @@ export function newThreadNear(fromThreadId: string | null) {
     useUI.setState({ paletteOpen: true });
     return;
   }
-  const key = projectKeyFor(t, threads, projectIndex(ui.projects, workspaces), ui.threadProject);
+  const key = projectKeyFor(t, threads, projectIndex(ui.projects, workspaces, ui.checkouts), ui.threadProject);
   newThread(key, ui.projects[key]?.path ?? t.cwd, { provider: ownerOf(t.id) });
 }
 
