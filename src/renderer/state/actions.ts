@@ -5,9 +5,9 @@ import type { ServerRequest, Thread, ThreadItem, UserInput } from "@shared/proto
 import { PROVIDERS, accessFor, pickProvider } from "../agents";
 import { enabledProviders, patchProvider, signedIn, useConn, type ProviderConn } from "./conn";
 import { guarded, toast } from "./toasts";
-import { normPath, projectIndex, projectKeyFor, threadTitle, type Workspace } from "./projects";
+import { lineageParent, normPath, projectIndex, projectKeyFor, spawnedBy, threadTitle, type Workspace } from "./projects";
 import { fillComposer } from "./composerDrafts";
-import { backfillLineage, lineageKnown } from "./lineage";
+import { backfillLineage, discoverThread, lineageKnown } from "./lineage";
 import { cancelTitle, isTitleThread, titleEvent, titleFromMessage } from "./titles";
 import {
   addPendingRequest,
@@ -15,6 +15,7 @@ import {
   enqueueNotification,
   flushNow,
   mergeThread,
+  delegated,
   ownerOf,
   patchLive,
   removePendingRequest,
@@ -56,7 +57,7 @@ export function bootstrap() {
       // Send the next queued follow-up (outside the reducer flush that called us).
       if (turn.status !== "failed") setTimeout(() => void drainQueue(threadId), 0);
       const visible = useThreads.getState().visible[threadId];
-      if (!visible || !document.hasFocus()) {
+      if ((!visible || !document.hasFocus()) && !delegated(useThreads.getState().threads[threadId], turn)) {
         const title = threadTitle(useThreads.getState().threads[threadId]);
         bridge.notify(turn.status === "failed" ? "Turn failed" : `${PROVIDERS[ownerOf(threadId)].name} finished`, title);
       }
@@ -134,8 +135,15 @@ function wireProvider(p: ProviderId) {
       case "project/changed":
         void loadWorkspaces(p);
         return;
+      case "turn/started":
+        if (PROVIDERS[p].subagentThreads) discoverThread(p, params?.threadId);
+        break;
       case "item/started":
       case "item/completed":
+        if (PROVIDERS[p].subagentThreads && method === "item/started") {
+          if (params?.item?.type === "subAgentActivity") discoverThread(p, params.item.agentThreadId);
+          if (params?.item?.type === "collabAgentToolCall") for (const id of params.item.receiverThreadIds ?? []) discoverThread(p, id);
+        }
         if (params?.item?.type === "userMessage" && params.item.clientId) clearOptimistic(params.threadId, params.item.clientId);
         if (method === "item/completed" && params?.item?.type === "userMessage") titleFromMessage(p, params.threadId, params.item);
         break;
@@ -401,6 +409,66 @@ async function loadWorkspaces(p: ProviderId) {
   }
 }
 
+/** How many of the latest threads to ask for their agents by name (see listSubagents). */
+const AGENT_PARENTS = 30;
+
+/**
+ * Spawned agents, which `thread/list` leaves out unless asked for. Asking by source finds the
+ * older kind; the newer kind (agents with a path, like /root/pong) only turns up when asked for
+ * by ancestor, so the latest threads are asked one by one. Older threads' agents appear when the
+ * thread is opened (mergeTurns). Only agents whose parent is listed too: one on its own, cut off
+ * from what it was doing, is just noise.
+ */
+async function listSubagents(p: ProviderId, parents: Thread[]): Promise<Thread[]> {
+  const agents: Thread[] = [];
+  let cursor: string | null = null;
+  const recent = parents
+    .filter((t) => !spawnedBy(t))
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, AGENT_PARENTS);
+  const byAncestor = Promise.all(
+    recent.map((t) =>
+      clients[p]
+        .request("thread/list", { limit: 100, sortKey: "updated_at", useStateDbOnly: true, ancestorThreadId: t.id })
+        .then((res) => (res as import("@shared/protocol").ThreadListResponse).data)
+        .catch(() => [] as Thread[]),
+    ),
+  );
+  try {
+    for (let page = 0; page < 10; page++) {
+      const res: import("@shared/protocol").ThreadListResponse = await clients[p].request("thread/list", {
+        limit: 100,
+        cursor,
+        sortKey: "updated_at",
+        useStateDbOnly: true,
+        sourceKinds: ["subAgentThreadSpawn"],
+      });
+      agents.push(...res.data);
+      cursor = res.nextCursor;
+      if (!cursor) break;
+    }
+  } catch (err) {
+    console.warn(`${p}: couldn't list subagents`, err);
+  }
+  const seen = new Set(agents.map((t) => t.id));
+  for (const t of (await byAncestor).flat()) if (spawnedBy(t) && !seen.has(t.id)) seen.add(t.id), agents.push(t);
+  const known = new Set(parents.map((t) => t.id));
+  // Agents spawn agents: keep adding while a pass finds more whose parent is in.
+  const out: Thread[] = [];
+  let rest = agents;
+  for (let added = true; added; ) {
+    added = false;
+    rest = rest.filter((t) => {
+      if (!known.has(spawnedBy(t)!)) return true;
+      known.add(t.id);
+      out.push(t);
+      added = true;
+      return false;
+    });
+  }
+  return out;
+}
+
 function listProvider(p: ProviderId): Promise<void> {
   const inflight = listing.get(p);
   if (inflight) return inflight;
@@ -420,6 +488,7 @@ function listProvider(p: ProviderId): Promise<void> {
         if (!cursor) break;
         if (page === 0) upsertThreads(p, all); // paint the sidebar after the first page
       }
+      if (PROVIDERS[p].subagentThreads) all.push(...(await listSubagents(p, all)));
       // Replace this provider's threads rather than merge, so archived/deleted ones disappear.
       const st = useThreads.getState();
       const mine = (id: string) => (st.owner[id] ?? "codex") === p;
@@ -430,11 +499,17 @@ function listProvider(p: ProviderId): Promise<void> {
         next[t.id] = mergeThread(st.threads[t.id], { ...t, turns: [] });
         owner[t.id] = p;
       }
-      // Keep threads we know about that the list doesn't return (ephemeral forks, brand-new threads).
-      for (const [id, t] of Object.entries(st.threads)) if (!next[id] && mine(id) && (t.ephemeral || Date.now() / 1000 - t.createdAt < 120)) next[id] = t;
+      // Keep threads we know about that the list doesn't return (ephemeral forks, brand-new threads),
+      // and agents met by opening an older thread, which the list only finds for the latest ones.
+      for (const [id, t] of Object.entries(st.threads)) {
+        if (next[id] || !mine(id)) continue;
+        const parent = spawnedBy(t);
+        if (t.ephemeral || Date.now() / 1000 - t.createdAt < 120 || (parent && next[parent])) next[id] = t;
+      }
       useThreads.setState({ threads: next, owner, listLoaded: true });
       // The list leaves out fork lineage; fill it in so forks nest and link to their parents.
-      void backfillLineage(all.map((t) => t.id));
+      // (A subagent's source already names its parent.)
+      void backfillLineage(all.filter((t) => !spawnedBy(t)).map((t) => t.id));
     } catch (err) {
       console.error(`${p}: thread/list failed`, err);
       useThreads.setState({ listLoaded: true });
@@ -505,6 +580,11 @@ export function mergeTurns(
   const st = useThreads.getState();
   const external = !!st.external[threadId];
   const threadActive = st.threads[threadId]?.status.type === "active" || external;
+  // Agents it started that the sidebar hasn't met (Codex lists its newer agents only by parent).
+  const owner = st.owner[threadId] ?? "codex";
+  if (PROVIDERS[owner].subagentThreads) {
+    for (const t of turnsDesc) for (const it of t.items ?? []) if (it.type === "subAgentActivity") discoverThread(owner, it.agentThreadId);
+  }
   patchLive(threadId, (prev) => {
     const asc = turnsDesc.slice().reverse();
     const turns = mode === "replace" ? {} : { ...prev.turns };
@@ -925,9 +1005,9 @@ function rootOf(threadId: string): string {
   const threads = useThreads.getState().threads;
   let t = threads[threadId];
   const seen = new Set<string>();
-  while (t?.forkedFromId && threads[t.forkedFromId] && !seen.has(t.id)) {
+  for (let up = t && lineageParent(t); up && threads[up] && !seen.has(t.id); up = lineageParent(t)) {
     seen.add(t.id);
-    t = threads[t.forkedFromId];
+    t = threads[up];
   }
   return t?.id ?? threadId;
 }

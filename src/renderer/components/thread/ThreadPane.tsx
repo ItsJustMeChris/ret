@@ -21,7 +21,7 @@ import { viewFile } from "../../lib/viewFile";
 import { openFileRef, resolvePath } from "../../lib/files";
 import { useUI, isDraft } from "../../state/ui";
 import { addProject, archiveThread, compactThread, forkThread, hydrateThread, openThread, renameThread, retargetDraft } from "../../state/actions";
-import { baseName, buildProjects, threadTitle } from "../../state/projects";
+import { baseName, buildProjects, spawnedBy, threadTitle } from "../../state/projects";
 import { useSizeClass, type SizeClass } from "../../lib/useSize";
 import { Transcript } from "./Transcript";
 import { Composer } from "./Composer";
@@ -391,14 +391,24 @@ function SidePanel({ threadId }: { threadId: string }) {
   );
 }
 
-/** Thread facts plus fork lineage: jump to the parent or any fork without hunting in the sidebar. */
+/** Thread facts plus lineage: jump to the parent, any fork or any subagent without hunting in the sidebar. */
 function ThreadInfo({ threadId }: { threadId: string }) {
   const thread = useThreads((s) => s.threads[threadId]);
+  const spawner = spawnedBy(thread);
   const parent = useThreads((s) => (thread?.forkedFromId ? s.threads[thread.forkedFromId] : undefined));
+  const spawnerThread = useThreads((s) => (spawner ? s.threads[spawner] : undefined));
+  // A subagent is forked from its parent too (it starts from the parent's history); it isn't a fork.
   const forks = useThreads(
     useShallow((s) =>
       Object.values(s.threads)
-        .filter((t) => t.forkedFromId === threadId)
+        .filter((t) => t.forkedFromId === threadId && !spawnedBy(t))
+        .sort((a, b) => a.createdAt - b.createdAt),
+    ),
+  );
+  const agents = useThreads(
+    useShallow((s) =>
+      Object.values(s.threads)
+        .filter((t) => spawnedBy(t) === threadId)
         .sort((a, b) => a.createdAt - b.createdAt),
     ),
   );
@@ -435,7 +445,11 @@ function ThreadInfo({ threadId }: { threadId: string }) {
           {baseName(thread.cwd)}
         </span>
       </div>
-      {thread.forkedFromId && (
+      {spawner ? (
+        <button className="lineage" onClick={() => openThread(spawner)} disabled={!spawnerThread}>
+          <CornerLeftUp size={12} /> Spawned by <span>{spawnerThread ? threadTitle(spawnerThread) : "an unavailable thread"}</span>
+        </button>
+      ) : thread.forkedFromId && (
         <button className="lineage" onClick={() => openThread(thread.forkedFromId!)} disabled={!parent}>
           <CornerLeftUp size={12} /> Forked from <span>{parent ? threadTitle(parent) : "an unavailable thread"}</span>
         </button>
@@ -447,6 +461,17 @@ function ThreadInfo({ threadId }: { threadId: string }) {
             <button key={f.id} className="lineage" onClick={() => openThread(f.id)}>
               <StatusDot threadId={f.id} />
               <span>{f.name && f.name !== thread.name ? f.name : `Fork ${i + 1}`}</span>
+            </button>
+          ))}
+        </>
+      )}
+      {agents.length > 0 && (
+        <>
+          <h4 className="sub-h">Subagents · {agents.length}</h4>
+          {agents.map((a) => (
+            <button key={a.id} className="lineage" onClick={() => openThread(a.id)}>
+              <StatusDot threadId={a.id} />
+              <span>{threadTitle(a)}</span>
             </button>
           ))}
         </>

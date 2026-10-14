@@ -4,7 +4,7 @@ import { GitFork } from "lucide-react";
 import { useThreads } from "../../state/threads";
 import { useUI, type Board, type CanvasWin } from "../../state/ui";
 import { openThread } from "../../state/actions";
-import { threadTitle } from "../../state/projects";
+import { lineageParent, threadTitle } from "../../state/projects";
 import { Menu, type MenuItem } from "../Menu";
 import { liveRect, onLiveRect, type Rect } from "./live";
 import { boundsOf, viewport, viewportSize } from "./viewport";
@@ -55,7 +55,7 @@ function geometry(a: Rect, b: Rect) {
   return { d: `M ${p1.x} ${p1.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${p2.x} ${p2.y}`, p1, p2, mid };
 }
 
-/** Lines from each thread window to the windows of its forks (nearest ancestor on the board). */
+/** Lines from each thread window to the windows of its forks and subagents (nearest ancestor on the board). */
 export function Links({ board }: { board: Board }) {
   const show = useUI((s) => s.showLinks);
   // For each window: the window id of its nearest forked-from ancestor on this board, plus whether it's the direct parent.
@@ -63,12 +63,13 @@ export function Links({ board }: { board: Board }) {
     useShallow((s) => {
       const byThread = new Map(board.windows.map((w) => [w.threadId, w.id]));
       return board.windows.map((w) => {
-        let p = s.threads[w.threadId]?.forkedFromId ?? null;
+        const up = (id: string) => (s.threads[id] ? lineageParent(s.threads[id]) : null);
+        let p = up(w.threadId);
         let hops = 1;
         const seen = new Set<string>();
         while (p && !byThread.has(p) && !seen.has(p)) {
           seen.add(p);
-          p = s.threads[p]?.forkedFromId ?? null;
+          p = up(p);
           hops++;
         }
         return p && byThread.has(p) ? `${byThread.get(p)}|${hops === 1 ? 1 : 0}` : "";

@@ -41,6 +41,11 @@ export interface AgentProvider {
   workspaces: boolean;
   /** Ret titles its threads (Codex leaves that to each client; Claude Code titles its own sessions). */
   autoTitle: boolean;
+  /**
+   * Subagents run as threads of their own (Codex's spawned agents), which `thread/list` leaves
+   * out unless asked for by source. Claude Code's subagents live inside their session.
+   */
+  subagentThreads: boolean;
   /** Where the provider's own settings live, for "inherit" labels. */
   configName: string;
   /** Which access choice a thread's reported settings amount to, when the engine doesn't name it. */
@@ -88,6 +93,7 @@ const codex: AgentProvider = {
   externalQuietS: 10 * 60,
   workspaces: true,
   autoTitle: true,
+  subagentThreads: true,
   configName: "config.toml",
   accessOf: (approvalPolicy, sandbox) => {
     const type = (sandbox as { type?: string } | null)?.type;
@@ -118,6 +124,7 @@ const claude: AgentProvider = {
   externalQuietS: null,
   workspaces: false,
   autoTitle: false,
+  subagentThreads: false,
   configName: "Claude Code settings",
 };
 

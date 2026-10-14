@@ -1,5 +1,6 @@
+import type { ProviderId } from "@shared/bridge";
 import { rpcFor } from "../rpc/client";
-import { ownerOf, useThreads } from "./threads";
+import { flushNow, ownerOf, upsertThreads, useThreads } from "./threads";
 
 /**
  * Fork lineage. `thread/list`, which fills the sidebar, never says which thread a fork came
@@ -50,4 +51,31 @@ export async function backfillLineage(ids: string[]): Promise<void> {
 /** Lineage that arrived with a full thread object (fork, read, resume) needs no lookup. */
 export function lineageKnown(id: string) {
   known.add(id);
+}
+
+/**
+ * Threads heard from before they're known. Codex announces nothing when an agent spawns a
+ * subagent: the new thread's events just start arriving under its id. Read each one and add it,
+ * so it shows up under its parent while it works. Right at the spawn its rollout may not be
+ * written yet, so a failed read tries again a little later.
+ */
+const sought = new Set<string>();
+
+export function discoverThread(provider: ProviderId, id: string | null | undefined) {
+  if (!id || sought.has(id)) return;
+  flushNow(); // its thread/started may still be queued
+  if (useThreads.getState().threads[id]) return;
+  sought.add(id);
+  const attempt = (n: number) =>
+    rpcFor(provider)
+      .request("thread/read", { threadId: id, includeTurns: false })
+      .then((res) => {
+        known.add(id);
+        upsertThreads(provider, [res.thread]);
+      })
+      .catch(() => {
+        if (n < 3) setTimeout(() => void attempt(n + 1), 1000 * 2 ** n);
+        else sought.delete(id); // let a later event try again
+      });
+  void attempt(0);
 }

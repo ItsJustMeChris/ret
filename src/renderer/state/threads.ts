@@ -11,7 +11,7 @@ import type {
   TurnPlanStep,
 } from "@shared/protocol";
 import type { TurnError, TurnStatus } from "@shared/protocol/generated/v2";
-import type { Workspace } from "./projects";
+import { spawnedBy, type Workspace } from "./projects";
 
 export interface TurnState {
   id: string;
@@ -284,6 +284,14 @@ export interface Hooks {
   onTurnCompleted?: (threadId: string, turn: Turn) => void;
 }
 
+/**
+ * A subagent's turn: work done for the turn that spawned it, which reports back. Not something to
+ * review on its own. Its thread may not be known yet; its turn names the turn it works for.
+ */
+export function delegated(thread: Thread | undefined, turn: Turn): boolean {
+  return !!spawnedBy(thread) || (!!turn.rootTurnId && turn.rootTurnId !== turn.id);
+}
+
 /** The provider a thread belongs to (Codex until known: it was the only one). */
 export function ownerOf(threadId: string): ProviderId {
   return useThreads.getState().owner[threadId] ?? "codex";
@@ -382,7 +390,7 @@ function apply(d: Draft, provider: ProviderId, method: string, p: any, hooks: Ho
       endSleeps(lt);
       lt.notice = null;
       setThread(d, p.threadId, { updatedAt: Math.floor(Date.now() / 1000), recencyAt: Math.floor(Date.now() / 1000) });
-      if (!d.attended[p.threadId]) {
+      if (!d.attended[p.threadId] && !delegated(d.threads[p.threadId], turn)) {
         d.unread = own(d.unread);
         d.unread[p.threadId] = true;
       }

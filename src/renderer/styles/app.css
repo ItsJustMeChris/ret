@@ -1679,6 +1679,33 @@ body.resizing .transcript {
   color: var(--text-3);
   transition: transform 0.15s var(--ease);
 }
+.tool-label .agent-name {
+  color: var(--text);
+  font-weight: 500;
+}
+.agent-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.agent-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 12px;
+}
+.agent-link:hover {
+  background: var(--bg-3);
+}
+.agent-link svg {
+  color: var(--text-3);
+}
 .tool.open .tool-chev,
 .activity.open > .activity-head .tool-chev,
 .file-row.open .tool-chev {

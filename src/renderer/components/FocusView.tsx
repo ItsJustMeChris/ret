@@ -1,11 +1,11 @@
 import { memo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Columns2, FileCode2, GitFork, Plus, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bot, Columns2, FileCode2, GitFork, Plus, X } from "lucide-react";
 import { useUI, isDraft, isFile, isThread, filePath, type FocusSplit } from "../state/ui";
 import { useFiles } from "../state/files";
 import { FilePane } from "./code/FilePane";
 import { useThreads } from "../state/threads";
 import { closePane, closeTab, newThreadNear, openThread, setSplitRatio } from "../state/actions";
-import { threadTitle } from "../state/projects";
+import { spawnedBy, threadTitle } from "../state/projects";
 import type { Thread } from "@shared/protocol";
 import { StatusDot } from "./StatusDot";
 import { ThreadPane } from "./thread/ThreadPane";
@@ -71,7 +71,7 @@ const Tab = memo(function Tab({ id, active, index }: { id: string; active: boole
       }}
     >
       <Marker id={id} />
-      {!split && thread?.forkedFromId && <GitFork size={11} className="muted" />}
+      {!split && (spawnedBy(thread) ? <Bot size={11} className="muted" /> : thread?.forkedFromId && <GitFork size={11} className="muted" />)}
       <span className="tab-title">{title}</span>
       {split && (
         <>
