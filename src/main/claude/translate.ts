@@ -59,9 +59,56 @@ export function mcpName(name: string): { server: string; tool: string } | null {
   return m ? { server: m[1], tool: m[2] } : null;
 }
 
+/** Claude desktop's task list tool, which its sessions keep in place of TodoWrite. */
+const CCD_PLAN = "mcp__ccd_turn__update_plan";
+/** Closes a Claude desktop turn, checking off the step still in progress. */
+const CCD_WRAP_UP = "mcp__ccd_turn__wrap_up";
+
+/** Tools whose only job is the turn's checklist. */
+export function isPlanTool(name: string): boolean {
+  return name === "TodoWrite" || name === CCD_PLAN;
+}
+
 /** Tools that drive Ret's own UI rather than appearing as items. */
 export function isUiTool(name: string): boolean {
-  return name === "TodoWrite" || name === "EnterPlanMode";
+  return isPlanTool(name) || name === "EnterPlanMode";
+}
+
+/** The turn's checklist after this tool call, given the one before it; null if the call leaves it be. */
+export function planUpdate(use: ToolUse, prev: TurnPlanStep[] | null): TurnPlanStep[] | null {
+  if (use.name === "TodoWrite") return todoPlan(use.input);
+  if (use.name === CCD_PLAN) return ccdPlan(use.input, prev);
+  if (use.name === CCD_WRAP_UP && prev?.some((s) => s.status === "inProgress"))
+    return prev.map((s) => (s.status === "inProgress" ? { ...s, status: "completed" } : s));
+  return null;
+}
+
+/**
+ * Claude desktop's `update_plan`: the whole list (`items`), or a move along the current one —
+ * `advance` finishes the step in progress and starts the next pending one; `done`/`start` name
+ * steps by 1-based number.
+ */
+export function ccdPlan(input: Record<string, any>, prev: TurnPlanStep[] | null): TurnPlanStep[] | null {
+  if (Array.isArray(input?.items)) {
+    return input.items.map((t: any) => ({
+      step: String(t?.content ?? ""),
+      status: t?.status === "completed" ? "completed" : t?.status === "in_progress" ? "inProgress" : "pending",
+    }));
+  }
+  if (!prev) return null;
+  const steps = prev.map((s) => ({ ...s }));
+  if (input?.advance === true) {
+    const at = steps.findIndex((s) => s.status === "inProgress");
+    for (const s of steps) if (s.status === "inProgress") s.status = "completed";
+    const next = steps.findIndex((s, i) => i > at && s.status === "pending");
+    if (next >= 0) steps[next].status = "inProgress";
+  }
+  for (const n of Array.isArray(input?.done) ? input.done : []) if (steps[n - 1]) steps[n - 1].status = "completed";
+  if (typeof input?.start === "number" && steps[input.start - 1]) {
+    for (const s of steps) if (s.status === "inProgress") s.status = "pending";
+    steps[input.start - 1].status = "inProgress";
+  }
+  return steps;
 }
 
 /** A TodoWrite list as the turn's plan checklist. */

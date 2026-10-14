@@ -14,7 +14,7 @@ import {
   type SDKSessionInfo,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { EngineStatus } from "../../shared/bridge";
-import type { BackgroundTask, Model, RateLimitSnapshot, Thread } from "../../shared/protocol";
+import type { BackgroundTask, Model, RateLimitSnapshot, Thread, TurnWithPlan } from "../../shared/protocol";
 import type { RateLimitWindow } from "../../shared/protocol/generated/v2";
 import { FsService } from "../fsService";
 import { gitInfo } from "../git";
@@ -473,7 +473,7 @@ export class ClaudeEngine {
     // can (ours), or the session registry (another Claude Code process busy with it).
     const live = this.sessions.get(p.threadId)?.turn?.id ?? ((await this.busyElsewhere()).has(p.threadId) ? turns.at(-1)?.turn.id : undefined);
     const page = ordered.slice(offset, offset + limit).map((t) => {
-      const turn = t.turn.id === live ? { ...t.turn, status: "inProgress" as const, completedAt: null, durationMs: null } : t.turn;
+      const turn: TurnWithPlan = { ...t.turn, plan: t.plan, ...(t.turn.id === live ? { status: "inProgress" as const, completedAt: null, durationMs: null } : {}) };
       return p.itemsView === "notLoaded" ? { ...turn, items: [], itemsView: "notLoaded" as const } : turn;
     });
     return { data: page, nextCursor: offset + limit < ordered.length ? String(offset + limit) : null, backwardsCursor: null };

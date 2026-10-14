@@ -9,6 +9,7 @@ import type {
   ThreadTokenUsage,
   Turn,
   TurnPlanStep,
+  TurnWithPlan,
 } from "@shared/protocol";
 import type { TurnError, TurnStatus } from "@shared/protocol/generated/v2";
 import type { Workspace } from "./projects";
@@ -176,7 +177,7 @@ function mergeItemIds(turn: Turn, prev?: TurnState): string[] {
   return added.length ? [...prev.itemIds, ...added] : prev.itemIds;
 }
 
-export function turnStateFrom(turn: Turn, prev?: TurnState): TurnState {
+export function turnStateFrom(turn: TurnWithPlan, prev?: TurnState): TurnState {
   return {
     id: turn.id,
     status: turn.status,
@@ -186,7 +187,7 @@ export function turnStateFrom(turn: Turn, prev?: TurnState): TurnState {
     completedAt: turn.completedAt,
     durationMs: turn.durationMs,
     diff: prev?.diff ?? null,
-    plan: prev?.plan ?? null,
+    plan: turn.plan ? { explanation: null, steps: turn.plan } : (prev?.plan ?? null),
   };
 }
 

@@ -61,6 +61,12 @@ export interface ResultMap {
 }
 export type ResultOf<M extends Method> = M extends keyof ResultMap ? ResultMap[M] : unknown;
 
+/**
+ * A turn plus its checklist, which the Claude Code engine reads back from the transcript (Ret's own
+ * extension). Codex sends a turn's plan only while it runs, as `turn/plan/updated`.
+ */
+export type TurnWithPlan = v2.Turn & { plan?: v2.TurnPlanStep[] | null };
+
 export type ServerRequestMethod = ServerRequest["method"];
 export type ServerRequestOf<M extends ServerRequestMethod> = Extract<ServerRequest, { method: M }>;
 

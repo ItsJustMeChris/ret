@@ -3,8 +3,9 @@ import {
   blocksOf,
   isInterruptMarker,
   isPrompt,
+  isPlanTool,
   localCommandOutput,
-  todoPlan,
+  planUpdate,
   toolItem,
   userInputs,
   type ToolUse,
@@ -40,6 +41,7 @@ export function buildTurns(messages: StoredMessage[], cwd: string): HistoryTurn[
   /** Turns whose prompt was a slash command: their command output is the reply. */
   const commands = new Set<string>();
   let cur: HistoryTurn | null = null;
+  let lastPlan: TurnPlanStep[] | null = null;
 
   const open = (id: string, ts: string | undefined): HistoryTurn => {
     const at = seconds(ts);
@@ -111,10 +113,9 @@ export function buildTurns(messages: StoredMessage[], cwd: string): HistoryTurn[
       else if (b.type === "thinking" && String(b.thinking ?? "").trim()) push(t, { type: "reasoning", id, summary: [String(b.thinking)], content: [] });
       else if (b.type === "tool_use") {
         const use: ToolUse = { id: b.id, name: b.name, input: b.input ?? {} };
-        if (use.name === "TodoWrite") {
-          t.plan = todoPlan(use.input) ?? t.plan;
-          continue;
-        }
+        const plan = planUpdate(use, t.plan ?? lastPlan);
+        if (plan) t.plan = lastPlan = plan;
+        if (isPlanTool(use.name)) continue;
         const item = toolItem(use, undefined, { cwd });
         if (!item) continue;
         tools.set(use.id, { use, turn: t, index: t.turn.items.length });
