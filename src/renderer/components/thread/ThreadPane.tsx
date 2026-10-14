@@ -150,7 +150,13 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
           <div className="pane-main">
             <TranscriptFor threadId={threadId} />
             {directInput ? (
-              <Composer threadId={threadId} compact={size === "compact"} autoFocus={props.focused && props.chrome === "focus"} />
+              <Composer
+                threadId={threadId}
+                compact={size === "compact"}
+                autoFocus={props.focused && props.chrome === "focus"}
+                // The details panel lists the subagents; the dock keeps its room for the rest.
+                agentsElsewhere={size === "wide" && showDetails}
+              />
             ) : (
               <SubagentBar threadId={threadId} />
             )}

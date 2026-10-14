@@ -86,7 +86,18 @@ function askHint(ask: QuestionFlow): string {
   return ask.otherRow ? `Press ${keys} to pick, or type your own answer…` : `Press ${keys} to pick…`;
 }
 
-export function Composer({ threadId, autoFocus, compact }: { threadId: string; autoFocus?: boolean; compact?: boolean }) {
+export function Composer({
+  threadId,
+  autoFocus,
+  compact,
+  agentsElsewhere,
+}: {
+  threadId: string;
+  autoFocus?: boolean;
+  compact?: boolean;
+  /** The thread's subagents are on screen already (the details panel), so the dock leaves them out. */
+  agentsElsewhere?: boolean;
+}) {
   const [text, setText] = useState(() => drafts.get(threadId) ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>(() => takeAttachments(threadId));
   const [sending, setSending] = useState(false);
@@ -362,7 +373,7 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     <>
     {/* Docked on top, longest-lived first and the next message nearest the box. */}
     <div className="composer-dock">
-      <AgentTray threadId={threadId} />
+      {!agentsElsewhere && <AgentTray threadId={threadId} />}
       <QueueTray threadId={threadId} />
     </div>
     <div
