@@ -5970,3 +5970,93 @@ body.resizing .sidebar-dock {
 .app-pane .pane-header .inbox-keys + .pane-header-actions {
   margin-left: 0;
 }
+
+/* Subagents: a tray of them on the parent's composer, and a bar in place of their own */
+.agent-tray-head {
+  width: 100%;
+  text-align: left;
+}
+.agent-tray.open .agent-tray-head .tool-chev {
+  transform: rotate(90deg);
+}
+.agent-tray-running {
+  color: var(--green);
+}
+.agent-row {
+  width: 100%;
+  text-align: left;
+  padding-left: 22px;
+}
+.agent-row .queue-when.state-running {
+  color: var(--green);
+}
+.agent-row .queue-when.state-attention {
+  color: var(--accent);
+}
+.agent-row .queue-icon {
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.agent-row:hover .queue-icon {
+  opacity: 1;
+}
+/* Both trays docked on the composer: the agents on top, the queue joined beneath. */
+.agent-tray + .queue-tray {
+  margin-top: 0;
+  border-radius: 0;
+}
+.agent-tray + .composer {
+  margin-top: 0;
+}
+.subagent-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 860px;
+  width: calc(100% - 32px);
+  margin: 4px auto 14px;
+  padding: 8px 8px 8px 12px;
+  border-radius: 12px;
+  border: 1px dashed var(--line-2);
+  color: var(--text-3);
+  font-size: 12px;
+}
+.subagent-bar.running {
+  border-color: color-mix(in srgb, var(--green) 35%, var(--line-2));
+}
+.subagent-bar-icon {
+  flex: none;
+}
+.subagent-bar-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subagent-bar-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 40%;
+  min-height: 24px;
+  padding: 2px 9px;
+  border-radius: 7px;
+  background: var(--bg-2);
+  color: var(--text-2);
+}
+.subagent-bar-btn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subagent-bar-btn:hover:not(:disabled) {
+  background: var(--bg-3);
+  color: var(--text);
+}
+.subagent-bar-btn.stop:hover {
+  color: var(--red);
+}

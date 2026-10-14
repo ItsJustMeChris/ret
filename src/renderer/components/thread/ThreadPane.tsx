@@ -21,11 +21,12 @@ import { viewFile } from "../../lib/viewFile";
 import { openFileRef, resolvePath } from "../../lib/files";
 import { useUI, isDraft } from "../../state/ui";
 import { addProject, archiveThread, compactThread, forkThread, hydrateThread, openThread, renameThread, retargetDraft } from "../../state/actions";
-import { baseName, buildProjects, spawnedBy, threadTitle } from "../../state/projects";
+import { baseName, buildProjects, spawnedBy, takesDirectInput, threadTitle } from "../../state/projects";
 import { useSizeClass, type SizeClass } from "../../lib/useSize";
 import { Transcript } from "./Transcript";
 import { Composer } from "./Composer";
 import { DiffView } from "./Items";
+import { SubagentBar } from "./Subagents";
 import { RequestCard } from "./Approvals";
 import { bridge, isDesktop } from "../../bridge";
 import { Menu, type MenuItem } from "../Menu";
@@ -49,6 +50,10 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const size = useSizeClass(ref);
   const showDetails = useUI((s) => s.showDetails);
+  // A subagent that asks you something still gets the composer, which is where questions are answered.
+  const directInput = useThreads(
+    (s) => takesDirectInput(s.threads[threadId]) || Object.values(s.requests).some((r) => r.threadId === threadId && r.method === "item/tool/requestUserInput"),
+  );
   // Relative file references in this thread resolve against its working directory.
   const cwd = useThreads((s) => s.threads[threadId]?.cwd) ?? useUI.getState().drafts[threadId]?.cwd;
 
@@ -70,7 +75,8 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
   // Files dragged in from the file manager (or a browser) drop anywhere on the pane.
   const [dropping, setDropping] = useState(false);
   const dragDepth = useRef(0);
-  const carriesFiles = (e: React.DragEvent) => e.dataTransfer.types.includes("Files");
+  // (Not on a subagent's: there's no message to add them to.)
+  const carriesFiles = (e: React.DragEvent) => directInput && e.dataTransfer.types.includes("Files");
   const drop = {
     onDragEnter: (e: React.DragEvent) => {
       if (!carriesFiles(e)) return;
@@ -143,7 +149,11 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
         <div className="pane-body">
           <div className="pane-main">
             <TranscriptFor threadId={threadId} />
-            <Composer threadId={threadId} compact={size === "compact"} autoFocus={props.focused && props.chrome === "focus"} />
+            {directInput ? (
+              <Composer threadId={threadId} compact={size === "compact"} autoFocus={props.focused && props.chrome === "focus"} />
+            ) : (
+              <SubagentBar threadId={threadId} />
+            )}
           </div>
           {size === "wide" && showDetails && <SidePanel threadId={threadId} />}
         </div>

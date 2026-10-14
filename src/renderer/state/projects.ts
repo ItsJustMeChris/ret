@@ -114,6 +114,9 @@ export function spawnedBy(t: Thread | undefined): string | null {
   return (typeof src === "object" && src?.subAgent?.thread_spawn?.parent_thread_id) || null;
 }
 
+/** Whether you can send it messages. Codex's subagents take theirs from the agent that spawned them. */
+export const takesDirectInput = (t: Thread | undefined): boolean => !spawnedBy(t) || t?.canAcceptDirectInput === true;
+
 /** The thread this one hangs under: the agent that spawned it, or the thread it was forked from. */
 export const lineageParent = (t: Thread): string | null => spawnedBy(t) ?? t.forkedFromId;
 
