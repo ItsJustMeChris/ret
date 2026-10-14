@@ -4991,25 +4991,40 @@ body.resizing .sidebar-dock {
   cursor: pointer;
 }
 
-/* Queued follow-ups: a tray docked on top of the composer */
-.queue-tray {
+/*
+ * The dock on top of the composer: one box for whatever the thread has to show there (queued
+ * follow-ups, its subagents, ...), stacked with a rule between, so any mix of them joins up.
+ * Its sections draw no box of their own; it hides when none of them renders.
+ */
+.composer-dock {
   width: calc(100% - 32px - 28px);
   max-width: calc(860px - 28px);
   margin: 6px auto 0;
+  border: 1px solid var(--line-2);
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  background: color-mix(in srgb, var(--bg-2) 65%, var(--bg));
+  overflow: hidden;
+  animation: tray-in 0.2s var(--ease);
+}
+.composer-dock:empty {
+  display: none;
+}
+.composer-dock:not(:empty) + .composer {
+  margin-top: 0;
+}
+.composer-dock > * + * {
+  border-top: 1px solid var(--line);
+}
+
+/* Queued follow-ups */
+.queue-tray {
   padding: 4px;
   display: flex;
   flex-direction: column;
   gap: 1px;
   max-height: 134px;
   overflow-y: auto;
-  border: 1px solid var(--line-2);
-  border-bottom: none;
-  border-radius: 10px 10px 0 0;
-  background: color-mix(in srgb, var(--bg-2) 65%, var(--bg));
-  animation: tray-in 0.2s var(--ease);
-}
-.queue-tray + .composer {
-  margin-top: 0;
 }
 .queue-row {
   display: flex;
@@ -5077,7 +5092,7 @@ body.resizing .sidebar-dock {
   }
 }
 @container pane (width < 640px) {
-  .queue-tray {
+  .composer-dock {
     width: calc(100% - 16px - 20px);
     margin-top: 4px;
   }
@@ -5085,23 +5100,7 @@ body.resizing .sidebar-dock {
 
 /* A thread's goal, docked on top of the composer (above any queued follow-ups) */
 .goal-bar {
-  width: calc(100% - 32px - 28px);
-  max-width: calc(860px - 28px);
-  margin: 6px auto 0;
   padding: 4px;
-  border: 1px solid var(--line-2);
-  border-bottom: none;
-  border-radius: 10px 10px 0 0;
-  background: color-mix(in srgb, var(--bg-2) 65%, var(--bg));
-  animation: tray-in 0.2s var(--ease);
-}
-.goal-bar + .queue-tray {
-  margin-top: 0;
-  border-radius: 0;
-  border-top-color: var(--line);
-}
-.goal-bar + .composer {
-  margin-top: 0;
 }
 .goal-row {
   display: flex;
@@ -5180,12 +5179,6 @@ body.resizing .sidebar-dock {
   margin-top: 6px;
   font-size: 11px;
   color: var(--text-3);
-}
-@container pane (width < 640px) {
-  .goal-bar {
-    width: calc(100% - 16px - 20px);
-    margin-top: 4px;
-  }
 }
 
 /* ==========================================================================
