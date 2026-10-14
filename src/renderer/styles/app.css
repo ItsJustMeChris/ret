@@ -2781,6 +2781,37 @@ body.resizing .transcript {
 .canvas-viewport.space-pan .cwin {
   pointer-events: none;
 }
+
+/* Middle-click autoscroll (lib/autoscroll.ts): the mark it scrolls from, and the way it's going. */
+.autoscroll-mark {
+  position: fixed;
+  z-index: 10000;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow);
+  color: var(--text-2);
+  fill: currentColor;
+  pointer-events: none;
+}
+html.autoscrolling,
+html.autoscrolling * {
+  cursor: ns-resize !important;
+  user-select: none;
+}
+html.autoscrolling[data-autoscroll="up"],
+html.autoscrolling[data-autoscroll="up"] * {
+  cursor: n-resize !important;
+}
+html.autoscrolling[data-autoscroll="down"],
+html.autoscrolling[data-autoscroll="down"] * {
+  cursor: s-resize !important;
+}
 .canvas-world {
   position: absolute;
   left: 0;

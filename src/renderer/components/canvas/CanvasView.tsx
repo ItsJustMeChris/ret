@@ -12,11 +12,14 @@ import { Beacons } from "./Beacons";
 import { CARD_ZOOM, MAX_ZOOM, fitAll, revealWindow, tidy, viewport, type Viewport } from "./viewport";
 import { Menu, type MenuItem } from "../Menu";
 import { promptText } from "../ui/Dialog";
+import { startAutoscroll } from "../../lib/autoscroll";
 
 /** Dot spacing at 100%. */
 const GRID = 24;
 /** The dot layer overhangs the view by one spacing at the largest zoom, so sliding it never shows an edge. */
 const GRID_PAD = GRID * MAX_ZOOM;
+/** How far a middle press moves before it's a pan rather than a click (which autoscrolls). */
+const PAN_SLOP = 4;
 const mod = (v: number, m: number) => ((v % m) + m) % m;
 
 export function CanvasView() {
@@ -259,14 +262,26 @@ export function CanvasView() {
     if (onBackground && e.button === 0 && !spaceDown.current) useUI.setState({ focusedWindow: null, selectedWindows: [] });
     const el = vpRef.current!;
     el.setPointerCapture(e.pointerId);
-    el.classList.add("panning");
     const start = { x: e.clientX, y: e.clientY, vx: viewport.vp.x, vy: viewport.vp.y };
-    const move = (ev: PointerEvent) => viewport.set({ ...viewport.vp, x: start.vx + ev.clientX - start.x, y: start.vy + ev.clientY - start.y });
-    const up = () => {
+    // A middle press pans only once it moves; let go where it was and it autoscrolls what's under
+    // it instead (the browser's own can't start: this press was taken for a possible pan).
+    const from = e.target as Element;
+    let panning = e.button !== 1;
+    if (panning) el.classList.add("panning");
+    const move = (ev: PointerEvent) => {
+      if (!panning) {
+        if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < PAN_SLOP) return;
+        panning = true;
+        el.classList.add("panning");
+      }
+      viewport.set({ ...viewport.vp, x: start.vx + ev.clientX - start.x, y: start.vy + ev.clientY - start.y });
+    };
+    const up = (ev: PointerEvent) => {
       el.classList.remove("panning");
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", up);
+      if (!panning && ev.type === "pointerup") startAutoscroll(from, start.x, start.y);
     };
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);
