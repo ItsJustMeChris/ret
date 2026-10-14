@@ -5,7 +5,7 @@ import { PROVIDERS } from "../agents";
 import { useConn } from "./conn";
 import type { Thread } from "@shared/protocol";
 import { mergeTurns } from "./actions";
-import { threadTitle } from "./projects";
+import { spawnedBy, threadTitle } from "./projects";
 import { upsertThreads, useThreads, type ExternalRun } from "./threads";
 import { backfillLineage } from "./lineage";
 
@@ -69,9 +69,41 @@ async function poll() {
   }
 }
 
+/**
+ * The agents of threads at work elsewhere, which the plain list leaves out. Asked of each such
+ * thread by ancestor (the only way newer agents turn up); a thread counts while its turn runs
+ * elsewhere, while it changed lately, or while one of its agents still runs, since an agent can
+ * work on after its parent's turn ends.
+ */
+async function agentsAtWork(p: ProviderId, listed: Thread[], now: number): Promise<Thread[]> {
+  const st = useThreads.getState();
+  const quiet = PROVIDERS[p].externalQuietS ?? 10 * 60;
+  const roots = new Set<string>();
+  const rootOf = (id: string) => {
+    const seen = new Set<string>();
+    for (let up = spawnedBy(st.threads[id]); up && !seen.has(up); up = spawnedBy(st.threads[up])) seen.add((id = up));
+    return id;
+  };
+  for (const t of listed) if (!spawnedBy(t) && (st.external[t.id] || now - t.updatedAt < quiet)) roots.add(t.id);
+  for (const id of Object.keys(st.external)) if (spawnedBy(st.threads[id])) roots.add(rootOf(id));
+  const found = await Promise.all(
+    [...roots].map((id) =>
+      clients[p]
+        .request("thread/list", { limit: 100, sortKey: "updated_at", useStateDbOnly: true, ancestorThreadId: id })
+        .then((res) => (res as import("@shared/protocol").ThreadListResponse).data.filter((t) => spawnedBy(t)))
+        .catch(() => [] as Thread[]),
+    ),
+  );
+  return found.flat();
+}
+
 async function pass(p: ProviderId) {
   const res = await clients[p].request("thread/list", { limit: 40, sortKey: "updated_at", useStateDbOnly: true });
   const now = Date.now() / 1000;
+  if (PROVIDERS[p].subagentThreads) {
+    const listed = new Set(res.data.map((t) => t.id));
+    res.data.push(...(await agentsAtWork(p, res.data, now)).filter((t) => !listed.has(t.id)));
+  }
   const st = useThreads.getState();
 
   // Pick up new threads and metadata changes made by other clients (only touch the store if something moved).
@@ -82,7 +114,7 @@ async function pass(p: ProviderId) {
   if (changed.length) {
     upsertThreads(p, changed);
     // The list doesn't say which of the new ones are forks; look that up.
-    const fresh = changed.filter((t) => !st.threads[t.id]).map((t) => t.id);
+    const fresh = changed.filter((t) => !st.threads[t.id] && !spawnedBy(t)).map((t) => t.id);
     if (fresh.length) void backfillLineage(fresh);
   }
 
@@ -122,6 +154,8 @@ async function check(p: ProviderId, t: Thread, moved: boolean) {
   } else if (was) {
     setExternal(t.id, null);
     refresh(p, t.id);
+    // A subagent finishing is its parent's news, not yours (see delegated()).
+    if (spawnedBy(t)) return;
     const visible = !!useThreads.getState().visible[t.id];
     if (!useThreads.getState().attended[t.id]) {
       useThreads.setState((s) => ({ unread: { ...s.unread, [t.id]: true } }));
