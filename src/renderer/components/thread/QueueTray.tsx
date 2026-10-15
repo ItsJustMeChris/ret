@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Clock, CornerDownRight, Pencil, X } from "lucide-react";
-import { useThreads } from "../../state/threads";
+import { useThread } from "../../state/useThread";
 import { discardQueued, editQueued, steerQueued } from "../../state/actions";
 
 /**
@@ -8,7 +8,7 @@ import { discardQueued, editQueued, steerQueued } from "../../state/actions";
  * Each can be pushed into the running turn now, pulled back to edit, or dropped.
  */
 export const QueueTray = memo(function QueueTray({ threadId }: { threadId: string }) {
-  const queued = useThreads((s) => s.queued[threadId]);
+  const queued = useThread(threadId, (s) => s.queued[threadId]);
   if (!queued?.length) return null;
   return (
     <div className="queue-tray">

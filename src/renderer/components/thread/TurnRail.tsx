@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
 import { CircleAlert, LoaderCircle } from "lucide-react";
-import { useThreads } from "../../state/threads";
+import { useThread } from "../../state/useThread";
+import { shallowEqual } from "../../lib/shallow";
 import type { ThreadItem } from "@shared/protocol";
 import { duration, plainText } from "../../lib/format";
 
@@ -49,20 +49,33 @@ function layoutTicks(n: number, H: number, focus: number | null): { top: number[
  * to hit however long the thread is; hovering shows the turn's opening message, and clicking
  * smooth-scrolls there.
  */
-export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadId: string; scroller: React.RefObject<HTMLDivElement | null> }) {
-  const turns = useThreads(
-    useShallow((s) => {
+export const TurnRail = memo(function TurnRail({
+  threadId,
+  scroller,
+  showFrom,
+}: {
+  threadId: string;
+  scroller: React.RefObject<HTMLDivElement | null>;
+  /** Draw the transcript down to a turn it hasn't drawn yet (a long one is drawn from its end). */
+  showFrom: (turnId: string) => void;
+}) {
+  const turns = useThread(
+    threadId,
+    (s) => {
       const lt = s.live[threadId];
       if (!lt) return [] as string[];
       return lt.turnOrder.filter((id) => !id.startsWith("pending:"));
-    }),
+    },
+    shallowEqual,
   );
-  const running = useThreads((s) => {
+  const running = useThread(threadId, (s) => {
     const lt = s.live[threadId];
     return lt?.activeTurnId ?? (s.external[threadId]?.turnId || null);
   });
   const rail = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState<string>("");
+  /** The pointer is on it or focus is in it: the only time its ticks show. */
+  const [active, setActive] = useState(false);
   /** The turn the pointer picks. Only this is React state: the layout and the preview's position are written to the DOM. */
   const [hot, setHot] = useState<string | null>(null);
   const hotIndex = useRef<number | null>(null);
@@ -72,10 +85,11 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
   const leaving = useRef(0);
   const arriving = useRef(0);
 
-  // Which turns are on screen.
+  // Which turns are on screen, while the ticks show. (Watching every turn of every transcript all
+  // the time had the canvas recompute them all on each frame of a pan or zoom.)
   useEffect(() => {
     const root = scroller.current;
-    if (!root || turns.length < 2) return;
+    if (!active || !root || turns.length < 2) return;
     const seen = new Map<string, boolean>();
     const io = new IntersectionObserver(
       (entries) => {
@@ -87,9 +101,9 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
     );
     for (const el of root.querySelectorAll<HTMLElement>("section.turn[data-turn]")) io.observe(el);
     return () => io.disconnect();
-  }, [scroller, turns]);
+  }, [scroller, turns, active]);
 
-  // Lay the ticks out (evenly, or fisheyed around the pointer), written straight to the DOM.
+  // Lay the ticks out fisheyed around the pointer, written straight to the DOM (at rest, CSS spaces them evenly).
   // Everything is computed, nothing measured per tick, so it stays cheap on long threads.
   // The preview rides on the picked tick's centre in the same frame, so they never drift apart.
   const height = useRef(0);
@@ -100,15 +114,22 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
       const el = rail.current;
       if (!el) return;
       const ticks = el.querySelectorAll<HTMLElement>(".rail-tick");
-      if (!ticks.length || !height.current) return;
+      if (!ticks.length) return;
+      // At rest the ticks are spaced evenly by CSS: nothing is written, so a window nobody can see
+      // (culled on the canvas) never starts a transition it can't finish, which Chrome would service
+      // on every frame from then on.
+      if (focus == null) {
+        for (const tick of ticks) for (const p of ["transform", "height", "--h", "--mag"]) tick.style.removeProperty(p);
+        return;
+      }
+      if (!height.current) return;
       const { top, size } = layoutTicks(ticks.length, height.current, focus);
       ticks.forEach((tick, i) => {
-        const centre = top[i] + size[i] / 2;
-        const d = focus == null ? Infinity : (centre - focus) / 26;
+        const d = (top[i] + size[i] / 2 - focus) / 26;
         tick.style.transform = `translateY(${top[i]}px)`;
         tick.style.height = `${size[i]}px`;
         tick.style.setProperty("--h", String(size[i]));
-        tick.style.setProperty("--mag", focus == null ? "0" : String(Math.exp(-d * d)));
+        tick.style.setProperty("--mag", String(Math.exp(-d * d)));
       });
       if (picked != null && picked < ticks.length) {
         previewY.current = PAD + top[picked] + size[picked] / 2;
@@ -164,14 +185,19 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
       hotIndex.current = null;
       arrange(null);
       setHot(null);
+      if (!el?.matches(":focus-within")) setActive(false);
     }, LEAVE_MS);
   };
 
   const jump = (id: string) => {
     const root = scroller.current;
-    const target = root?.querySelector<HTMLElement>(`section.turn[data-turn="${CSS.escape(id)}"]`);
+    const find = () => root?.querySelector<HTMLElement>(`section.turn[data-turn="${CSS.escape(id)}"]`);
+    let target = find();
+    if (root && !target) {
+      showFrom(id);
+      target = find();
+    }
     if (!root || !target) return;
-    root.dispatchEvent(new Event("ret:unstick"));
     // The rects are screen px (zoomed on the canvas); scrollTop is layout px.
     const top = (target.getBoundingClientRect().top - root.getBoundingClientRect().top) / scaleOf(root) + root.scrollTop - 12;
     root.scrollTo({ top, behavior: "smooth" });
@@ -180,16 +206,17 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
     target.classList.add("flash");
   };
 
-  // Track the rail's usable height; re-lay the ticks evenly when it or the turn count changes.
+  // Track the rail's usable height (its content box); back to even spacing when it or the turn count
+  // changes. From the observer, which also reports it once on observing: nothing measured here forces
+  // a layout.
   useLayoutEffect(() => {
     const el = rail.current;
     if (!el) return;
-    const measure = () => {
-      height.current = Math.max(1, el.clientHeight - PAD * 2);
+    const ro = new ResizeObserver(([e]) => {
+      if (!e.contentRect.height) return; // out of the document (a canvas window off screen)
+      height.current = Math.max(1, e.contentRect.height);
       arrange(null);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
+    });
     ro.observe(el);
     return () => {
       ro.disconnect();
@@ -206,7 +233,9 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
     const el = rail.current;
     const wrap = el?.parentElement;
     if (!el || !wrap) return;
+    // From the observer (which also calls it once on observing), where layout is fresh.
     const place = () => {
+      if (!wrap.isConnected) return; // out of the document (a canvas window off screen)
       // Measured in screen px but written in layout px, so divide out a canvas window's zoom.
       const scale = scaleOf(wrap);
       const w = wrap.getBoundingClientRect();
@@ -214,7 +243,6 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
       const left = inner ? (inner.left - w.left) / scale - 14 : 8;
       el.style.left = `${Math.max(6, Math.round(left))}px`;
     };
-    place();
     const ro = new ResizeObserver(place);
     ro.observe(wrap);
     return () => ro.disconnect();
@@ -228,8 +256,11 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
       ref={rail}
       className="turn-rail"
       style={{ "--n": turns.length } as React.CSSProperties}
+      onPointerEnter={() => setActive(true)}
       onPointerMove={(e) => point(e.clientY)}
       onPointerLeave={leave}
+      onFocus={() => setActive(true)}
+      onBlur={(e) => !e.currentTarget.contains(e.relatedTarget) && !e.currentTarget.matches(":hover") && setActive(false)}
       // The highlighted turn, not the hit-tested element, is what a click takes: clicks between ticks still land.
       onClick={(e) => {
         if (e.detail === 0) return; // keyboard activation goes to the focused tick's own onClick
@@ -270,8 +301,9 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
 
 /** The hovered turn's opening message. Stays mounted while the pointer moves between turns (so it doesn't re-pop); the rail positions it. */
 function RailPreview({ threadId, turnId, index, place }: { threadId: string; turnId: string; index: number; place: (el: HTMLDivElement | null) => void }) {
-  const info = useThreads(
-    useShallow((s) => {
+  const info = useThread(
+    threadId,
+    (s) => {
       const lt = s.live[threadId];
       const turn = lt?.turns[turnId];
       if (!turn) return null;
@@ -281,7 +313,8 @@ function RailPreview({ threadId, turnId, index, place }: { threadId: string; tur
         .join(" ")
         .trim();
       return { text: text ?? "", status: turn.status, stale: !!turn.stale, startedAt: turn.startedAt, durationMs: turn.durationMs };
-    }),
+    },
+    shallowEqual,
   );
   if (!info) return null;
   const when = info.startedAt ? new Date(info.startedAt * 1000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";

@@ -1,6 +1,6 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { LoaderCircle } from "lucide-react";
-import { useShallow } from "zustand/react/shallow";
+import { useShallow } from "../lib/shallow";
 import { PROVIDERS } from "../agents";
 import { loadTokenUsage } from "../state/actions";
 import { useConn, useEnabledProviders } from "../state/conn";

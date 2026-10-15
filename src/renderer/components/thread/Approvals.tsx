@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { useShallow } from "zustand/react/shallow";
 import { FilePen, Globe, KeyRound, MessageCircleQuestion, ShieldAlert, SquareTerminal, Wrench } from "lucide-react";
-import { useThreads, type PendingRequest } from "../../state/threads";
+import { type PendingRequest } from "../../state/threads";
+import { useThread } from "../../state/useThread";
+import { shallowEqual } from "../../lib/shallow";
 import { PROVIDERS } from "../../agents";
 import { respondToRequest } from "../../state/actions";
 import { bridge } from "../../bridge";
@@ -11,8 +12,10 @@ import { unwrapCommand } from "../../lib/format";
 
 export function Approvals({ threadId }: { threadId: string }) {
   // Questions (request_user_input) are answered in the dock on top of the composer instead.
-  const reqs = useThreads(
-    useShallow((s) => Object.values(s.requests).filter((r) => r.threadId === threadId && r.method !== "item/tool/requestUserInput")),
+  const reqs = useThread(
+    threadId,
+    (s) => Object.values(s.requests).filter((r) => r.threadId === threadId && r.method !== "item/tool/requestUserInput"),
+    shallowEqual,
   );
   if (!reqs.length) return null;
   return (

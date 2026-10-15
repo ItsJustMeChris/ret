@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { create } from "zustand";
-import { useShallow } from "zustand/react/shallow";
 import { ChevronLeft, CornerDownLeft, MessageCircleQuestion, X } from "lucide-react";
-import { ownerOf, useThreads, type ThreadsState } from "../../state/threads";
+import { ownerOf, type ThreadsState } from "../../state/threads";
+import { useThread } from "../../state/useThread";
+import { shallowEqual } from "../../lib/shallow";
 import { PROVIDERS } from "../../agents";
 import { respondToRequest } from "../../state/actions";
 import { Markdown } from "../Markdown";
@@ -59,10 +60,10 @@ export function openQuestionItems(s: ThreadsState, threadId: string): string[] {
 }
 
 function useOpenAsk(threadId: string): Ask | null {
-  const req = useThreads((s) => Object.values(s.requests).find((r) => r.threadId === threadId && r.method === "item/tool/requestUserInput"));
+  const req = useThread(threadId, (s) => Object.values(s.requests).find((r) => r.threadId === threadId && r.method === "item/tool/requestUserInput"));
   const dismissed = useDismissed();
-  const ids = useThreads(useShallow((s) => openQuestionItems(s, threadId))).filter((id) => !dismissed[id]);
-  const items = useThreads(useShallow((s) => ids.map((id) => s.live[threadId]?.items[id])));
+  const ids = useThread(threadId, (s) => openQuestionItems(s, threadId), shallowEqual).filter((id) => !dismissed[id]);
+  const items = useThread(threadId, (s) => ids.map((id) => s.live[threadId]?.items[id]), shallowEqual);
 
   if (req) {
     const qs: { id: string; header: string; question: string; isOther: boolean; isSecret: boolean; options: { label: string; description: string }[] | null }[] =
@@ -126,7 +127,7 @@ export function useQuestionFlow(
   io: { send: (text: string) => Promise<unknown>; focusInput: () => void },
 ) {
   const ask = useOpenAsk(threadId);
-  const running = useThreads((s) => !!s.live[threadId]?.activeTurnId);
+  const running = useThread(threadId, (s) => !!s.live[threadId]?.activeTurnId);
   const [flow, setFlow] = useState<FlowState>(() => fresh(null));
   // A different question starts over.
   const source = ask?.source ?? null;

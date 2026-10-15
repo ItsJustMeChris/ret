@@ -94,6 +94,40 @@ const marked = new Marked({
   },
 });
 
+/** Markdown and the source text of each of its top-level blocks (paragraphs, lists, code blocks…), in order. */
+export interface MarkdownBlocks {
+  src: string;
+  raws: string[];
+}
+
+/**
+ * Cut markdown into its top-level blocks. For text that's still streaming in: new text only ever
+ * changes the last block or two, so `prev` (the split of an earlier, shorter version) lets the blocks
+ * before those be kept as they were instead of lexed again.
+ */
+export function splitBlocks(text: string, prev: MarkdownBlocks | null): MarkdownBlocks {
+  const src = text.includes("\r") ? text.replace(/\r\n?/g, "\n") : text;
+  // The last two of the earlier split can still change (a list grows, a setext underline lands).
+  const keep = prev && src.startsWith(prev.src) ? Math.max(0, prev.raws.length - 2) : 0;
+  let offset = 0;
+  for (let i = 0; i < keep; i++) offset += prev!.raws[i].length;
+  const raws = prev ? prev.raws.slice(0, keep) : [];
+  for (const t of marked.lexer(src.slice(offset))) {
+    // Blank lines ride with the block before them.
+    if (t.type === "space" && raws.length > keep) raws[raws.length - 1] += t.raw;
+    else raws.push(t.raw);
+  }
+  // Every token's source, in order, is the whole text; if not, start over rather than trust the offsets.
+  if (keep && raws.join("").length !== src.length) return splitBlocks(src, null);
+  return { src, raws };
+}
+
+// Configured once: a config passed to sanitize() is re-parsed (its allow-lists copied) on every call.
+const purifyHtml = DOMPurify(window);
+purifyHtml.setConfig({ ADD_ATTR: ["data-copy", "target"] });
+const purifyDom = DOMPurify(window);
+purifyDom.setConfig({ ADD_ATTR: ["data-copy", "target"], RETURN_DOM_FRAGMENT: true });
+
 const cache = new Map<string, string>();
 const CACHE_MAX = 600;
 
@@ -101,11 +135,14 @@ const CACHE_MAX = 600;
 export function renderMarkdown(src: string, memo = true): string {
   const hit = cache.get(src);
   if (hit !== undefined) return hit;
-  const html = DOMPurify.sanitize(marked.parse(src, { async: false }) as string, {
-    ADD_ATTR: ["data-copy", "target"],
-  });
+  const html = purifyHtml.sanitize(marked.parse(src, { async: false }) as string) as unknown as string;
   if (!memo) return html;
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
   cache.set(src, html);
   return html;
+}
+
+/** Markdown → sanitized nodes, ready to insert: for a streaming block, which would only be parsed again from HTML. */
+export function renderMarkdownFragment(src: string): DocumentFragment {
+  return purifyDom.sanitize(marked.parse(src, { async: false }) as string) as unknown as DocumentFragment;
 }

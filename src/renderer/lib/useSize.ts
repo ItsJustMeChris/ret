@@ -9,14 +9,19 @@ export function classify(w: number, h: number): SizeClass {
   return "regular";
 }
 
-/** Structural size class for adaptive layouts (fine-grained styling uses CSS container queries). */
-export function useSizeClass(ref: RefObject<HTMLElement | null>): SizeClass {
-  const [size, setSize] = useState<SizeClass>("regular");
+/**
+ * Structural size class for adaptive layouts (fine-grained styling uses CSS container queries).
+ * `initial` is the class it most likely has, for a view that's built before it's first shown.
+ */
+export function useSizeClass(ref: RefObject<HTMLElement | null>, initial: SizeClass = "regular"): SizeClass {
+  const [size, setSize] = useState<SizeClass>(initial);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
+      // Out of the document (a canvas window's view while it's off screen) it measures 0×0: keep what it was.
+      if (!el.isConnected || (!width && !height)) return;
       const next = classify(width, height);
       setSize((prev) => (prev === next ? prev : next));
     });
