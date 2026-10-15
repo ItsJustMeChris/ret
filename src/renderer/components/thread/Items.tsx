@@ -3,7 +3,6 @@ import {
   Bot,
   Brain,
   Check,
-  ChevronRight,
   FileText,
   FolderOpen,
   Globe,
@@ -19,15 +18,19 @@ import {
   FilePen,
   Layers,
 } from "lucide-react";
+import { Chevron } from "../ui/Chevron";
 import type { FileUpdateChange, ThreadItem } from "@shared/protocol";
-import { useThreads } from "../../state/threads";
+import { useThread } from "../../state/useThread";
+import { agentName } from "../../state/projects";
+import { StatusDot } from "../StatusDot";
+import { openFrom } from "./Subagents";
 import { changeStats, duration, shortPath, unwrapCommand } from "../../lib/format";
 import { highlight } from "../../lib/markdown";
 import { Markdown } from "../Markdown";
 import { ThreadImage } from "./ThreadImage";
 import { PlanActions, ReplyQuestions } from "./Questions";
 import { Shimmer } from "../ui/Shimmer";
-import { appKey, appLabel, computerUseOf, outputText, useComputerUse, useScreens, type ComputerUse } from "../../state/computerUse";
+import { appKey, appLabel, computerUseOf, outputText, useComputerUse, useScreen, type ComputerUse } from "../../state/computerUse";
 import { AppIcon, AppName } from "./ComputerUse";
 
 type Ctx = { threadId: string; cwd: string | null };
@@ -62,7 +65,7 @@ function Disclosure({
         <span className="tool-icon">{icon}</span>
         <span className="tool-label">{label}</span>
         {meta && <span className="tool-meta">{meta}</span>}
-        {expandable && <ChevronRight className="tool-chev" size={13} />}
+        {expandable && <Chevron className="tool-chev" size={13} />}
       </button>
       {open && expandable && <div className="tool-body">{children}</div>}
     </div>
@@ -124,7 +127,7 @@ function Reasoning({ item, live }: { item: Extract<ThreadItem, { type: "reasonin
       label={live ? <Shimmer text={heading ?? "Thinking"} /> : (heading ?? "Thought")}
       tone="muted"
     >
-      <Markdown text={text} className="md-muted" />
+      <Markdown text={text} className="md-muted" streaming={live} />
     </Disclosure>
   );
 }
@@ -222,7 +225,7 @@ function FileRow({ change, cwd }: { change: FileUpdateChange; cwd: string | null
   return (
     <div className={`file-row ${open ? "open" : ""}`}>
       <button className="file-head" onClick={() => setOpen(!open)}>
-        <ChevronRight className="tool-chev" size={12} />
+        <Chevron className="tool-chev" size={12} />
         <span className={`kind kind-${kind}`}>{kind === "add" ? "A" : kind === "delete" ? "D" : "M"}</span>
         <span className="path" data-path={change.path}>{shortPath(change.path, cwd)}</span>
         <span className="stat">
@@ -299,7 +302,7 @@ function McpTool({ item }: { item: Extract<ThreadItem, { type: "mcpToolCall" }> 
 /** A step of the agent using an app: the app, what the step was for, and the window it saw. */
 function ComputerUseTool({ item }: { item: Extract<ThreadItem, { type: "mcpToolCall" }> }) {
   const use = useComputerUse(item)!;
-  const shot = useScreens((s) => s.shots[item.id]);
+  const shot = useScreen((s) => s.shots[item.id]);
   const code = (item.arguments as any)?.code;
   const output = outputText(item);
   const failed = item.status === "failed" || (item.result as any)?.isError === true;
@@ -324,7 +327,7 @@ function ComputerUseTool({ item }: { item: Extract<ThreadItem, { type: "mcpToolC
     >
       {shot && (
         <div className="cu-shot">
-          <ThreadImage src={shot} />
+          <ThreadImage src={shot.thumb ?? shot.url} full={shot.url} />
         </div>
       )}
       {use.window && (
@@ -370,7 +373,7 @@ function WebSearch({ item }: { item: Extract<ThreadItem, { type: "webSearch" }> 
  * down until it ends (early, if new input arrives), and then says how long it took.
  */
 function Sleep({ item, threadId, live }: { item: Extract<ThreadItem, { type: "sleep" }>; threadId: string; live: boolean }) {
-  const seen = useThreads((s) => s.live[threadId]?.sleeps[item.id]);
+  const seen = useThread(threadId, (s) => s.live[threadId]?.sleeps[item.id]);
   const waiting = live && seen?.endedAt == null;
   const [, tick] = useState(0);
   useEffect(() => {
@@ -390,21 +393,79 @@ function Sleep({ item, threadId, live }: { item: Extract<ThreadItem, { type: "sl
   return <Disclosure icon={<Hourglass size={13} />} label="Waited" meta={took} tone="muted" />;
 }
 
-function Collab({ item }: { item: Extract<ThreadItem, { type: "collabAgentToolCall" }> }) {
+/** What a subagent goes by here: its nickname once its thread is known, else its path or id. */
+function useAgentName(threadId: string, path?: string | null): string {
+  return useThread(threadId, (s) => agentName(s.threads[threadId], path)) ?? `agent ${threadId.slice(-6)}`;
+}
+
+/** A subagent named in a row of `from`'s transcript: opens its thread. */
+function AgentLink({ threadId, path, from }: { threadId: string; path?: string | null; from: string }) {
+  const name = useAgentName(threadId, path);
+  return (
+    <button className="agent-link" onClick={(e) => openFrom(e, threadId, from)} title={`Open ${name}'s thread`}>
+      <StatusDot threadId={threadId} />
+      <span>{name}</span>
+    </button>
+  );
+}
+
+/** A subagent starting, hearing from its parent, being stopped, or finishing. The row opens its thread. */
+function SubAgentActivity({ item, from }: { item: Extract<ThreadItem, { type: "subAgentActivity" }>; from: string }) {
+  const name = useAgentName(item.agentThreadId, item.agentPath);
+  const who = <span className="agent-name">{name}</span>;
+  const label = {
+    started: <>Started {who}</>,
+    interacted: <>Messaged {who}</>,
+    interrupted: <>Interrupted {who}</>,
+    completed: <>{who} finished</>,
+  }[item.kind] ?? <>{who}</>;
+  const meta = [item.model, item.reasoningEffort].filter(Boolean).join(" · ");
+  return (
+    <div className="tool">
+      <button className="tool-head" onClick={(e) => openFrom(e, item.agentThreadId, from)} title={`Open ${name}'s thread`}>
+        <span className="tool-icon">
+          <Bot size={13} />
+        </span>
+        <span className="tool-label">{label}</span>
+        <span className="tool-meta">
+          {meta}
+          <StatusDot threadId={item.agentThreadId} />
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function Collab({ item, from }: { item: Extract<ThreadItem, { type: "collabAgentToolCall" }>; from: string }) {
   const verb: Record<string, string> = {
-    spawnAgent: "Spawned agent",
-    sendInput: "Messaged agent",
-    sendMessage: "Messaged agent",
-    wait: "Waiting on agents",
-    closeAgent: "Closed agent",
-    resumeAgent: "Resumed agent",
-    followupTask: "Follow-up task",
-    interruptAgent: "Interrupted agent",
+    spawnAgent: "Spawned",
+    sendInput: "Messaged",
+    sendMessage: "Messaged",
+    wait: "Waited on",
+    closeAgent: "Closed",
+    resumeAgent: "Resumed",
+    followupTask: "Follow-up task for",
+    interruptAgent: "Interrupted",
     listAgents: "Listed agents",
   };
+  const ids = item.receiverThreadIds;
+  const first = useAgentName(ids[0] ?? "");
+  const who = item.tool === "listAgents" ? "" : !ids.length ? "agents" : ids.length === 1 ? first : `${ids.length} agents`;
+  const label = `${verb[item.tool] ?? item.tool}${who ? ` ${who}` : ""}`;
   return (
-    <Disclosure icon={<Bot size={13} />} label={verb[item.tool] ?? item.tool} meta={<Status status={item.status as string} />}>
-      {item.prompt && <Markdown text={item.prompt} className="md-muted" />}
+    <Disclosure icon={<Bot size={13} />} label={label} meta={<Status status={item.status as string} />}>
+      {(item.prompt || ids.length > 0) && (
+        <>
+          {item.prompt && <Markdown text={item.prompt} className="md-muted" />}
+          {ids.length > 0 && (
+            <div className="agent-links">
+              {ids.map((id) => (
+                <AgentLink key={id} threadId={id} from={from} />
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </Disclosure>
   );
 }
@@ -431,30 +492,33 @@ export function isActivity(item: ThreadItem | undefined): boolean {
   }
 }
 
-export function activitySummary(items: ThreadItem[]): string {
+/** `known`: what the live session learned about each item's computer-use step (see useScreen), in step with `items`. */
+export function activitySummary(items: ThreadItem[], known?: readonly (ComputerUse | undefined)[]): string {
   let reads = 0;
   let searches = 0;
   let cmds = 0;
   let tools = 0;
   let web = 0;
   let waits = 0;
+  let agents = 0;
   const apps = new Map<string, ComputerUse>();
-  const known = useScreens.getState().uses;
-  for (const it of items) {
-    const use = computerUseOf(it) && (known[it.id] ?? computerUseOf(it));
+  items.forEach((it, i) => {
+    const use = known?.[i] ?? computerUseOf(it);
     if (use) {
       apps.set(appKey(use), use);
-      continue;
+      return;
     }
     if (it.type === "commandExecution") {
       const t = it.commandActions?.[0]?.type;
       if (t === "read") reads += it.commandActions.length;
       else if (t === "search" || t === "listFiles") searches++;
       else cmds++;
-    } else if (it.type === "mcpToolCall" || it.type === "dynamicToolCall" || it.type === "collabAgentToolCall") tools++;
+    } else if (it.type === "collabAgentToolCall" && it.tool === "wait") waits++;
+    else if (it.type === "mcpToolCall" || it.type === "dynamicToolCall" || it.type === "collabAgentToolCall") tools++;
     else if (it.type === "webSearch") web++;
     else if (it.type === "sleep") waits++;
-  }
+    else if (it.type === "subAgentActivity" && it.kind === "started") agents++;
+  });
   // Steps that never said which app count with the ones that did.
   if (apps.size > 1) apps.delete("computer");
   const parts: string[] = [];
@@ -464,6 +528,7 @@ export function activitySummary(items: ThreadItem[]): string {
   if (cmds) parts.push(`ran ${cmds} ${cmds === 1 ? "command" : "commands"}`);
   if (tools) parts.push(`${tools} tool ${tools === 1 ? "call" : "calls"}`);
   if (web) parts.push(`${web} web ${web === 1 ? "lookup" : "lookups"}`);
+  if (agents) parts.push(`started ${agents} ${agents === 1 ? "agent" : "agents"}`);
   if (waits) parts.push(waits === 1 ? "waited" : `waited ${waits} times`);
   const s = parts.join(", ") || "thought";
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -472,7 +537,7 @@ export function activitySummary(items: ThreadItem[]): string {
 const listOf = (names: string[]) => (names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
 
 export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: string; ctx: Ctx; live: boolean }) {
-  const item = useThreads((s) => s.live[ctx.threadId]?.items[itemId]);
+  const item = useThread(ctx.threadId, (s) => s.live[ctx.threadId]?.items[itemId]);
   if (!item) return null;
   switch (item.type) {
     case "userMessage":
@@ -497,7 +562,7 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
           <div className="plan-title">
             <ListChecks size={13} /> Plan
           </div>
-          <Markdown text={item.text} />
+          <Markdown text={item.text} streaming={live} />
           <PlanActions threadId={ctx.threadId} itemId={item.id} />
         </div>
       );
@@ -533,9 +598,9 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
         </div>
       );
     case "collabAgentToolCall":
-      return <Collab item={item} />;
+      return <Collab item={item} from={ctx.threadId} />;
     case "subAgentActivity":
-      return <Disclosure icon={<Bot size={13} />} label={`Sub-agent ${item.kind}`} meta={<span className="path">{item.agentPath}</span>} />;
+      return <SubAgentActivity item={item} from={ctx.threadId} />;
     case "hookPrompt":
       return <div className="hook">{item.fragments.map((f) => f.text).join("\n")}</div>;
     case "sleep":

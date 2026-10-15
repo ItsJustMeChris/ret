@@ -39,8 +39,10 @@ export interface ThreadNode {
   children: ThreadNode[];
   /** Most recent activity anywhere in this subtree (seconds). */
   recency: number;
-  /** Number of descendants (forks, forks of forks, ...). */
+  /** Forks among its descendants (forks, forks of forks, ...). */
   forkCount: number;
+  /** Subagents among its descendants. */
+  agentCount: number;
 }
 
 export interface ProjectNode {
@@ -101,9 +103,51 @@ export function projectIndex(projects: Record<string, ProjectConf>, workspaces: 
 
 export const recencyOf = (t: Thread) => t.recencyAt ?? t.updatedAt ?? t.createdAt;
 
+/**
+ * The thread that spawned this one, when it's a Codex subagent. `thread/list` leaves
+ * `parentThreadId` out, but the thread's source still names its parent.
+ */
+export function spawnedBy(t: Thread | undefined): string | null {
+  if (!t) return null;
+  if (t.parentThreadId) return t.parentThreadId;
+  const src = t.source as { subAgent?: { thread_spawn?: { parent_thread_id?: string } } } | string | undefined;
+  return (typeof src === "object" && src?.subAgent?.thread_spawn?.parent_thread_id) || null;
+}
+
+/** Whether you can send it messages. Codex's subagents take theirs from the agent that spawned them. */
+export const takesDirectInput = (t: Thread | undefined): boolean => !spawnedBy(t) || t?.canAcceptDirectInput === true;
+
+/** The thread this one hangs under: the agent that spawned it, or the thread it was forked from. */
+export const lineageParent = (t: Thread): string | null => spawnedBy(t) ?? t.forkedFromId;
+
+/**
+ * The top of a thread's line: up through the threads it came from (`parentOf`: forks and spawns by
+ * default) as far as `threads` knows them.
+ */
+export function lineageRoot(threads: Record<string, Thread>, id: string, parentOf: (t: Thread) => string | null = lineageParent): string {
+  const seen = new Set<string>([id]);
+  let cur = id;
+  for (let up = threads[cur] && parentOf(threads[cur]); up && threads[up] && !seen.has(up); up = parentOf(threads[cur])) {
+    seen.add(up);
+    cur = up;
+  }
+  return cur;
+}
+
+/** A subagent's handle: the nickname Codex gave it, else the last part of its path (/root/pong). */
+export function agentName(t: Thread | undefined, path?: string | null): string | null {
+  const p = path ?? (t?.source as { subAgent?: { thread_spawn?: { agent_path?: string | null } } } | undefined)?.subAgent?.thread_spawn?.agent_path;
+  return t?.agentNickname?.trim() || p?.split("/").filter(Boolean).pop() || null;
+}
+
 export function threadTitle(t: Thread | undefined): string {
   if (!t) return "New thread";
   if (t.name?.trim()) return t.name.trim();
+  // A subagent that inherited its parent's history would otherwise borrow the parent's first message.
+  if (spawnedBy(t)) {
+    const name = agentName(t);
+    if (name) return t.agentRole ? `${name} (${t.agentRole})` : name;
+  }
   const first = t.preview?.split("\n").find((l) => l.trim());
   return first?.trim().slice(0, 120) || "Untitled thread";
 }
@@ -119,7 +163,8 @@ export function projectKeyFor(
   for (;;) {
     const pinned = threadProject[root.id];
     if (pinned) return pinned;
-    const parent = root.forkedFromId ? byId[root.forkedFromId] : undefined;
+    const up = lineageParent(root);
+    const parent = up ? byId[up] : undefined;
     if (!parent || seen.has(parent.id)) break;
     seen.add(root.id);
     root = parent;
@@ -132,8 +177,8 @@ export function projectKeyFor(
 }
 
 /**
- * Groups threads into projects and nests forks under the thread they were
- * forked from. A thread with forks becomes a "fork group" folder in the sidebar.
+ * Groups threads into projects and nests forks and subagents under the thread they came
+ * from. A thread with forks or subagents becomes a group folder in the sidebar.
  */
 export function buildProjects(
   threads: Record<string, Thread>,
@@ -148,13 +193,14 @@ export function buildProjects(
   for (const t of list) keyOf.set(t.id, projectKeyFor(t, threads, index, threadProject));
 
   const nodes = new Map<string, ThreadNode>();
-  for (const t of list) nodes.set(t.id, { thread: t, children: [], recency: recencyOf(t), forkCount: 0 });
+  for (const t of list) nodes.set(t.id, { thread: t, children: [], recency: recencyOf(t), forkCount: 0, agentCount: 0 });
 
   const groups = new Map<string, ThreadNode[]>();
   for (const t of list) {
     const node = nodes.get(t.id)!;
     const key = keyOf.get(t.id)!;
-    const parent = t.forkedFromId ? nodes.get(t.forkedFromId) : undefined;
+    const up = lineageParent(t);
+    const parent = up ? nodes.get(up) : undefined;
     if (parent && keyOf.get(parent.thread.id) === key) parent.children.push(node);
     else {
       let g = groups.get(key);
@@ -168,7 +214,10 @@ export function buildProjects(
     for (const c of n.children) {
       finalize(c);
       n.recency = Math.max(n.recency, c.recency);
-      n.forkCount += 1 + c.forkCount;
+      if (spawnedBy(c.thread)) n.agentCount++;
+      else n.forkCount++;
+      n.forkCount += c.forkCount;
+      n.agentCount += c.agentCount;
     }
   };
 
@@ -189,7 +238,7 @@ export function buildProjects(
       name: conf?.name ?? ws?.name ?? (!conf ? scratchOf(normPath(sample?.cwd ?? ""))?.name : undefined) ?? baseName(path),
       conf,
       roots,
-      threadCount: roots.reduce((n, r) => n + 1 + r.forkCount, 0),
+      threadCount: roots.reduce((n, r) => n + 1 + r.forkCount + r.agentCount, 0),
       recency: roots[0]?.recency ?? (conf?.addedAt ? conf.addedAt / 1000 : 0), // addedAt is ms; recency is seconds
     });
   }

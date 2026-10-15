@@ -1,7 +1,9 @@
 import { memo, useCallback, useMemo, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { useShallow } from "../lib/shallow";
+import { holdCursor } from "../lib/cursorShield";
 import {
   Archive,
+  Bot,
   ChevronRight,
   EyeOff,
   Folder,
@@ -20,7 +22,7 @@ import {
 } from "lucide-react";
 import { useThreads } from "../state/threads";
 import { activeBoard, useUI } from "../state/ui";
-import { buildProjects, flattenNode, recencyOf, threadTitle, type ProjectNode, type ThreadNode } from "../state/projects";
+import { buildProjects, flattenNode, recencyOf, spawnedBy, threadTitle, type ProjectNode, type ThreadNode } from "../state/projects";
 import { addProject, archiveThread, forkThread, newThread, openThread, renameThread, updateProject } from "../state/actions";
 import { StatusDot, useThreadState, type ThreadState } from "./StatusDot";
 import { Menu, type MenuItem } from "./Menu";
@@ -112,8 +114,10 @@ function ResizeHandle() {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       document.body.classList.remove("resizing");
+      release();
     };
     document.body.classList.add("resizing");
+    const release = holdCursor("col-resize");
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
@@ -306,7 +310,7 @@ const ForkGroup = memo(function ForkGroup({
         data-forks={node.forkCount}
       >
         <ChevronRight className="chev" size={12} />
-        <FolderGit2 size={13} className="fork-folder" />
+        {node.forkCount ? <FolderGit2 size={13} className="fork-folder" /> : <Bot size={13} className="fork-folder" />}
         {renaming ? (
           <input
             className="title-input"
@@ -330,15 +334,23 @@ const ForkGroup = memo(function ForkGroup({
         )}
         {attention > 0 && <span className="pill attention">{attention}</span>}
         {running > 0 && <span className="pill running">{running}</span>}
-        <span className="count">
-          <GitFork size={10} />
-          {node.forkCount}
-        </span>
+        {node.forkCount > 0 && (
+          <span className="count">
+            <GitFork size={10} />
+            {node.forkCount}
+          </span>
+        )}
+        {node.agentCount > 0 && (
+          <span className="count" title={`${node.agentCount} ${node.agentCount === 1 ? "subagent" : "subagents"}`}>
+            <Bot size={10} />
+            {node.agentCount}
+          </span>
+        )}
       </div>
       {open && (
         <div className="fork-body">
           <ThreadRow node={node} depth={depth + 1} showMenu={showMenu} label="Original" />
-          {node.children.map((c, i) =>
+          {forkNumbers(node.children).map(([c, fork]) =>
             c.children.length ? (
               <ForkGroup
                 key={c.thread.id}
@@ -346,11 +358,11 @@ const ForkGroup = memo(function ForkGroup({
                 depth={depth + 1}
                 showMenu={showMenu}
                 forceOpen={forceOpen}
-                fork={i + 1}
+                fork={fork}
                 parentName={node.thread.name}
               />
             ) : (
-              <ThreadRow key={c.thread.id} node={c} depth={depth + 1} showMenu={showMenu} fork={i + 1} parentName={node.thread.name} />
+              <ThreadRow key={c.thread.id} node={c} depth={depth + 1} showMenu={showMenu} fork={fork} parentName={node.thread.name} />
             ),
           )}
         </div>
@@ -358,6 +370,12 @@ const ForkGroup = memo(function ForkGroup({
     </div>
   );
 });
+
+/** Forks are numbered in the order they were made; subagents go by their own names. */
+function forkNumbers(children: ThreadNode[]): [ThreadNode, number | undefined][] {
+  let n = 0;
+  return children.map((c) => [c, spawnedBy(c.thread) ? undefined : ++n]);
+}
 
 const ThreadRow = memo(function ThreadRow({
   node,
@@ -400,6 +418,7 @@ const ThreadRow = memo(function ThreadRow({
     >
       <StatusDot threadId={t.id} />
       {fork != null && <GitFork size={11} className="fork-glyph" />}
+      {spawnedBy(t) && !label && <Bot size={11} className="fork-glyph" />}
       {worktree && <FolderGit2 size={11} className="fork-glyph" />}
       {renaming ? (
         <input

@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Command, FolderPlus, AppWindow } from "lucide-react";
 import { useThreads } from "../state/threads";
 import { useUI } from "../state/ui";
-import { buildProjects, threadTitle } from "../state/projects";
+import { buildProjects, spawnedBy, threadTitle } from "../state/projects";
 import { addProject, newThread, openThread } from "../state/actions";
 import { StatusDot } from "./StatusDot";
 import { ThreadTime } from "./ThreadTime";
@@ -17,7 +17,9 @@ export function EmptyState() {
   const tree = useMemo(() => buildProjects(threads, projects, threadProject, workspaces, checkouts).slice(0, 6), [threads, projects, threadProject, workspaces, checkouts]);
   const recent = useMemo(
     () =>
+      // Subagents are part of the thread that spawned them, not threads to pick up.
       Object.values(threads)
+        .filter((t) => !spawnedBy(t))
         .sort((a, b) => (b.recencyAt ?? b.updatedAt) - (a.recencyAt ?? a.updatedAt))
         .slice(0, 6),
     [threads],

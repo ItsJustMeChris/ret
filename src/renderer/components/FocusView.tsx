@@ -1,17 +1,21 @@
 import { memo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Columns2, FileCode2, GitFork, Plus, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bot, Columns2, FileCode2, GitFork, Plus, X } from "lucide-react";
 import { useUI, isDraft, isFile, isThread, filePath, type FocusSplit } from "../state/ui";
 import { useFiles } from "../state/files";
+import { holdCursor } from "../lib/cursorShield";
 import { FilePane } from "./code/FilePane";
 import { useThreads } from "../state/threads";
 import { closePane, closeTab, newThreadNear, openThread, setSplitRatio } from "../state/actions";
-import { threadTitle } from "../state/projects";
+import { spawnedBy, threadTitle } from "../state/projects";
 import type { Thread } from "@shared/protocol";
 import { StatusDot } from "./StatusDot";
 import { ThreadPane } from "./thread/ThreadPane";
 import { EmptyState } from "./EmptyState";
+import { Kept, useRecent } from "./ui/Kept";
 
 const DRAG_THREAD = "application/x-ret-thread";
+/** Tabs kept built after you switch away (see Kept), so switching back to one is instant. */
+const KEEP_TABS = 4;
 const DRAG_TAB = "application/x-ret-tab";
 
 function titleOf(id: string, t: Thread | undefined) {
@@ -47,6 +51,7 @@ const Tab = memo(function Tab({ id, active, index }: { id: string; active: boole
   const title = titleOf(id, thread);
   const rightTitle = split ? titleOf(split.right, right) : null;
   const related = !!split && (right?.forkedFromId === id || thread?.forkedFromId === split.right);
+  const agents = !!split && (spawnedBy(right) === id || spawnedBy(thread) === split.right);
   return (
     <div
       className={`tab ${active ? "active" : ""} ${split ? "tab-split" : ""}`}
@@ -71,11 +76,11 @@ const Tab = memo(function Tab({ id, active, index }: { id: string; active: boole
       }}
     >
       <Marker id={id} />
-      {!split && thread?.forkedFromId && <GitFork size={11} className="muted" />}
+      {!split && (spawnedBy(thread) ? <Bot size={11} className="muted" /> : thread?.forkedFromId && <GitFork size={11} className="muted" />)}
       <span className="tab-title">{title}</span>
       {split && (
         <>
-          <span className={`tab-join ${related ? "fork" : ""}`}>{related ? <GitFork size={11} /> : <Columns2 size={11} />}</span>
+          <span className={`tab-join ${related || agents ? "fork" : ""}`}>{agents ? <Bot size={11} /> : related ? <GitFork size={11} /> : <Columns2 size={11} />}</span>
           <Marker id={split.right} />
           <span className="tab-title">{rightTitle}</span>
         </>
@@ -101,6 +106,7 @@ export function FocusView() {
   const strip = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const [drop, setDrop] = useState<"side" | "tab" | null>(null);
+  const kept = useRecent(split ? null : active, KEEP_TABS, (id) => tabs.includes(id));
 
   const dropZone = (e: React.DragEvent): "side" | "tab" | null => {
     if (!e.dataTransfer.types.includes(DRAG_THREAD)) return null;
@@ -152,15 +158,12 @@ export function FocusView() {
           openThread(id, { mode: "focus", side: zone === "side" });
         }}
       >
-        {active ? (
-          split ? (
-            <SplitView left={active} split={split} focusedSide={focusedSide} />
-          ) : (
-            <Pane id={active} focused />
-          )
-        ) : (
-          <EmptyState />
-        )}
+        {!active ? <EmptyState /> : split ? <SplitView left={active} split={split} focusedSide={focusedSide} /> : null}
+        {kept.map((id) => (
+          <Kept key={id} shown={!split && id === active}>
+            <Pane id={id} focused />
+          </Kept>
+        ))}
         {drop && (
           <div className={`drop-hint ${drop}`}>
             <span>{drop === "side" ? "Open beside" : "Open as tab"}</span>
@@ -171,16 +174,19 @@ export function FocusView() {
   );
 }
 
-type Relation = "fork" | "parent" | "sibling" | null;
+type Relation = "fork" | "parent" | "sibling" | "agent" | "spawner" | null;
 
 /** How the right pane relates to the left: drives the badge on the divider. */
 function useRelation(left: string, right: string): Relation {
   return useThreads((s) => {
     const l = s.threads[left];
     const r = s.threads[right];
+    // A subagent starts from its parent's history, so it's "forked" from it too: that check comes first.
+    if (spawnedBy(r) === left) return "agent";
+    if (spawnedBy(l) === right) return "spawner";
     if (r?.forkedFromId === left) return "fork";
     if (l?.forkedFromId === right) return "parent";
-    if (l?.forkedFromId && l.forkedFromId === r?.forkedFromId) return "sibling";
+    if (l?.forkedFromId && l.forkedFromId === r?.forkedFromId && !spawnedBy(l) && !spawnedBy(r)) return "sibling";
     return null;
   });
 }
@@ -202,6 +208,7 @@ function SplitView({ left, split, focusedSide }: { left: string; split: FocusSpl
     const rect = box.current.getBoundingClientRect();
     let ratio = split.ratio;
     document.body.classList.add("resizing");
+    const release = holdCursor("col-resize");
     const move = (ev: PointerEvent) => {
       ratio = Math.min(0.8, Math.max(0.2, (ev.clientX - rect.left) / rect.width));
       setGrid(ratio);
@@ -211,6 +218,7 @@ function SplitView({ left, split, focusedSide }: { left: string; split: FocusSpl
       gutter.removeEventListener("pointerup", up);
       gutter.removeEventListener("lostpointercapture", up);
       document.body.classList.remove("resizing");
+      release();
       setSplitRatio(left, ratio);
     };
     gutter.addEventListener("pointermove", move);
@@ -225,13 +233,17 @@ function SplitView({ left, split, focusedSide }: { left: string; split: FocusSpl
   );
 
   const badgeTitle =
-    relation === "fork"
-      ? `Right is a fork of “${leftTitle}”`
-      : relation === "parent"
-        ? "Left is a fork of the thread on the right"
-        : relation === "sibling"
-          ? "Both are forks of the same thread"
-          : "Drag to resize · double-click to even out";
+    relation === "agent"
+      ? `Right is a subagent of “${leftTitle}”`
+      : relation === "spawner"
+        ? "Left is a subagent of the thread on the right"
+        : relation === "fork"
+          ? `Right is a fork of “${leftTitle}”`
+          : relation === "parent"
+            ? "Left is a fork of the thread on the right"
+            : relation === "sibling"
+              ? "Both are forks of the same thread"
+              : "Drag to resize · double-click to even out";
 
   return (
     <div className="split" ref={box} style={{ gridTemplateColumns: `${split.ratio}fr 12px ${1 - split.ratio}fr` }}>
@@ -249,9 +261,9 @@ function SplitView({ left, split, focusedSide }: { left: string; split: FocusSpl
       >
         {relation && (
           <span className="split-link">
-            {relation === "parent" && <ArrowLeft size={10} />}
-            <GitFork size={12} />
-            {relation === "fork" && <ArrowRight size={10} />}
+            {(relation === "parent" || relation === "spawner") && <ArrowLeft size={10} />}
+            {relation === "agent" || relation === "spawner" ? <Bot size={12} /> : <GitFork size={12} />}
+            {(relation === "fork" || relation === "agent") && <ArrowRight size={10} />}
           </span>
         )}
       </div>

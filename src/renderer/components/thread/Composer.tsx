@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Gauge, ListChecks, LoaderCircle, LogIn, Paperclip, Rocket, Settings2, Shield, ShieldAlert, ShieldCheck, Square, X, Zap } from "lucide-react";
 import type { ProviderId } from "@shared/bridge";
-import { useThreads } from "../../state/threads";
+import { useThread } from "../../state/useThread";
 import { useUI, isDraft, type ComposerPrefs } from "../../state/ui";
 import { useConn, useEnabledProviders } from "../../state/conn";
 import { interrupt, isWritingFinalAnswer, sendMessage, setDraftProvider, startLogin, type Attachment, type TurnOverrides } from "../../state/actions";
@@ -10,10 +10,13 @@ import { bridge, isDesktop } from "../../bridge";
 import { toast } from "../../state/toasts";
 import { Select, type SelectOption } from "../ui/Select";
 import { QueueTray } from "./QueueTray";
+import { GoalBar } from "./GoalBar";
+import { AgentTray } from "./Subagents";
 import { ScreenDock } from "./ComputerUse";
 import { composerDrafts as drafts, composerFocus, takeAttachments } from "../../state/composerDrafts";
 import { addFilesToThread } from "../../state/attach";
 import { QuestionDock, useQuestionFlow, type QuestionFlow } from "./QuestionDock";
+import { useVisibility } from "../ui/Kept";
 
 /** Access choices escalate: default, careful, in-between, everything. */
 const ACCESS_ICON: Record<string, React.ReactNode> = {
@@ -86,22 +89,33 @@ function askHint(ask: QuestionFlow): string {
   return ask.otherRow ? `Press ${keys} to pick, or type your own answer…` : `Press ${keys} to pick…`;
 }
 
-export function Composer({ threadId, autoFocus, compact }: { threadId: string; autoFocus?: boolean; compact?: boolean }) {
+export function Composer({
+  threadId,
+  autoFocus,
+  compact,
+  agentsListed,
+}: {
+  threadId: string;
+  autoFocus?: boolean;
+  compact?: boolean;
+  /** The thread's subagents are on screen already (the details panel), so the dock leaves them out. */
+  agentsListed?: boolean;
+}) {
   const [text, setText] = useState(() => drafts.get(threadId) ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>(() => takeAttachments(threadId));
   const [sending, setSending] = useState(false);
   const ta = useRef<HTMLTextAreaElement>(null);
-  const running = useThreads((s) => !!s.live[threadId]?.activeTurnId);
+  const running = useThread(threadId, (s) => !!s.live[threadId]?.activeTurnId);
   // Final summary streaming: Enter now means "send right after it finishes" (a steer would be dropped).
-  const finishing = useThreads((s) => {
+  const finishing = useThread(threadId, (s) => {
     const lt = s.live[threadId];
     return !!lt?.activeTurnId && isWritingFinalAnswer(lt);
   });
   // Another Codex process owns the current turn; writing to the same thread from here could corrupt it.
-  const elsewhere = useThreads((s) => !!s.external[threadId]);
+  const elsewhere = useThread(threadId, (s) => !!s.external[threadId]);
   // The agent this thread runs on: its owner, or for a new thread the one picked in this composer.
   const draft = isDraft(threadId);
-  const owner = useThreads((s) => s.owner[threadId]);
+  const owner = useThread(threadId, (s) => s.owner[threadId]);
   const chosen = useUI((s) => s.drafts[threadId]?.provider);
   const lastAgent = useUI((s) => s.lastAgent);
   const enabled = useEnabledProviders();
@@ -112,21 +126,21 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     return c.status?.state === "running" && c.accountLoaded && !c.account?.account && !!c.account?.requiresOpenaiAuth;
   });
   // What the thread actually runs with, once its engine has said (see hydrateThread).
-  const threadAccess = useThreads((s) => {
+  const threadAccess = useThread(threadId, (s) => {
     const st = s.live[threadId]?.settings;
     return st ? (st.access ?? PROVIDERS[s.owner[threadId] ?? "codex"].accessOf?.(st.approvalPolicy, st.sandbox) ?? null) : null;
   });
-  const threadModel = useThreads((s) => s.live[threadId]?.settings?.model ?? s.threads[threadId]?.model ?? null);
-  const threadEffort = useThreads((s) => s.live[threadId]?.settings?.effort ?? s.threads[threadId]?.reasoningEffort ?? null);
+  const threadModel = useThread(threadId, (s) => s.live[threadId]?.settings?.model ?? s.threads[threadId]?.model ?? null);
+  const threadEffort = useThread(threadId, (s) => s.live[threadId]?.settings?.effort ?? s.threads[threadId]?.reasoningEffort ?? null);
   // Known once the thread is loaded in the app-server; undefined means "not known yet".
-  const threadTier = useThreads((s) => {
+  const threadTier = useThread(threadId, (s) => {
     const st = s.live[threadId]?.settings;
     return st ? (st.serviceTier ?? "default") : undefined;
   });
   const conns = useConn((s) => s.providers);
   const models = conns[provider].models;
   const hasModes = useConn((s) => s.providers[provider].modes.some((m) => m.mode === "plan"));
-  const threadMode = useThreads((s) => s.live[threadId]?.settings?.mode ?? null);
+  const threadMode = useThread(threadId, (s) => s.live[threadId]?.settings?.mode ?? null);
   const configTier = useConn((s) => s.providers[provider].defaults.serviceTier);
   // New threads start from the last-used settings for their agent; existing threads from their own.
   const [over, setOver] = useState<TurnOverrides>(() => overrides.get(threadId) ?? (draft ? lastUsed(provider) : {}));
@@ -152,15 +166,33 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     drafts.set(threadId, text);
   }, [threadId, text]);
 
+  // Kept built while another view shows (see Kept), it leaves what's handed to the thread's composer
+  // to the one on screen, or picks it up when it's back, as one mounting would.
+  const visibility = useVisibility();
+  useEffect(() => {
+    let was = visibility.shown;
+    return visibility.subscribe(() => {
+      const shown = visibility.shown;
+      if (shown === was) return;
+      was = shown;
+      if (!shown) return;
+      const draft = drafts.get(threadId) ?? "";
+      setText((cur) => (cur === draft ? cur : draft));
+      const more = takeAttachments(threadId);
+      if (more.length) setAttachments((cur) => [...cur, ...more.filter((m) => !cur.some((c) => c.path === m.path))]);
+      if (composerFocus.delete(threadId)) focusAtEnd(ta.current);
+    });
+  }, [visibility, threadId]);
+
   // Attachments and focus requests from elsewhere (files dropped on the pane).
   useEffect(() => {
     const onAttach = (e: Event) => {
-      if ((e as CustomEvent<{ threadId: string }>).detail.threadId !== threadId) return;
+      if ((e as CustomEvent<{ threadId: string }>).detail.threadId !== threadId || !visibility.shown) return;
       const more = takeAttachments(threadId);
       setAttachments((cur) => [...cur, ...more.filter((m) => !cur.some((c) => c.path === m.path))]);
     };
     const onFocus = (e: Event) => {
-      if ((e as CustomEvent<{ threadId: string }>).detail.threadId !== threadId) return;
+      if ((e as CustomEvent<{ threadId: string }>).detail.threadId !== threadId || !visibility.shown) return;
       composerFocus.delete(threadId);
       requestAnimationFrame(() => focusAtEnd(ta.current));
     };
@@ -176,7 +208,7 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
   useEffect(() => {
     const onFill = (e: Event) => {
       const d = (e as CustomEvent<{ threadId: string; text: string }>).detail;
-      if (d.threadId !== threadId) return;
+      if (d.threadId !== threadId || !visibility.shown) return;
       composerFocus.delete(threadId);
       setText((cur) => (cur.trim() ? `${cur}\n${d.text}` : d.text));
       requestAnimationFrame(() => focusAtEnd(ta.current));
@@ -189,14 +221,6 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     if (composerFocus.delete(threadId)) focusAtEnd(ta.current);
     else if (autoFocus) ta.current?.focus();
   }, [threadId]); // on appear only, never when the pane merely regains focus
-
-  // Auto-size the textarea.
-  useEffect(() => {
-    const el = ta.current;
-    if (!el) return;
-    el.style.height = "0px";
-    el.style.height = `${Math.min(el.scrollHeight, 320)}px`;
-  }, [text]);
 
   const submit = async (how: "auto" | "steer" | "queue" = "auto") => {
     const value = text;
@@ -251,7 +275,7 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
   useEffect(() => {
     const onSend = (e: Event) => {
       const d = (e as CustomEvent<{ threadId: string; text: string; mode?: "plan" | "default"; handled: boolean }>).detail;
-      if (d.threadId !== threadId) return;
+      if (d.threadId !== threadId || d.handled || !visibility.shown) return;
       d.handled = true;
       if (d.mode) setPrefs({ mode: d.mode });
       const prefs = { ...effectiveOverrides(), ...(d.mode ? { mode: d.mode } : {}) };
@@ -362,6 +386,8 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     <>
     {/* Docked on top, longest-lived first and the next message nearest the box. */}
     <div className="composer-dock">
+      <GoalBar threadId={threadId} />
+      {!agentsListed && <AgentTray threadId={threadId} />}
       <ScreenDock threadId={threadId} compact={compact} />
       <QueueTray threadId={threadId} />
     </div>

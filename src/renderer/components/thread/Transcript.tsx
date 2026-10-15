@@ -1,7 +1,11 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
-import { Bot, ChevronRight, CircleAlert, CircleDashed, FileDiff, GitFork, LoaderCircle, Radar, SquareTerminal, Workflow } from "lucide-react";
+import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { Bot, CircleAlert, CircleDashed, FileDiff, GitFork, LoaderCircle, Radar, SquareTerminal, Workflow } from "lucide-react";
+import { Chevron } from "../ui/Chevron";
 import { ownerOf, useThreads } from "../../state/threads";
+import { useThread } from "../../state/useThread";
+import { takesDirectInput } from "../../state/projects";
+import { shallowEqual } from "../../lib/shallow";
 import { PROVIDERS } from "../../agents";
 import { forkThread, loadOlder, resendUnanswered } from "../../state/actions";
 import type { BackgroundTask, ThreadItem } from "@shared/protocol";
@@ -12,25 +16,24 @@ import { diffStats, duration } from "../../lib/format";
 import { Approvals } from "./Approvals";
 import { TurnRail } from "./TurnRail";
 import { Shimmer } from "../ui/Shimmer";
-import { appKey, computerUseOf, useAppInfosFor, useScreens } from "../../state/computerUse";
+import { appKey, computerUseOf, useAppInfosFor, useScreen, type Shot } from "../../state/computerUse";
 
 type Ctx = { threadId: string; cwd: string | null };
 
 function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: boolean }) {
-  const items = useThreads(useShallow((s) => ids.map((id) => s.live[ctx.threadId]?.items[id]).filter(Boolean) as ThreadItem[]));
-  // Each app the agent used shows as the last look it took at it.
-  const shots = useScreens(
-    useShallow((s) => {
-      const byApp = new Map<string, string>();
-      for (const it of items) {
-        const use = s.shots[it.id] && (s.uses[it.id] ?? computerUseOf(it));
-        if (use) byApp.set(appKey(use), s.shots[it.id]);
-      }
-      return [...byApp.values()];
-    }),
-  );
+  const items = useThread(ctx.threadId, (s) => ids.map((id) => s.live[ctx.threadId]?.items[id]).filter(Boolean) as ThreadItem[], shallowEqual);
+  // What the live session learned about each computer-use step, and each app's last screenshot.
+  const known = useScreen((s) => items.map((it) => (computerUseOf(it) ? s.uses[it.id] : undefined)), shallowEqual);
+  const shots = useScreen((s) => {
+    const byApp = new Map<string, Shot>();
+    items.forEach((it, i) => {
+      const own = s.shots[it.id] && computerUseOf(it);
+      if (own) byApp.set(appKey(known[i] ?? own), s.shots[it.id]);
+    });
+    return [...byApp.values()];
+  }, shallowEqual);
   // The folded summary names the apps it used, so it needs their names before any row asks.
-  useAppInfosFor(useMemo(() => [...new Set(items.flatMap((it) => computerUseOf(it)?.appId ?? []))], [items]));
+  useAppInfosFor(useMemo(() => [...new Set(items.flatMap((it, i) => (known[i] ?? computerUseOf(it))?.appId ?? []))], [items, known]));
   const [open, setOpen] = useState(false);
   if (live) {
     // While the agent works, show the most recent steps live.
@@ -55,14 +58,14 @@ function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: bool
   return (
     <div className={`activity ${open ? "open" : ""}`}>
       <button className="activity-head" onClick={() => setOpen(!open)}>
-        <ChevronRight className="tool-chev" size={13} />
-        <span>{activitySummary(items)}</span>
+        <Chevron className="tool-chev" size={13} />
+        <span>{activitySummary(items, known)}</span>
         {failed && <span className="badge err">failed step</span>}
       </button>
       {!open && viewed.length + shots.length > 0 && (
         <div className="activity-thumbs">
-          {shots.map((src, i) => (
-            <ThreadImage key={`s${i}`} src={src} size="sm" />
+          {shots.map((shot) => (
+            <ThreadImage key={shot.url} src={shot.thumb ?? shot.url} full={shot.url} size="sm" />
           ))}
           {viewed.slice(0, 6).map((path, i) => (
             <ThreadImage key={i} path={path} cwd={ctx.cwd} size="sm" />
@@ -82,16 +85,18 @@ function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: bool
 }
 
 const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
-  const turn = useThreads((s) => s.live[ctx.threadId]?.turns[turnId]);
-  const types = useThreads(
-    useShallow((s) => {
+  const turn = useThread(ctx.threadId, (s) => s.live[ctx.threadId]?.turns[turnId]);
+  const types = useThread(
+    ctx.threadId,
+    (s) => {
       const lt = s.live[ctx.threadId];
       return turn ? turn.itemIds.map((id) => lt?.items[id]?.type ?? "") : [];
-    }),
+    },
+    shallowEqual,
   );
   const [showDiff, setShowDiff] = useState(false);
-  const elsewhere = useThreads((s) => s.external[ctx.threadId]?.turnId === turnId);
-  const background = useThreads((s) => s.background[ctx.threadId]?.length ?? 0);
+  const elsewhere = useThread(ctx.threadId, (s) => s.external[ctx.threadId]?.turnId === turnId);
+  const background = useThread(ctx.threadId, (s) => s.background[ctx.threadId]?.length ?? 0);
   if (!turn) return null;
   const live = turn.status === "inProgress" && !turn.stale;
 
@@ -166,8 +171,10 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
 
 /** A steer that landed after the final answer: the turn ended with the user's message unanswered. */
 function UnansweredNotice({ threadId, lastItemId, count }: { threadId: string; lastItemId: string | undefined; count: number }) {
-  const item = useThreads((s) => (lastItemId ? s.live[threadId]?.items[lastItemId] : undefined));
-  if (!item || item.type !== "userMessage" || count < 2) return null;
+  const item = useThread(threadId, (s) => (lastItemId ? s.live[threadId]?.items[lastItemId] : undefined));
+  // A subagent takes its messages from the agent that spawned it.
+  const direct = useThread(threadId, (s) => takesDirectInput(s.threads[threadId]));
+  if (!item || item.type !== "userMessage" || count < 2 || !direct) return null;
   return (
     <div className="unanswered">
       <CircleAlert size={13} />
@@ -204,8 +211,8 @@ const TASK_ICON: Record<BackgroundTask["kind"], typeof Bot> = { shell: SquareTer
  */
 function BackgroundWork({ threadId }: { threadId: string }) {
   const count = useBackgroundOnly(threadId);
-  const tasks = useThreads((s) => s.background[threadId]);
-  const agent = useThreads((s) => PROVIDERS[s.owner[threadId] ?? "codex"].name);
+  const tasks = useThread(threadId, (s) => s.background[threadId]);
+  const agent = useThread(threadId, (s) => PROVIDERS[s.owner[threadId] ?? "codex"].name);
   const [, tick] = useState(0);
   useEffect(() => {
     if (!count) return;
@@ -234,41 +241,83 @@ function BackgroundWork({ threadId }: { threadId: string }) {
   );
 }
 
-export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | null }) {
-  const lt = useThreads((s) => s.live[threadId]);
-  const scroller = useRef<HTMLDivElement>(null);
-  const content = useRef<HTMLDivElement>(null);
-  const stick = useRef(true);
-  const ctx = useMemo(() => ({ threadId, cwd }), [threadId, cwd]);
-  const loading = !lt || (!lt.hydrated && lt.hydrating);
+/**
+ * A long thread is drawn from its end: the newest turns first (about FIRST_ITEMS items' worth, the
+ * view opens at the bottom), then older ones a chunk at a time when the app is idle. Opening a
+ * thread of thousands of items used to build all of it before the first frame.
+ */
+const FIRST_ITEMS = 120;
+const CHUNK_ITEMS = 160;
 
-  // Stick to the bottom while content grows, unless the user scrolled up.
-  // Re-attaches once history has loaded (the scroller doesn't exist while the spinner shows).
+/** Where to start drawing so the turns from there to `end` come to about `items` items (at least one turn). */
+function startFor(threadId: string, order: string[], end: number, items: number): number {
+  const turns = useThreads.getState().live[threadId]?.turns;
+  let i = end;
+  let n = 0;
+  while (i > 0 && (i === end || n < items)) {
+    i--;
+    n += 1 + (turns?.[order[i]]?.itemIds.length ?? 0);
+  }
+  return i;
+}
+
+export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | null }) {
+  // Only what this level shows: a token streaming into an item re-renders that item, not the transcript.
+  const lt = useThread(
+    threadId,
+    (s) => {
+      const l = s.live[threadId];
+      return l && { turnOrder: l.turnOrder, olderCursor: l.olderCursor, loadingOlder: l.loadingOlder, notice: l.notice, error: l.error, loading: !l.hydrated && l.hydrating };
+    },
+    shallowEqual,
+  );
+  const scroller = useRef<HTMLDivElement>(null);
+  const ctx = useMemo(() => ({ threadId, cwd }), [threadId, cwd]);
+  const loading = !lt || lt.loading;
+
+  // The oldest turn drawn so far (null: just the newest few). Older ones are added in idle time, as
+  // a transition, so a key or a click never waits on them; the view, laid out from its end, doesn't
+  // move as they come in above it.
+  const [oldest, setOldest] = useState<string | null>(null);
+  const order = lt?.turnOrder;
+  const found = order && oldest ? order.indexOf(oldest) : -1;
+  const start = !order ? 0 : found >= 0 ? found : startFor(threadId, order, order.length, FIRST_ITEMS);
+  useEffect(() => {
+    if (!order || !start) return;
+    const idle = requestIdleCallback(() => startTransition(() => setOldest(order[startFor(threadId, order, start, CHUNK_ITEMS)])), { timeout: 500 });
+    return () => cancelIdleCallback(idle);
+  }, [threadId, order, start]);
+  /** Draw down to `turnId` now (the rail jumping to a turn that isn't drawn yet). */
+  const showFrom = useCallback((turnId: string) => flushSync(() => setOldest(turnId)), []);
+
+  // The transcript is laid out from its end (column-reverse, see .transcript): its scroll origin is the
+  // bottom, so a view at the bottom stays there as replies grow, and one scrolled up stays on what it
+  // shows (scroll anchoring), with no script setting scroll offsets on every token. Each of those cost
+  // a layout and, in Electron, a walk of the whole page for its draggable regions.
+  //
+  // Out of the document (a canvas window off screen, or zoomed out to its card) it forgets where it
+  // was, so that's kept, and put back when it's back. (The bottom is offset 0: nothing to put back.)
   useLayoutEffect(() => {
     const el = scroller.current;
-    const inner = content.current;
-    if (!el || !inner) return;
-    stick.current = true;
+    if (!el) return;
+    let top = 0;
+    let away = false;
     const onScroll = () => {
-      stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      if (!away && el.isConnected) top = el.scrollTop;
     };
     const ro = new ResizeObserver(() => {
-      if (stick.current) el.scrollTop = el.scrollHeight;
+      if (!el.isConnected) {
+        away = true;
+        return;
+      }
+      if (away && top) el.scrollTop = top;
+      away = false;
     });
-    // Programmatic jumps (turn rail) must not be pulled back to the bottom while
-    // off-screen turns render at their real size along the way.
-    const unstick = () => {
-      stick.current = false;
-    };
-    ro.observe(inner);
-    ro.observe(el); // the composer growing (a question docking on it) shrinks the view from below
+    ro.observe(el);
     el.addEventListener("scroll", onScroll, { passive: true });
-    el.addEventListener("ret:unstick", unstick);
-    el.scrollTop = el.scrollHeight;
     return () => {
       ro.disconnect();
       el.removeEventListener("scroll", onScroll);
-      el.removeEventListener("ret:unstick", unstick);
     };
   }, [threadId, loading]);
 
@@ -282,14 +331,14 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
 
   return (
     <div className="transcript-wrap">
-    <div className="transcript" ref={scroller}>
-      <div className="transcript-inner" ref={content}>
-        {lt.olderCursor && (
+    <div className="transcript" ref={scroller} data-own-scroll="">
+      <div className="transcript-inner">
+        {lt.olderCursor && !start && (
           <button className="load-older" onClick={() => void loadOlder(threadId)} disabled={lt.loadingOlder}>
             {lt.loadingOlder ? <LoaderCircle className="spin" size={12} /> : null} Load earlier turns
           </button>
         )}
-        {lt.turnOrder.map((id) => (
+        {(start ? lt.turnOrder.slice(start) : lt.turnOrder).map((id) => (
           <Turn key={id} turnId={id} ctx={ctx} />
         ))}
         <BackgroundWork threadId={threadId} />
@@ -303,7 +352,7 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
         <Approvals threadId={threadId} />
       </div>
     </div>
-    <TurnRail threadId={threadId} scroller={scroller} />
+    <TurnRail threadId={threadId} scroller={scroller} showFrom={showFrom} />
     </div>
   );
 }

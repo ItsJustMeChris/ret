@@ -5,9 +5,9 @@ import type { ServerRequest, Thread, ThreadItem, UserInput } from "@shared/proto
 import { PROVIDERS, accessFor, pickProvider } from "../agents";
 import { enabledProviders, patchProvider, signedIn, useConn, type ProviderConn } from "./conn";
 import { guarded, toast } from "./toasts";
-import { normPath, projectIndex, projectKeyFor, threadTitle, type Workspace } from "./projects";
+import { lineageRoot, normPath, projectIndex, projectKeyFor, spawnedBy, threadTitle, type Workspace } from "./projects";
 import { fillComposer } from "./composerDrafts";
-import { backfillLineage, lineageKnown } from "./lineage";
+import { agentsUnasked, backfillLineage, discoverThread, lineageKnown, listAgentsOf } from "./lineage";
 import { cancelTitle, isTitleThread, titleEvent, titleFromMessage } from "./titles";
 import {
   addPendingRequest,
@@ -15,9 +15,12 @@ import {
   enqueueNotification,
   flushNow,
   mergeThread,
+  delegated,
   ownerOf,
   patchLive,
+  goalMark,
   removePendingRequest,
+  setGoal,
   setThreadHooks,
   turnStateFrom,
   upsertThreads,
@@ -28,7 +31,7 @@ import {
 } from "./threads";
 import { activeBoard, appId, appKind, fileId, isApp, isDraft, isFile, isThread, newId, updateBoard, useUI, type CanvasWin, type FocusSplit, type UIState, type ViewMode } from "./ui";
 import { onFsChanged, useFiles } from "./files";
-import { captureComputerUse, noteAppRequest } from "./computerUse";
+import { captureLive, captureTurns, noteAppRequest, screenTurnEnded } from "./computerUse";
 
 // ---------------------------------------------------------------------------
 // Boot: wire the transport into the stores.
@@ -57,7 +60,7 @@ export function bootstrap() {
       // Send the next queued follow-up (outside the reducer flush that called us).
       if (turn.status !== "failed") setTimeout(() => void drainQueue(threadId), 0);
       const visible = useThreads.getState().visible[threadId];
-      if (!visible || !document.hasFocus()) {
+      if ((!visible || !document.hasFocus()) && !delegated(useThreads.getState().threads[threadId], turn)) {
         const title = threadTitle(useThreads.getState().threads[threadId]);
         bridge.notify(turn.status === "failed" ? "Turn failed" : `${PROVIDERS[ownerOf(threadId)].name} finished`, title);
       }
@@ -135,17 +138,29 @@ function wireProvider(p: ProviderId) {
       case "project/changed":
         void loadWorkspaces(p);
         return;
+      case "turn/started":
+        if (PROVIDERS[p].subagentThreads) discoverThread(p, params?.threadId);
+        break;
       case "item/started":
       case "item/completed":
+        if (PROVIDERS[p].subagentThreads && method === "item/started") {
+          if (params?.item?.type === "subAgentActivity") discoverThread(p, params.item.agentThreadId);
+          if (params?.item?.type === "collabAgentToolCall") for (const id of params.item.receiverThreadIds ?? []) discoverThread(p, id);
+        }
         if (params?.item?.type === "userMessage" && params.item.clientId) clearOptimistic(params.threadId, params.item.clientId);
         if (method === "item/completed" && params?.item?.type === "userMessage") titleFromMessage(p, params.threadId, params.item);
-        if (params?.item?.type === "mcpToolCall") params = { ...params, item: captureComputerUse(params.threadId, params.turnId, params.item) };
+        // Computer-use steps leave their screenshots with the screens (see computerUse).
+        if (params?.item?.type === "mcpToolCall") {
+          const item = captureLive(params.threadId, params.turnId, params.item);
+          if (item !== params.item) params = { ...params, item };
+        }
         break;
       case "turn/completed":
         if (params?.turn?.items?.length) {
-          const items = params.turn.items.map((it: ThreadItem) => (it.type === "mcpToolCall" ? captureComputerUse(params.threadId, params.turn.id, it, false) : it));
-          params = { ...params, turn: { ...params.turn, items } };
+          const [turn] = captureTurns(params.threadId, [params.turn]);
+          if (turn !== params.turn) params = { ...params, turn };
         }
+        if (params?.turn?.id) screenTurnEnded(params.threadId, params.turn.id);
         break;
     }
     enqueueNotification(p, method, params);
@@ -170,6 +185,7 @@ function wireProvider(p: ProviderId) {
 
   rpc.onReady((info) => {
     patchProvider(p, { info });
+    goalsOff.delete(p);
     // A fresh connection knows nothing about our subscriptions. Threads that were mid-turn
     // are re-fetched: the turn either died with the old process or (shared daemon, Claude
     // sessions) is still running and gets rejoined by hydrateThread.
@@ -410,6 +426,58 @@ async function loadWorkspaces(p: ProviderId) {
   }
 }
 
+/** How many of the latest threads to ask for their agents by ancestor (see listSubagents). */
+const AGENT_PARENTS = 30;
+
+/**
+ * Spawned agents, which a plain `thread/list` leaves out. Asking by source finds the older kind;
+ * the newer kind (agents with a path, like /root/pong) only turns up when asked for by ancestor, so
+ * the latest threads are asked, those that changed since they last were. Older threads' agents
+ * appear when the thread is opened (mergeTurns). Only agents whose parent is known too: one on its
+ * own, cut off from what it was doing, is just noise.
+ */
+async function listSubagents(p: ProviderId, parents: Thread[]): Promise<Thread[]> {
+  const agents: Thread[] = [];
+  let cursor: string | null = null;
+  try {
+    for (let page = 0; page < 10; page++) {
+      const res: import("@shared/protocol").ThreadListResponse = await rpcFor(p).request("thread/list", {
+        limit: 100,
+        cursor,
+        sortKey: "updated_at",
+        useStateDbOnly: true,
+        sourceKinds: ["subAgentThreadSpawn"],
+      });
+      agents.push(...res.data);
+      cursor = res.nextCursor;
+      if (!cursor) break;
+    }
+  } catch (err) {
+    console.warn(`${p}: couldn't list subagents`, err);
+  }
+  const recent = parents
+    .filter((t) => !spawnedBy(t) && agentsUnasked(t))
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, AGENT_PARENTS);
+  const seen = new Set(agents.map((t) => t.id));
+  for (const t of await listAgentsOf(p, recent)) if (!seen.has(t.id)) seen.add(t.id), agents.push(t);
+  const known = new Set([...parents.map((t) => t.id), ...Object.keys(useThreads.getState().threads)]);
+  // Agents spawn agents: keep adding while a pass finds more whose parent is in.
+  const out: Thread[] = [];
+  let rest = agents;
+  for (let added = true; added; ) {
+    added = false;
+    rest = rest.filter((t) => {
+      if (!known.has(spawnedBy(t)!)) return true;
+      known.add(t.id);
+      out.push(t);
+      added = true;
+      return false;
+    });
+  }
+  return out;
+}
+
 function listProvider(p: ProviderId): Promise<void> {
   const inflight = listing.get(p);
   if (inflight) return inflight;
@@ -439,11 +507,23 @@ function listProvider(p: ProviderId): Promise<void> {
         next[t.id] = mergeThread(st.threads[t.id], { ...t, turns: [] });
         owner[t.id] = p;
       }
-      // Keep threads we know about that the list doesn't return (ephemeral forks, brand-new threads).
-      for (const [id, t] of Object.entries(st.threads)) if (!next[id] && mine(id) && (t.ephemeral || Date.now() / 1000 - t.createdAt < 120)) next[id] = t;
+      // Keep threads we know about that the list doesn't return (ephemeral forks, brand-new threads),
+      // and agents met by opening an older thread, which the list only finds for the latest ones.
+      for (const [id, t] of Object.entries(st.threads)) {
+        if (next[id] || !mine(id)) continue;
+        const parent = spawnedBy(t);
+        if (t.ephemeral || Date.now() / 1000 - t.createdAt < 120 || (parent && next[parent])) next[id] = t;
+      }
       useThreads.setState({ threads: next, owner, listLoaded: true });
       // The list leaves out fork lineage; fill it in so forks nest and link to their parents.
-      void backfillLineage(all.map((t) => t.id));
+      // (A subagent's source already names its parent.)
+      void backfillLineage(all.filter((t) => !spawnedBy(t)).map((t) => t.id));
+      // Then the agents, which take a few more lists: the sidebar shows what it has meanwhile.
+      if (PROVIDERS[p].subagentThreads) {
+        void listSubagents(p, all).then((agents) => {
+          if (agents.length) upsertThreads(p, agents);
+        });
+      }
     } catch (err) {
       console.error(`${p}: thread/list failed`, err);
       useThreads.setState({ listLoaded: true });
@@ -472,6 +552,7 @@ export async function hydrateThread(threadId: string) {
       itemsView: "full",
     });
     mergeTurns(threadId, res.data, res.nextCursor, "replace");
+    void loadGoal(threadId);
     // Resume it in its engine: that's what reports the thread's own settings (model, effort, speed,
     // access, Plan) for the composer, and subscribes to live events if it's running here. Not while
     // another app is running it: watching it is all Ret does then.
@@ -511,9 +592,18 @@ export function mergeTurns(
   cursor: string | null,
   mode: "replace" | "prepend" | "tail",
 ) {
+  // Computer-use steps leave their screenshots with the screens, in one update for the lot.
+  turnsDesc = captureTurns(threadId, turnsDesc);
   const st = useThreads.getState();
   const external = !!st.external[threadId];
   const threadActive = st.threads[threadId]?.status.type === "active" || external;
+  // Agents it started that the sidebar hasn't met (Codex lists its newer agents only by parent).
+  const owner = st.owner[threadId] ?? "codex";
+  if (PROVIDERS[owner].subagentThreads) {
+    const unknown = new Set<string>();
+    for (const t of turnsDesc) for (const it of t.items ?? []) if (it.type === "subAgentActivity" && !st.threads[it.agentThreadId]) unknown.add(it.agentThreadId);
+    for (const id of unknown) discoverThread(owner, id);
+  }
   patchLive(threadId, (prev) => {
     const asc = turnsDesc.slice().reverse();
     const turns = mode === "replace" ? {} : { ...prev.turns };
@@ -535,7 +625,7 @@ export function mergeTurns(
           if (!threadActive) state.stale = true;
         }
         turns[turn.id] = state;
-        for (const it of turn.items) items[it.id] = it.type === "mcpToolCall" ? captureComputerUse(threadId, turn.id, it, false) : it;
+        for (const it of turn.items) items[it.id] = it;
       }
       order.push(turn.id);
     }
@@ -582,6 +672,40 @@ export function ensureSubscribed(threadId: string): Promise<void> {
   })().finally(() => resuming.delete(threadId));
   resuming.set(threadId, p);
   return p;
+}
+
+/** Engines that said they have no goals this connection (the feature off in their config): not asked again until they reconnect. */
+const goalsOff = new Set<ProviderId>();
+
+/**
+ * Fetch a thread's goal. Live events keep it current while the thread runs here; one running in
+ * another app only changes on disk, so that's re-read whenever its transcript is.
+ */
+export async function loadGoal(threadId: string) {
+  const p = await ownerFor(threadId);
+  if (!PROVIDERS[p].goals || goalsOff.has(p)) return;
+  const mark = goalMark(threadId);
+  try {
+    const res = await rpcFor(p).request("thread/goal/get", { threadId });
+    setGoal(threadId, res.goal, mark);
+  } catch (err) {
+    if (/disabled|not enabled|unknown variant/i.test((err as Error).message)) goalsOff.add(p);
+    else console.warn("goal fetch failed", err);
+  }
+}
+
+// Changing a goal acts on the thread in its engine, so it's loaded there first: a goal resumed on a
+// thread that isn't would only be saved, with nothing to pick it up.
+async function setGoalStatusImpl(threadId: string, status: "active" | "paused") {
+  await ensureSubscribed(threadId);
+  const res = await rpcFor(ownerOf(threadId)).request("thread/goal/set", { threadId, status, origin: "user" });
+  setGoal(threadId, res.goal);
+}
+
+async function clearGoalImpl(threadId: string) {
+  await ensureSubscribed(threadId);
+  await rpcFor(ownerOf(threadId)).request("thread/goal/clear", { threadId, origin: "user" });
+  setGoal(threadId, null);
 }
 
 // ---------------------------------------------------------------------------
@@ -912,6 +1036,8 @@ async function forkThreadImpl(threadId: string, opts: ForkOptions = {}): Promise
     lastTurnId: opts.atTurnId ?? null,
     cwd: cwd ?? null,
     excludeTurns: true,
+    // A fork carries the thread's goal, but waits for you to say something before working on it.
+    ...(PROVIDERS[provider].goals ? { deferGoalContinuation: true } : {}),
   });
   const fork = res.thread;
   lineageKnown(fork.id);
@@ -931,14 +1057,7 @@ async function forkThreadImpl(threadId: string, opts: ForkOptions = {}): Promise
 }
 
 function rootOf(threadId: string): string {
-  const threads = useThreads.getState().threads;
-  let t = threads[threadId];
-  const seen = new Set<string>();
-  while (t?.forkedFromId && threads[t.forkedFromId] && !seen.has(t.id)) {
-    seen.add(t.id);
-    t = threads[t.forkedFromId];
-  }
-  return t?.id ?? threadId;
+  return lineageRoot(useThreads.getState().threads, threadId);
 }
 
 // ---------------------------------------------------------------------------
@@ -1305,7 +1424,9 @@ useThreads.subscribe((s, prev) => {
         unsubscribeTimers.delete(id);
         const st = useThreads.getState();
         const lt = st.live[id];
-        const busy = lt?.activeTurnId || Object.values(st.requests).some((r) => r.threadId === id);
+        // A parent whose agents still work isn't done: they report back to it.
+        const working = (a: string) => !!st.live[a]?.activeTurnId || !!st.external[a] || st.threads[a]?.status.type === "active";
+        const busy = lt?.activeTurnId || Object.values(st.requests).some((r) => r.threadId === id) || (st.agents[id] ?? []).some(working);
         if (st.visible[id] || !lt || busy) return;
         if (lt.subscribed) void rpcFor(ownerOf(id)).request("thread/unsubscribe", { threadId: id }).catch(() => {});
         // Drop the cached transcript too; reopening re-fetches it in one page.
@@ -1337,3 +1458,5 @@ export const renameThread = guarded("Couldn't rename thread", renameThreadImpl);
 export const archiveThread = guarded("Couldn't archive thread", archiveThreadImpl);
 export const compactThread = guarded("Couldn't compact context", compactThreadImpl);
 export const forkThread = guarded("Couldn't fork thread", forkThreadImpl);
+export const setGoalStatus = guarded("Couldn't update the goal", setGoalStatusImpl);
+export const clearGoal = guarded("Couldn't clear the goal", clearGoalImpl);

@@ -1,10 +1,11 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { useShallow } from "../../lib/shallow";
 import { Check, CheckCheck, Inbox as InboxIcon } from "lucide-react";
+import { Kept, useRecent, useVisibility } from "../ui/Kept";
 import { markSeen, useThreads, type PendingRequest } from "../../state/threads";
 import { PROVIDERS } from "../../agents";
 import { useUI } from "../../state/ui";
-import { buildProjects, recencyOf, threadTitle, type ThreadNode } from "../../state/projects";
+import { buildProjects, recencyOf, spawnedBy, threadTitle, type ThreadNode } from "../../state/projects";
 import { plainText, timeAgo, unwrapCommand } from "../../lib/format";
 import { StatusDot, threadStateOf, type ThreadState } from "../StatusDot";
 import { ThreadPane } from "../thread/ThreadPane";
@@ -35,7 +36,7 @@ function askFor(req: PendingRequest | undefined): string | null {
     case "item/tool/requestUserInput":
       return p.questions?.[0]?.question ?? `${PROVIDERS[req.provider].name} has a question`;
     case "mcpServer/elicitation/request":
-      return isPermissionAsk(p) ? (p.message ?? "Allow a tool?") : `${p.serverName ?? "A tool"} needs input: ${p.message ?? ""}`;
+      return isPermissionAsk(p) ? (typeof p.message === "string" ? p.message : "Allow a tool?") : `${p.serverName ?? "A tool"} needs input: ${p.message ?? ""}`;
     case "item/tool/requestApproval":
       return p.title ?? `Use ${p.tool ?? "a tool"}?`;
   }
@@ -48,7 +49,7 @@ export function useInboxCount(): number {
     let n = 0;
     for (const id of Object.keys(s.threads)) {
       const st = threadStateOf(s, id);
-      if (st === "attention" || st === "unread" || st === "error") n++;
+      if (st === "attention" || ((st === "unread" || st === "error") && !spawnedBy(s.threads[id]))) n++;
     }
     return n;
   });
@@ -59,6 +60,7 @@ export function useInboxCount(): number {
  * Pick one to read it (and answer or reply) on the right; j/k or ↑/↓ move, e clears a finished one.
  */
 export function InboxView({ active = true }: { active?: boolean } = {}) {
+  const visibility = useVisibility();
   const activeRef = useRef(active);
   activeRef.current = active;
   const selected = useUI((s) => s.inbox.selected);
@@ -72,9 +74,10 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
   const states = useThreads(
     useShallow((s) => {
       const out: Record<string, ThreadState> = {};
+      // A subagent working, done or failed is its parent's to report; what it asks you is yours.
       for (const id of Object.keys(s.threads)) {
         const st = threadStateOf(s, id);
-        if (st !== "idle") out[id] = st;
+        if (st === "attention" || (st !== "idle" && !spawnedBy(s.threads[id]))) out[id] = st;
       }
       return out;
     }),
@@ -141,7 +144,7 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
   // j/k and the arrows move through the list; e clears a finished one. Not while typing.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!activeRef.current) return;
+      if (!activeRef.current || !visibility.shown) return;
       const t = e.target as HTMLElement | null;
       if (t?.closest?.("input, textarea, [contenteditable], .monaco-editor, .menu, .overlay") || e.ctrlKey || e.metaKey || e.altKey) return;
       const list = orderRef.current;
@@ -163,6 +166,8 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const reading = selected && threads[selected] ? selected : null;
+  const read = useRecent(reading, 3, (id) => !!threads[id]);
   const empty = order.length === 0;
   return (
     <div className="inbox-view">
@@ -206,14 +211,18 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
         )}
       </aside>
       <section className="inbox-read">
-        {selected && threads[selected] ? (
-          <ThreadPane key={selected} threadId={selected} chrome="focus" focused />
-        ) : (
+        {!reading && (
           <div className="inbox-empty">
             <InboxIcon size={26} />
             <span>Pick something on the left.</span>
           </div>
         )}
+        {/* The last few you've read stay built (see Kept): going back up the list is instant. */}
+        {read.map((id) => (
+          <Kept key={id} shown={id === reading}>
+            <ThreadPane threadId={id} chrome="focus" focused />
+          </Kept>
+        ))}
       </section>
     </div>
   );

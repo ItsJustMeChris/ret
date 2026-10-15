@@ -487,7 +487,7 @@ function registerIpc() {
     return shell.openExternal(`vscode://file${target.startsWith("/") ? "" : "/"}${encodeURI(target)}${loc}`);
   });
   ipcMain.handle(IPC.copy, (_e, text: string) => clipboard.writeText(String(text)));
-  ipcMain.handle(IPC.appInfo, (_e, appId: string) => appInfo(String(appId)));
+  ipcMain.handle(IPC.appInfo, (_e, appId: unknown) => appInfo(appId));
   ipcMain.on(IPC.edit, (e, command: EditCommand, arg?: string) => {
     const wc = e.sender;
     switch (command) {

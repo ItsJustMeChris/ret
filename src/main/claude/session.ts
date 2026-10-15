@@ -16,7 +16,7 @@ import type { BackgroundTask, ThreadItem, ThreadStatus, ThreadTokenUsage, Turn, 
 import { kindOf, sameTasks } from "./background";
 import { agentMessage } from "./history";
 import { claudeEnv } from "./platform";
-import { blocksOf, localCommandOutput, planText, todoPlan, toolItem, type ToolResult, type ToolUse } from "./translate";
+import { blocksOf, isPlanTool, localCommandOutput, planText, planUpdate, toolItem, type ToolResult, type ToolUse } from "./translate";
 
 /** How a thread runs tools: Claude Code's own permission modes ("config" = whatever the user's settings say). */
 export type ClaudeAccess = "config" | "default" | "acceptEdits" | "auto" | "bypassPermissions";
@@ -120,6 +120,8 @@ export class ClaudeSession {
   private input: Inbox<SDKUserMessage> | null = null;
   turn: LiveTurn | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
+  /** The latest checklist, which a later turn's `update_plan` may move along without restating. */
+  private lastPlan: TurnPlanStep[] | null = null;
   /** Settings the running process has (so changes are pushed only when they differ). */
   private applied: { model: string | null; effort: string | null; mode: PermissionMode | null } | null = null;
   usage: ThreadTokenUsage | null = null;
@@ -133,6 +135,11 @@ export class ClaudeSession {
     readonly config: ThreadConfig,
     private readonly host: SessionHost,
   ) {}
+
+  /** The checklist a resumed session's transcript ended with: its next `update_plan` may build on it. */
+  resumePlan(plan: TurnPlanStep[] | null) {
+    this.lastPlan = plan;
+  }
 
   get status(): ThreadStatus {
     if (this.turn) return { type: "active", activeFlags: [] };
@@ -586,14 +593,12 @@ export class ClaudeSession {
   private toolStarted(use: ToolUse) {
     const turn = this.ensureTurn();
     if (turn.tools.has(use.id)) return;
-    if (use.name === "TodoWrite") {
-      const plan = todoPlan(use.input);
-      if (plan) {
-        turn.plan = plan;
-        this.host.notify("turn/plan/updated", { threadId: this.config.id, turnId: turn.id, explanation: null, plan });
-      }
-      return;
+    const plan = planUpdate(use, turn.plan ?? this.lastPlan);
+    if (plan) {
+      turn.plan = this.lastPlan = plan;
+      this.host.notify("turn/plan/updated", { threadId: this.config.id, turnId: turn.id, explanation: null, plan });
     }
+    if (isPlanTool(use.name)) return;
     const tool: LiveTool = { use, startedAt: Date.now() };
     if (use.name === "Write" && typeof use.input.file_path === "string") tool.before = readText(use.input.file_path);
     turn.tools.set(use.id, tool);

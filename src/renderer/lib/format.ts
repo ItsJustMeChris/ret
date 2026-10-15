@@ -8,6 +8,12 @@ export function timeAgo(seconds: number | null | undefined): string {
   return new Date(seconds * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/** When something happened, to follow a verb: "just now", "5m ago", "on Oct 3". */
+export function sinceWhen(seconds: number | null | undefined): string {
+  const ago = timeAgo(seconds);
+  return ago === "now" ? "just now" : /^\d/.test(ago) ? `${ago} ago` : ago ? `on ${ago}` : "";
+}
+
 export function duration(ms: number | null | undefined): string {
   if (ms == null) return "";
   if (ms < 1000) return `${ms}ms`;
@@ -58,8 +64,10 @@ export function shortPath(p: string, cwd?: string | null): string {
 
 /** Rough markdown → plain text for previews (cards, glance views). */
 export function plainText(md: string, max = 420): string {
-  const text = md
+  // Only the start can show (a long reply on a card would be run through every pattern whole).
+  const text = (md.length > max * 8 ? md.slice(0, max * 8) : md)
     .replace(/```[\s\S]*?```/g, " ")
+    .replace(/```[\s\S]*$/, " ")
     .replace(/`([^`]*)`/g, "$1")
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/^#{1,6}\s+/gm, "")

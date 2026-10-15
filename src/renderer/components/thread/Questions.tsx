@@ -1,12 +1,14 @@
 import { MessageCircleQuestion, Play } from "lucide-react";
-import { ownerOf, useThreads } from "../../state/threads";
+import { ownerOf } from "../../state/threads";
+import { useThread } from "../../state/useThread";
+import { takesDirectInput } from "../../state/projects";
 import { PROVIDERS } from "../../agents";
 import { focusComposer, sendFromComposer } from "../../state/composerDrafts";
 import { openQuestionItems, reopenQuestion, useQuestionDismissed } from "./QuestionDock";
 
 /** True while `itemId` is in the thread's latest turn and nothing is running: the moment to answer. */
 function useAnswerable(threadId: string, itemId: string): boolean {
-  return useThreads((s) => {
+  return useThread(threadId, (s) => {
     const lt = s.live[threadId];
     if (!lt || lt.activeTurnId || s.external[threadId]) return false;
     const last = lt.turnOrder[lt.turnOrder.length - 1];
@@ -22,7 +24,8 @@ type Async = { title: string; options: string[] | null };
  * afterwards a record, unless the message already lists the options itself (it usually does).
  */
 export function ReplyQuestions({ threadId, itemId, text, questions }: { threadId: string; itemId: string; text: string; questions: Async[] }) {
-  const open = useThreads((s) => openQuestionItems(s, threadId).includes(itemId));
+  // A subagent's questions are for the agent that spawned it: they're shown as asked, not to be answered here.
+  const open = useThread(threadId, (s) => takesDirectInput(s.threads[threadId]) && openQuestionItems(s, threadId).includes(itemId));
   const dismissed = useQuestionDismissed(itemId);
   if (open) {
     return (
@@ -67,7 +70,7 @@ export function ReplyQuestions({ threadId, itemId, text, questions }: { threadId
  */
 export function PlanActions({ threadId, itemId }: { threadId: string; itemId: string }) {
   const live = useAnswerable(threadId, itemId);
-  const planning = useThreads((s) => s.live[threadId]?.settings?.mode === "plan");
+  const planning = useThread(threadId, (s) => s.live[threadId]?.settings?.mode === "plan");
   if (!live || !planning) return null;
   return (
     <div className="plan-actions">

@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { useShallow } from "../../lib/shallow";
 import {
   Archive,
   ChevronDown,
@@ -15,17 +15,19 @@ import {
   PanelRight,
   Paperclip,
 } from "lucide-react";
-import { useThreads, markAttended, markVisible } from "../../state/threads";
+import { NO_AGENTS, useThreads, markAttended, markVisible } from "../../state/threads";
+import { useThread } from "../../state/useThread";
 import { addFilesToThread } from "../../state/attach";
 import { viewFile } from "../../lib/viewFile";
 import { openFileRef, resolvePath } from "../../lib/files";
 import { useUI, isDraft } from "../../state/ui";
 import { addProject, archiveThread, compactThread, forkThread, hydrateThread, openThread, renameThread, retargetDraft } from "../../state/actions";
-import { baseName, buildProjects, threadTitle } from "../../state/projects";
+import { baseName, buildProjects, spawnedBy, takesDirectInput, threadTitle } from "../../state/projects";
 import { useSizeClass, type SizeClass } from "../../lib/useSize";
 import { Transcript } from "./Transcript";
 import { Composer } from "./Composer";
 import { DiffView } from "./Items";
+import { SubagentBar, openFrom } from "./Subagents";
 import { RequestCard } from "./Approvals";
 import { ScreenGlance, useLiveScreen } from "./ComputerUse";
 import { bridge, isDesktop } from "../../bridge";
@@ -35,6 +37,7 @@ import { PROVIDERS } from "../../agents";
 import { diffStats, compactNumber, plainText } from "../../lib/format";
 import { Markdown } from "../Markdown";
 import { Select, type SelectOption } from "../ui/Select";
+import { useShown, useVisibility } from "../ui/Kept";
 
 interface Props {
   threadId: string;
@@ -43,15 +46,22 @@ interface Props {
   onHeaderPointerDown?: (e: React.PointerEvent) => void;
   onHeaderDoubleClick?: () => void;
   windowControls?: React.ReactNode;
+  /** The size class it'll most likely have, when it's built before it's shown (a canvas window off screen). */
+  initialSize?: SizeClass;
 }
 
 export const ThreadPane = memo(function ThreadPane(props: Props) {
   const { threadId } = props;
   const ref = useRef<HTMLDivElement>(null);
-  const size = useSizeClass(ref);
+  const size = useSizeClass(ref, props.initialSize);
   const showDetails = useUI((s) => s.showDetails);
+  // A subagent that asks you something still gets the composer, which is where questions are answered.
+  const directInput = useThread(
+    threadId,
+    (s) => takesDirectInput(s.threads[threadId]) || Object.values(s.requests).some((r) => r.threadId === threadId && r.method === "item/tool/requestUserInput"),
+  );
   // Relative file references in this thread resolve against its working directory.
-  const cwd = useThreads((s) => s.threads[threadId]?.cwd) ?? useUI.getState().drafts[threadId]?.cwd;
+  const cwd = useThread(threadId, (s) => s.threads[threadId]?.cwd) ?? useUI.getState().drafts[threadId]?.cwd;
 
   useEffect(() => {
     if (isDraft(threadId)) return;
@@ -60,8 +70,9 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
     return () => markVisible(threadId, -1);
   }, [threadId]);
 
-  // A focus-mode pane is what you're reading; canvas windows count once clicked (CanvasWindow).
-  const attends = props.chrome === "focus" && !isDraft(threadId);
+  // A focus-mode pane is what you're reading (while it shows); canvas windows count once clicked (CanvasWindow).
+  const shown = useShown(props.chrome === "focus");
+  const attends = props.chrome === "focus" && !isDraft(threadId) && shown;
   useEffect(() => {
     if (!attends) return;
     markAttended(threadId, 1);
@@ -71,7 +82,8 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
   // Files dragged in from the file manager (or a browser) drop anywhere on the pane.
   const [dropping, setDropping] = useState(false);
   const dragDepth = useRef(0);
-  const carriesFiles = (e: React.DragEvent) => e.dataTransfer.types.includes("Files");
+  // (Not on a subagent's: there's no message to add them to.)
+  const carriesFiles = (e: React.DragEvent) => directInput && e.dataTransfer.types.includes("Files");
   const drop = {
     onDragEnter: (e: React.DragEvent) => {
       if (!carriesFiles(e)) return;
@@ -144,7 +156,17 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
         <div className="pane-body">
           <div className="pane-main">
             <TranscriptFor threadId={threadId} />
-            <Composer threadId={threadId} compact={size === "compact"} autoFocus={props.focused && props.chrome === "focus"} />
+            {directInput ? (
+              <Composer
+                threadId={threadId}
+                compact={size === "compact"}
+                autoFocus={props.focused && props.chrome === "focus"}
+                // The details panel lists the subagents; the dock keeps its room for the rest.
+                agentsListed={size === "wide" && showDetails}
+              />
+            ) : (
+              <SubagentBar threadId={threadId} />
+            )}
           </div>
           {size === "wide" && showDetails && <SidePanel threadId={threadId} />}
         </div>
@@ -155,10 +177,12 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
 
 /** The thread's "…" menu; canvas windows show the same on right-click. */
 export function threadMoreItems(threadId: string, rename: () => void): MenuItem[] {
-  const cwd = useThreads.getState().threads[threadId]?.cwd ?? "";
+  const thread = useThreads.getState().threads[threadId];
+  const cwd = thread?.cwd ?? "";
   return [
     { label: "Rename", icon: <Pencil size={14} />, onClick: rename },
-    { label: "Compact context", icon: <Layers size={14} />, onClick: () => void compactThread(threadId) },
+    // Compacting starts a turn: a subagent only takes those from the agent that spawned it.
+    ...(takesDirectInput(thread) ? [{ label: "Compact context", icon: <Layers size={14} />, onClick: () => void compactThread(threadId) }] : []),
     {
       label: useUI.getState().showDetails ? "Hide details panel" : "Show details panel",
       icon: <PanelRight size={14} />,
@@ -171,15 +195,15 @@ export function threadMoreItems(threadId: string, rename: () => void): MenuItem[
 }
 
 function TranscriptFor({ threadId }: { threadId: string }) {
-  const cwd = useThreads((s) => s.threads[threadId]?.cwd ?? null);
+  const cwd = useThread(threadId, (s) => s.threads[threadId]?.cwd ?? null);
   return <Transcript threadId={threadId} cwd={cwd} />;
 }
 
 function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, windowControls, size }: Props & { size: SizeClass }) {
-  const thread = useThreads((s) => s.threads[threadId]);
+  const thread = useThread(threadId, (s) => s.threads[threadId]);
   const draft = useUI((s) => s.drafts[threadId]);
   const worktree = useUI((s) => s.worktrees[threadId]);
-  const usage = useThreads((s) => s.live[threadId]?.tokenUsage);
+  const usage = useThread(threadId, (s) => s.live[threadId]?.tokenUsage);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
@@ -209,8 +233,9 @@ function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, wi
   };
 
   // A canvas window's right-click menu asks its header to start the inline rename.
+  const visibility = useVisibility();
   useEffect(() => {
-    const onRename = (e: Event) => (e as CustomEvent<string>).detail === threadId && startRename();
+    const onRename = (e: Event) => visibility.shown && (e as CustomEvent<string>).detail === threadId && startRename();
     window.addEventListener("ret:rename-thread", onRename);
     return () => window.removeEventListener("ret:rename-thread", onRename);
   });
@@ -295,7 +320,7 @@ function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, wi
 
 /** Tiny windows: just enough to monitor and unblock a thread. */
 function Glance({ threadId }: { threadId: string }) {
-  const last = useThreads((s) => {
+  const last = useThread(threadId, (s) => {
     const lt = s.live[threadId];
     if (!lt) return null;
     for (let i = lt.turnOrder.length - 1; i >= 0; i--) {
@@ -307,15 +332,15 @@ function Glance({ threadId }: { threadId: string }) {
     }
     return null;
   });
-  const preview = useThreads((s) => s.threads[threadId]?.preview);
-  const req = useThreads((s) => Object.values(s.requests).find((r) => r.threadId === threadId));
+  const preview = useThread(threadId, (s) => s.threads[threadId]?.preview);
+  const req = useThread(threadId, (s) => Object.values(s.requests).find((r) => r.threadId === threadId));
   const screen = useLiveScreen(threadId);
   return (
     <div className="glance">
       {req ? (
         <RequestCard req={req} compact />
       ) : screen?.shot ? (
-        <ScreenGlance threadId={threadId} />
+        <ScreenGlance screen={screen.screen} shot={screen.shot} />
       ) : (
         <div className="glance-text">{plainText(last ?? preview ?? "", 600)}</div>
       )}
@@ -324,7 +349,7 @@ function Glance({ threadId }: { threadId: string }) {
 }
 
 function SidePanel({ threadId }: { threadId: string }) {
-  const lastTurn = useThreads((s) => {
+  const lastTurn = useThread(threadId, (s) => {
     const lt = s.live[threadId];
     if (!lt) return null;
     for (let i = lt.turnOrder.length - 1; i >= 0; i--) {
@@ -333,7 +358,7 @@ function SidePanel({ threadId }: { threadId: string }) {
     }
     return null;
   });
-  const usage = useThreads((s) => s.live[threadId]?.tokenUsage);
+  const usage = useThread(threadId, (s) => s.live[threadId]?.tokenUsage);
   const [openDiff, setOpenDiff] = useState(false);
   const files = lastTurn?.diff ? splitDiff(lastTurn.diff) : [];
   return (
@@ -395,19 +420,33 @@ function SidePanel({ threadId }: { threadId: string }) {
   );
 }
 
-/** Thread facts plus fork lineage: jump to the parent or any fork without hunting in the sidebar. */
+function AgentLineage({ agentId, from }: { agentId: string; from: string }) {
+  const title = useThread(agentId, (s) => threadTitle(s.threads[agentId]));
+  return (
+    <button className="lineage" onClick={(e) => openFrom(e, agentId, from)}>
+      <StatusDot threadId={agentId} />
+      <span>{title}</span>
+    </button>
+  );
+}
+
+/** Thread facts plus lineage: jump to the parent, any fork or any subagent without hunting in the sidebar. */
 function ThreadInfo({ threadId }: { threadId: string }) {
-  const thread = useThreads((s) => s.threads[threadId]);
+  const thread = useThread(threadId, (s) => s.threads[threadId]);
+  const spawner = spawnedBy(thread);
   const parent = useThreads((s) => (thread?.forkedFromId ? s.threads[thread.forkedFromId] : undefined));
+  const spawnerThread = useThread(spawner ?? "", (s) => (spawner ? s.threads[spawner] : undefined));
+  // A subagent is forked from its parent too (it starts from the parent's history); it isn't a fork.
   const forks = useThreads(
     useShallow((s) =>
       Object.values(s.threads)
-        .filter((t) => t.forkedFromId === threadId)
+        .filter((t) => t.forkedFromId === threadId && !spawnedBy(t))
         .sort((a, b) => a.createdAt - b.createdAt),
     ),
   );
+  const agents = useThread(threadId, (s) => s.agents[threadId] ?? NO_AGENTS);
   const worktree = useUI((s) => s.worktrees[threadId]);
-  const owner = useThreads((s) => s.owner[threadId] ?? "codex");
+  const owner = useThread(threadId, (s) => s.owner[threadId] ?? "codex");
   if (!thread) return null;
   return (
     <section>
@@ -439,7 +478,11 @@ function ThreadInfo({ threadId }: { threadId: string }) {
           {baseName(thread.cwd)}
         </span>
       </div>
-      {thread.forkedFromId && (
+      {spawner ? (
+        <button className="lineage" onClick={() => openThread(spawner)} disabled={!spawnerThread}>
+          <CornerLeftUp size={12} /> Spawned by <span>{spawnerThread ? threadTitle(spawnerThread) : "an unavailable thread"}</span>
+        </button>
+      ) : thread.forkedFromId && (
         <button className="lineage" onClick={() => openThread(thread.forkedFromId!)} disabled={!parent}>
           <CornerLeftUp size={12} /> Forked from <span>{parent ? threadTitle(parent) : "an unavailable thread"}</span>
         </button>
@@ -452,6 +495,14 @@ function ThreadInfo({ threadId }: { threadId: string }) {
               <StatusDot threadId={f.id} />
               <span>{f.name && f.name !== thread.name ? f.name : `Fork ${i + 1}`}</span>
             </button>
+          ))}
+        </>
+      )}
+      {agents.length > 0 && (
+        <>
+          <h4 className="sub-h">Subagents · {agents.length}</h4>
+          {agents.map((id) => (
+            <AgentLineage key={id} agentId={id} from={threadId} />
           ))}
         </>
       )}
