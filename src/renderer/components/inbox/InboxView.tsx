@@ -9,6 +9,7 @@ import { buildProjects, recencyOf, spawnedBy, threadTitle, type ThreadNode } fro
 import { plainText, timeAgo, unwrapCommand } from "../../lib/format";
 import { StatusDot, threadStateOf, type ThreadState } from "../StatusDot";
 import { ThreadPane } from "../thread/ThreadPane";
+import { isPermissionAsk } from "../../state/computerUse";
 
 type Section = "attention" | "unread" | "error" | "running";
 
@@ -35,7 +36,7 @@ function askFor(req: PendingRequest | undefined): string | null {
     case "item/tool/requestUserInput":
       return p.questions?.[0]?.question ?? `${PROVIDERS[req.provider].name} has a question`;
     case "mcpServer/elicitation/request":
-      return `${p.serverName ?? "A tool"} needs input: ${p.message ?? ""}`;
+      return isPermissionAsk(p) ? (typeof p.message === "string" ? p.message : "Allow a tool?") : `${p.serverName ?? "A tool"} needs input: ${p.message ?? ""}`;
     case "item/tool/requestApproval":
       return p.title ?? `Use ${p.tool ?? "a tool"}?`;
   }

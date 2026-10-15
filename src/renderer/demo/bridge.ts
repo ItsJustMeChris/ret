@@ -200,6 +200,7 @@ export function createDemoBridge(): RetBridge & { world: World } {
       stat: async (path) => world.fs.stat(path),
       pathFor: () => null,
     },
+    apps: { info: async () => ({ name: null, icon: null }) },
     copy: async (text) => {
       try {
         await navigator.clipboard.writeText(text);

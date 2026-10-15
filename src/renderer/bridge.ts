@@ -139,6 +139,7 @@ function createWebBridge(base: string): RetBridge {
     },
     onSpelling: () => () => {},
     copy: (text) => navigator.clipboard.writeText(text),
+    apps: { info: async () => ({ name: null, icon: null }) },
     git: {
       info: async () => ({ isRepo: false, root: null, branch: null }),
       createWorktree: async () => {
