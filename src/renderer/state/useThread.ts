@@ -16,7 +16,7 @@ import { useThreads, type ThreadsState } from "./threads";
 type Listener = () => void;
 
 /** The store's per-thread maps: a change to one thread's entry concerns that thread's subscribers only. */
-const KEYED = ["threads", "owner", "live", "unread", "external", "background", "queued", "goals", "visible", "attended"] as const;
+const KEYED = ["threads", "owner", "live", "unread", "external", "background", "queued", "goals", "agents", "visible", "attended"] as const;
 
 const subs = new Map<string, Set<Listener>>();
 
@@ -270,18 +270,37 @@ export const FreezeContext = createContext<FreezeGate | null>(null);
  * Results that `equal` the last one are returned as the last one (pass `shallowEqual` for arrays).
  */
 export function useThread<T>(threadId: string, selector: (s: ThreadsState) => T, equal: (a: T, b: T) => boolean = Object.is): T {
+  return useGated(threadId, (l) => listen(threadId, l), selector, equal);
+}
+
+/** `useThread` over several threads (a parent's subagents, say): re-run when any of theirs change. */
+export function useThreadGroup<T>(threadIds: readonly string[], selector: (s: ThreadsState) => T, equal: (a: T, b: T) => boolean = Object.is): T {
+  return useGated(
+    threadIds.join("\n"),
+    (l) => {
+      const offs = threadIds.map((id) => listen(id, l));
+      return () => offs.forEach((off) => off());
+    },
+    selector,
+    equal,
+  );
+}
+
+/** A selector that follows what `on` listens to (the same for the same `key`), held still while its view is frozen. */
+function useGated<T>(key: string, on: (l: Listener) => () => void, selector: (s: ThreadsState) => T, equal: (a: T, b: T) => boolean): T {
   const gate = useContext(FreezeContext);
   const last = useRef<{ v: T } | null>(null);
   const subscribe = useCallback(
     (cb: Listener) => {
-      const off = listen(threadId, gate ? () => (gate.frozen ? gate.markStale() : cb()) : cb);
+      const off = on(gate ? () => (gate.frozen ? gate.markStale() : cb()) : cb);
       const offGate = gate?.subscribe(cb);
       return () => {
         off();
         offGate?.();
       };
     },
-    [threadId, gate],
+    // `on` follows `key`.
+    [key, gate],
   );
   const get = () => {
     const c = last.current;

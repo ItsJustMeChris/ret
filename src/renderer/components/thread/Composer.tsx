@@ -11,6 +11,7 @@ import { toast } from "../../state/toasts";
 import { Select, type SelectOption } from "../ui/Select";
 import { QueueTray } from "./QueueTray";
 import { GoalBar } from "./GoalBar";
+import { AgentTray } from "./Subagents";
 import { composerDrafts as drafts, composerFocus, takeAttachments } from "../../state/composerDrafts";
 import { addFilesToThread } from "../../state/attach";
 import { QuestionDock, useQuestionFlow, type QuestionFlow } from "./QuestionDock";
@@ -87,7 +88,18 @@ function askHint(ask: QuestionFlow): string {
   return ask.otherRow ? `Press ${keys} to pick, or type your own answer…` : `Press ${keys} to pick…`;
 }
 
-export function Composer({ threadId, autoFocus, compact }: { threadId: string; autoFocus?: boolean; compact?: boolean }) {
+export function Composer({
+  threadId,
+  autoFocus,
+  compact,
+  agentsListed,
+}: {
+  threadId: string;
+  autoFocus?: boolean;
+  compact?: boolean;
+  /** The thread's subagents are on screen already (the details panel), so the dock leaves them out. */
+  agentsListed?: boolean;
+}) {
   const [text, setText] = useState(() => drafts.get(threadId) ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>(() => takeAttachments(threadId));
   const [sending, setSending] = useState(false);
@@ -374,6 +386,7 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     {/* Docked on top, longest-lived first and the next message nearest the box. */}
     <div className="composer-dock">
       <GoalBar threadId={threadId} />
+      {!agentsListed && <AgentTray threadId={threadId} />}
       <QueueTray threadId={threadId} />
     </div>
     <div

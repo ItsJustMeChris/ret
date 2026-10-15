@@ -5,7 +5,7 @@ import { Kept, useRecent, useVisibility } from "../ui/Kept";
 import { markSeen, useThreads, type PendingRequest } from "../../state/threads";
 import { PROVIDERS } from "../../agents";
 import { useUI } from "../../state/ui";
-import { buildProjects, recencyOf, threadTitle, type ThreadNode } from "../../state/projects";
+import { buildProjects, recencyOf, spawnedBy, threadTitle, type ThreadNode } from "../../state/projects";
 import { plainText, timeAgo, unwrapCommand } from "../../lib/format";
 import { StatusDot, threadStateOf, type ThreadState } from "../StatusDot";
 import { ThreadPane } from "../thread/ThreadPane";
@@ -48,7 +48,7 @@ export function useInboxCount(): number {
     let n = 0;
     for (const id of Object.keys(s.threads)) {
       const st = threadStateOf(s, id);
-      if (st === "attention" || st === "unread" || st === "error") n++;
+      if (st === "attention" || ((st === "unread" || st === "error") && !spawnedBy(s.threads[id]))) n++;
     }
     return n;
   });
@@ -73,9 +73,10 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
   const states = useThreads(
     useShallow((s) => {
       const out: Record<string, ThreadState> = {};
+      // A subagent working, done or failed is its parent's to report; what it asks you is yours.
       for (const id of Object.keys(s.threads)) {
         const st = threadStateOf(s, id);
-        if (st !== "idle") out[id] = st;
+        if (st === "attention" || (st !== "idle" && !spawnedBy(s.threads[id]))) out[id] = st;
       }
       return out;
     }),

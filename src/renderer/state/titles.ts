@@ -5,6 +5,7 @@ import { clients } from "../rpc/client";
 import { PROVIDERS } from "../agents";
 import { useConn } from "./conn";
 import { flushNow, useThreads } from "./threads";
+import { spawnedBy } from "./projects";
 
 /**
  * Thread titles for engines that leave naming to the client: Codex's TUI and desktop app each
@@ -104,7 +105,8 @@ export function titleFromMessage(provider: ProviderId, threadId: string, item: E
   if (!PROVIDERS[provider].autoTitle || pending.has(threadId) || hidden.has(threadId)) return;
   flushNow(); // a brand-new thread's thread/started may still be queued
   const thread = useThreads.getState().threads[threadId];
-  if (!thread || thread.ephemeral || thread.name) return;
+  // A subagent goes by the nickname Codex gave it.
+  if (!thread || thread.ephemeral || thread.name || spawnedBy(thread)) return;
   const text = item.content
     .map((c) => (c.type === "text" ? c.text : ""))
     .filter(Boolean)

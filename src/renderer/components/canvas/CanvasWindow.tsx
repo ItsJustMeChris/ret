@@ -1,6 +1,6 @@
 import { memo, startTransition, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Maximize2, Minimize2, X, GitFork, FolderGit2, Copy } from "lucide-react";
+import { Maximize2, Minimize2, X, GitFork, FolderGit2, Copy, Bot } from "lucide-react";
 import { activeBoard, updateBoard, useUI, isApp, isDraft, isFile, isThread, filePath, type CanvasWin } from "../../state/ui";
 import { FilePane, FileTile } from "../code/FilePane";
 import { AppPane, AppTile } from "./AppPane";
@@ -9,7 +9,7 @@ import { markAttended, markSeen, useThreads } from "../../state/threads";
 import { FreezeContext, FreezeGate, holdViews, useThread } from "../../state/useThread";
 import { useShown } from "../ui/Kept";
 import { closeWindow, focusWindow, forkThread, renameThread } from "../../state/actions";
-import { threadTitle } from "../../state/projects";
+import { spawnedBy, threadTitle } from "../../state/projects";
 import { ThreadPane, threadMoreItems } from "../thread/ThreadPane";
 import { Menu, type MenuItem } from "../Menu";
 import { promptText } from "../ui/Dialog";
@@ -494,7 +494,7 @@ function ThreadCard({ threadId, winId, onPointerDown }: { threadId: string; winI
     <div className={`tcard state-${state}`} onPointerDown={onPointerDown} onDoubleClick={zoomIn}>
       <div className="tcard-head">
         <StatusDot threadId={threadId} />
-        {thread?.forkedFromId && <GitFork className="tcard-fork" />}
+        {spawnedBy(thread) ? <Bot className="tcard-fork" /> : thread?.forkedFromId && <GitFork className="tcard-fork" />}
         <span className="tcard-title">{title}</span>
       </div>
       <div className="tcard-body">{plainText(lastText ?? thread?.preview ?? "")}</div>

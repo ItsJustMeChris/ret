@@ -3,7 +3,7 @@ import { AppWindow, FolderPlus, GitFork, LayoutGrid, MessageSquarePlus, PanelLef
 import { useUI, activeBoard, isThread } from "../state/ui";
 import { useThreads } from "../state/threads";
 import { useConn } from "../state/conn";
-import { buildProjects, flattenNode, threadTitle } from "../state/projects";
+import { buildProjects, flattenNode, spawnedBy, threadTitle } from "../state/projects";
 import { addProject, forkThread, newThread, openThread } from "../state/actions";
 import { timeAgo } from "../lib/format";
 import { StatusDot } from "./StatusDot";
@@ -110,7 +110,7 @@ function PaletteInner() {
         id: t.id,
         kind: "thread",
         title: threadTitle(t),
-        sub: `${projectName.get(t.id) ?? t.cwd} · ${timeAgo(t.recencyAt ?? t.updatedAt)}${t.forkedFromId ? " · fork" : ""}`,
+        sub: `${projectName.get(t.id) ?? t.cwd} · ${timeAgo(t.recencyAt ?? t.updatedAt)}${spawnedBy(t) ? " · subagent" : t.forkedFromId ? " · fork" : ""}`,
         threadId: t.id,
         run: () => openThread(t.id),
       }));
