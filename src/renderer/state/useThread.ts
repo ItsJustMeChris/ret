@@ -16,7 +16,7 @@ import { useThreads, type ThreadsState } from "./threads";
 type Listener = () => void;
 
 /** The store's per-thread maps: a change to one thread's entry concerns that thread's subscribers only. */
-const KEYED = ["threads", "owner", "live", "unread", "external", "background", "queued", "visible", "attended"] as const;
+const KEYED = ["threads", "owner", "live", "unread", "external", "background", "queued", "goals", "visible", "attended"] as const;
 
 const subs = new Map<string, Set<Listener>>();
 
