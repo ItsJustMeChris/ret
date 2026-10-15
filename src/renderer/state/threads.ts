@@ -340,10 +340,12 @@ function apply(d: Draft, provider: ProviderId, method: string, p: any, hooks: Ho
       break;
     }
     case "thread/goal/updated":
+      goalNews.set(p.threadId, (goalNews.get(p.threadId) ?? 0) + 1);
       d.goals = own(d.goals);
       d.goals[p.threadId] = p.goal;
       break;
     case "thread/goal/cleared": {
+      goalNews.set(p.threadId, (goalNews.get(p.threadId) ?? 0) + 1);
       if (!d.goals[p.threadId]) break;
       d.goals = own(d.goals);
       delete d.goals[p.threadId];
@@ -590,17 +592,34 @@ export function patchLive(threadId: string, patch: Partial<LiveThread> | ((lt: L
   });
 }
 
-/** Record a thread's goal as fetched (null: it has none). */
-export function setGoal(threadId: string, goal: ThreadGoal | null) {
+/** How many goal events each thread has had: a fetch answered after one of them is out of date. */
+const goalNews = new Map<string, number>();
+
+/** Where a thread's goal events are at (taken before asking for the goal; see setGoal). */
+export function goalMark(threadId: string): number {
   flushNow();
+  return goalNews.get(threadId) ?? 0;
+}
+
+/**
+ * Record a thread's goal as fetched (null: it has none). With `mark` (goalMark when it was asked
+ * for), the answer is dropped if a goal event came in since: that event is newer.
+ */
+export function setGoal(threadId: string, goal: ThreadGoal | null, mark?: number) {
+  const cur = useThreads.getState().goals[threadId];
+  if (!goal && !cur) return;
+  if (goal && cur && sameGoal(goal, cur)) return;
+  if (mark !== undefined && goalMark(threadId) !== mark) return;
   useThreads.setState((s) => {
-    if (!goal && !s.goals[threadId]) return s;
     const goals = { ...s.goals };
     if (goal) goals[threadId] = goal;
     else delete goals[threadId];
     return { goals };
   });
 }
+
+const sameGoal = (a: ThreadGoal, b: ThreadGoal) =>
+  a.updatedAt === b.updatedAt && a.status === b.status && a.objective === b.objective && a.tokensUsed === b.tokensUsed && a.timeUsedSeconds === b.timeUsedSeconds;
 
 export function upsertThreads(provider: ProviderId, list: Thread[]) {
   useThreads.setState((s) => {

@@ -17,6 +17,7 @@ import {
   mergeThread,
   ownerOf,
   patchLive,
+  goalMark,
   removePendingRequest,
   setGoal,
   setThreadHooks,
@@ -162,6 +163,7 @@ function wireProvider(p: ProviderId) {
 
   rpc.onReady((info) => {
     patchProvider(p, { info });
+    goalsOff.delete(p);
     // A fresh connection knows nothing about our subscriptions. Threads that were mid-turn
     // are re-fetched: the turn either died with the old process or (shared daemon, Claude
     // sessions) is still running and gets rejoined by hydrateThread.
@@ -577,27 +579,36 @@ export function ensureSubscribed(threadId: string): Promise<void> {
   return p;
 }
 
+/** Engines that said they have no goals this connection (the feature off in their config): not asked again until they reconnect. */
+const goalsOff = new Set<ProviderId>();
+
 /**
  * Fetch a thread's goal. Live events keep it current while the thread runs here; one running in
  * another app only changes on disk, so that's re-read whenever its transcript is.
  */
 export async function loadGoal(threadId: string) {
   const p = await ownerFor(threadId);
-  if (!PROVIDERS[p].goals) return;
+  if (!PROVIDERS[p].goals || goalsOff.has(p)) return;
+  const mark = goalMark(threadId);
   try {
     const res = await rpcFor(p).request("thread/goal/get", { threadId });
-    setGoal(threadId, res.goal);
+    setGoal(threadId, res.goal, mark);
   } catch (err) {
-    console.warn("goal fetch failed", err);
+    if (/disabled|not enabled|unknown variant/i.test((err as Error).message)) goalsOff.add(p);
+    else console.warn("goal fetch failed", err);
   }
 }
 
+// Changing a goal acts on the thread in its engine, so it's loaded there first: a goal resumed on a
+// thread that isn't would only be saved, with nothing to pick it up.
 async function setGoalStatusImpl(threadId: string, status: "active" | "paused") {
+  await ensureSubscribed(threadId);
   const res = await rpcFor(ownerOf(threadId)).request("thread/goal/set", { threadId, status, origin: "user" });
   setGoal(threadId, res.goal);
 }
 
 async function clearGoalImpl(threadId: string) {
+  await ensureSubscribed(threadId);
   await rpcFor(ownerOf(threadId)).request("thread/goal/clear", { threadId, origin: "user" });
   setGoal(threadId, null);
 }
@@ -930,6 +941,8 @@ async function forkThreadImpl(threadId: string, opts: ForkOptions = {}): Promise
     lastTurnId: opts.atTurnId ?? null,
     cwd: cwd ?? null,
     excludeTurns: true,
+    // A fork carries the thread's goal, but waits for you to say something before working on it.
+    ...(PROVIDERS[provider].goals ? { deferGoalContinuation: true } : {}),
   });
   const fork = res.thread;
   lineageKnown(fork.id);

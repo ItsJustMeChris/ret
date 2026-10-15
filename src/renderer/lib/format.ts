@@ -8,6 +8,12 @@ export function timeAgo(seconds: number | null | undefined): string {
   return new Date(seconds * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/** When something happened, to follow a verb: "just now", "5m ago", "on Oct 3". */
+export function sinceWhen(seconds: number | null | undefined): string {
+  const ago = timeAgo(seconds);
+  return ago === "now" ? "just now" : /^\d/.test(ago) ? `${ago} ago` : ago ? `on ${ago}` : "";
+}
+
 export function duration(ms: number | null | undefined): string {
   if (ms == null) return "";
   if (ms < 1000) return `${ms}ms`;

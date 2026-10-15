@@ -2912,7 +2912,7 @@ html.autoscrolling[data-autoscroll="down"] * {
 }
 /* The canvas is a scroller (CanvasView), so a scroll that runs out in a window's outermost scrolling
    parts mustn't carry on into it and pan the canvas (keys; the wheel is guarded in CanvasView too). */
-.cwin :is(.transcript, .side-panel, .pane-body.draft, .glance, .queue-tray, .ask-dock, .tree-rows, .inbox-list, .code-tabs, textarea) {
+.cwin :is(.transcript, .side-panel, .pane-body.draft, .glance, .queue-tray, .goal-detail, .ask-dock, .tree-rows, .inbox-list, .code-tabs, textarea) {
   overscroll-behavior: contain;
 }
 /* The full view's host (CanvasWindow): there only while the full view shows, and no box of its own. */
@@ -5123,8 +5123,8 @@ body.resizing .sidebar-dock {
 }
 
 /*
- * The dock on top of the composer: one box for whatever the thread has to show there (queued
- * follow-ups, its subagents, ...), stacked with a rule between, so any mix of them joins up.
+ * The dock on top of the composer: one box for whatever the thread has to show there (its goal,
+ * queued follow-ups…), stacked with a rule between, so any mix of them joins up.
  * Its sections draw no box of their own; it hides when none of them renders.
  */
 .composer-dock {
