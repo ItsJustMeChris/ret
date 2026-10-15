@@ -21,6 +21,8 @@ import { lodAtMount, registerWindow, type Lod } from "./lod";
 import { plainText } from "../../lib/format";
 import { classify } from "../../lib/useSize";
 import { holdCursor } from "../../lib/cursorShield";
+import { hostOfView } from "../../state/projectTree";
+import { useHosts } from "../../state/hosts";
 
 const MIN_W = 220;
 const MIN_H = 130;
@@ -489,6 +491,9 @@ function ThreadCard({ threadId, winId, onPointerDown }: { threadId: string; winI
     return null;
   });
   const title = isDraft(threadId) ? "New thread" : threadTitle(thread);
+  const host = useThread(threadId, () => hostOfView(threadId));
+  const hostLabel = useHosts((s) => (host ? (s.hosts[host]?.name ?? "another device") : null));
+  const stateText = state === "attention" ? "Needs input" : state === "running" ? "Working…" : state === "unread" ? "New activity" : "";
   const zoomIn = () => zoomToWindow(winId);
   return (
     <div className={`tcard state-${state}`} onPointerDown={onPointerDown} onDoubleClick={zoomIn}>
@@ -498,7 +503,7 @@ function ThreadCard({ threadId, winId, onPointerDown }: { threadId: string; winI
         <span className="tcard-title">{title}</span>
       </div>
       <div className="tcard-body">{plainText(lastText ?? thread?.preview ?? "")}</div>
-      <div className="tcard-state">{state === "attention" ? "Needs input" : state === "running" ? "Working…" : state === "unread" ? "New activity" : ""}</div>
+      <div className="tcard-state">{[hostLabel && `On ${hostLabel}`, stateText].filter(Boolean).join(" · ")}</div>
     </div>
   );
 }

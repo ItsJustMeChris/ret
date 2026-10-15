@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { useThreads } from "../state/threads";
 import { useThread } from "../state/useThread";
-import { PROVIDERS } from "../agents";
+import { agentOf } from "../agents";
 
 export type ThreadState = "attention" | "running" | "error" | "unread" | "idle";
 
@@ -74,7 +74,7 @@ export const StatusDot = memo(function StatusDot({ threadId }: { threadId: strin
   const state = useThreadState(threadId);
   const elsewhere = useRunsElsewhere(threadId);
   const background = useBackgroundOnly(threadId);
-  const agent = useThread(threadId, (s) => PROVIDERS[s.owner[threadId] ?? "codex"].name);
+  const agent = useThread(threadId, (s) => agentOf(s.owner[threadId] ?? "codex").name);
   const shown = state === "running" && background > 0;
   return (
     <span

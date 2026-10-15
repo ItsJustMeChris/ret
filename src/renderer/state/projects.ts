@@ -1,13 +1,35 @@
+import { hostOf, type EngineId } from "@shared/bridge";
 import type { Thread } from "@shared/protocol";
 import type { ProjectConf } from "./ui";
 
 const caseInsensitive = /win/i.test(navigator.platform);
+/** Windows paths: case-insensitive, written with backslashes. A device's platform, or this computer's. */
+const windowsPaths = (platform?: string | null) => (platform ? platform === "win32" : caseInsensitive);
 
-/** Canonical project key for a filesystem path. */
-export function normPath(p: string): string {
+/** Canonical project key for a filesystem path (on a device with `platform`, or this computer). */
+export function normPath(p: string, platform?: string | null): string {
   let s = p.replace(/\\/g, "/").replace(/\/+$/, "");
-  if (caseInsensitive) s = s.toLowerCase();
+  if (windowsPaths(platform)) s = s.toLowerCase();
   return s;
+}
+
+/**
+ * Keys of a paired device's projects, folders and workspaces carry its host key in front
+ * ("<host>|<path>"): the same path on two computers is two different folders.
+ */
+const SCOPED = /^([0-9a-f]{16})\|/;
+
+export function scopedKey(host: string | null | undefined, key: string): string {
+  return host ? `${host}|${key}` : key;
+}
+
+/** The device a project key (or scoped path) belongs to; null for this computer. */
+export function hostOfKey(key: string): string | null {
+  return SCOPED.exec(key)?.[1] ?? null;
+}
+
+export function pathOfKey(key: string): string {
+  return SCOPED.test(key) ? key.slice(17) : key;
 }
 
 export function baseName(p: string): string {
@@ -47,6 +69,8 @@ export interface ThreadNode {
 
 export interface ProjectNode {
   key: string;
+  /** The paired device it's on; null for this computer. */
+  host: string | null;
   path: string;
   name: string;
   conf: ProjectConf | null;
@@ -64,6 +88,8 @@ export interface Workspace {
   name: string;
   /** The first is where its threads start. */
   roots: string[];
+  /** The paired device whose engine keeps it; null for this computer. */
+  host?: string | null;
 }
 
 /**
@@ -71,34 +97,46 @@ export interface Workspace {
  * subdirectories too; a workspace's roots all lead to one project, keyed by its first root.
  */
 export interface ProjectIndex {
-  /** Longest first, so the innermost wins; Ret's own projects win ties. */
-  dirs: { dir: string; key: string }[];
-  /** Workspace id → project key, for threads their engine assigned outright. */
+  /** Longest first, so the innermost wins; Ret's own projects win ties. `dir` is on `host`. */
+  dirs: { dir: string; key: string; host: string | null }[];
+  /** Workspace id (scoped by device) → project key, for threads their engine assigned outright. */
   byWorkspace: Record<string, string>;
   /** Project key → the workspace behind it. */
   workspaces: Map<string, Workspace>;
-  /** Worktree folder → the same place in its main checkout. */
+  /** Worktree folder (scoped by device) → the same place in its main checkout. */
   checkouts: Record<string, string>;
+  /** Thread → its engine, which says which device its folder is on. */
+  owner: Record<string, EngineId>;
+  /** A device's platform (see hostPlatform). */
+  platformOf: (host: string | null) => string | null;
 }
 
 function explicitKeys(projects: Record<string, ProjectConf>): string[] {
   return Object.keys(projects).filter((k) => projects[k].explicit);
 }
 
-export function projectIndex(projects: Record<string, ProjectConf>, workspaces: Workspace[], checkouts: Record<string, string>): ProjectIndex {
-  const dirs = explicitKeys(projects).map((k) => ({ dir: k, key: k }));
+export function projectIndex(
+  projects: Record<string, ProjectConf>,
+  workspaces: Workspace[],
+  checkouts: Record<string, string>,
+  owner: Record<string, EngineId>,
+  platformOf: (host: string | null) => string | null,
+): ProjectIndex {
+  const dirs = explicitKeys(projects).map((k) => ({ dir: pathOfKey(k), key: k, host: hostOfKey(k) }));
   const byWorkspace: Record<string, string> = {};
   const byKey = new Map<string, Workspace>();
   for (const w of workspaces) {
     if (!w.roots.length) continue;
-    const key = normPath(w.roots[0]);
+    const host = w.host ?? null;
+    const platform = platformOf(host);
+    const key = scopedKey(host, normPath(w.roots[0], platform));
     if (byKey.has(key)) continue;
     byKey.set(key, w);
-    byWorkspace[w.id] = key;
-    for (const r of w.roots) dirs.push({ dir: normPath(r), key });
+    byWorkspace[scopedKey(host, w.id)] = key;
+    for (const r of w.roots) dirs.push({ dir: normPath(r, platform), key, host });
   }
   dirs.sort((a, b) => b.dir.length - a.dir.length);
-  return { dirs, byWorkspace, workspaces: byKey, checkouts };
+  return { dirs, byWorkspace, workspaces: byKey, checkouts, owner, platformOf };
 }
 
 export const recencyOf = (t: Thread) => t.recencyAt ?? t.updatedAt ?? t.createdAt;
@@ -169,11 +207,12 @@ export function projectKeyFor(
     seen.add(root.id);
     root = parent;
   }
-  const assigned = root.projectId ? index.byWorkspace[root.projectId] : undefined;
+  const host = hostOf(index.owner[root.id] ?? index.owner[thread.id] ?? "codex");
+  const assigned = root.projectId ? index.byWorkspace[scopedKey(host, root.projectId)] : undefined;
   if (assigned) return assigned;
-  const cwd = normPath(index.checkouts[root.cwd] ?? root.cwd);
-  for (const { dir, key } of index.dirs) if (cwd === dir || cwd.startsWith(dir + "/")) return key;
-  return scratchOf(cwd)?.key ?? cwd;
+  const cwd = normPath(index.checkouts[scopedKey(host, root.cwd)] ?? root.cwd, index.platformOf(host));
+  for (const d of index.dirs) if (d.host === host && (cwd === d.dir || cwd.startsWith(d.dir + "/"))) return d.key;
+  return scopedKey(host, scratchOf(cwd)?.key ?? cwd);
 }
 
 /**
@@ -186,8 +225,10 @@ export function buildProjects(
   threadProject: Record<string, string>,
   workspaces: Workspace[],
   checkouts: Record<string, string>,
+  owner: Record<string, EngineId>,
+  platformOf: (host: string | null) => string | null,
 ): ProjectNode[] {
-  const index = projectIndex(projects, workspaces, checkouts);
+  const index = projectIndex(projects, workspaces, checkouts, owner, platformOf);
   const list = Object.values(threads);
   const keyOf = new Map<string, string>();
   for (const t of list) keyOf.set(t.id, projectKeyFor(t, threads, index, threadProject));
@@ -231,11 +272,15 @@ export function buildProjects(
     roots.sort((a, b) => b.recency - a.recency);
     const sample = roots[0]?.thread;
     const ws = index.workspaces.get(key);
-    const path = conf?.path ?? ws?.roots[0] ?? (sample ? displayPathFor(key, checkouts[sample.cwd] ?? sample.cwd) : key);
+    const host = hostOfKey(key);
+    const platform = platformOf(host);
+    const bare = pathOfKey(key);
+    const path = conf?.path ?? ws?.roots[0] ?? (sample ? displayPathFor(bare, checkouts[scopedKey(host, sample.cwd)] ?? sample.cwd, platform) : bare);
     out.push({
       key,
+      host,
       path,
-      name: conf?.name ?? ws?.name ?? (!conf ? scratchOf(normPath(sample?.cwd ?? ""))?.name : undefined) ?? baseName(path),
+      name: conf?.name ?? ws?.name ?? (!conf ? scratchOf(normPath(sample?.cwd ?? "", platform))?.name : undefined) ?? baseName(path),
       conf,
       roots,
       threadCount: roots.reduce((n, r) => n + 1 + r.forkCount + r.agentCount, 0),
@@ -253,9 +298,9 @@ export function buildProjects(
 }
 
 /** Recover original casing for an auto-detected project from one of its threads' cwd. */
-function displayPathFor(key: string, cwd: string): string {
+function displayPathFor(key: string, cwd: string, platform?: string | null): string {
   const norm = cwd.replace(/\\/g, "/");
-  return norm.slice(0, key.length).replace(/\//g, caseInsensitive ? "\\" : "/");
+  return norm.slice(0, key.length).replace(/\//g, windowsPaths(platform) ? "\\" : "/");
 }
 
 /** All thread ids in a subtree, root first. */

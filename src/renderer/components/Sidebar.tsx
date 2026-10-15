@@ -13,7 +13,10 @@ import {
   GitFork,
   AppWindow,
   Columns2,
+  Laptop,
+  Monitor,
   Pencil,
+  Settings as SettingsIcon,
   Pin,
   Plus,
   Search,
@@ -22,7 +25,11 @@ import {
 } from "lucide-react";
 import { useThreads } from "../state/threads";
 import { activeBoard, useUI } from "../state/ui";
-import { buildProjects, flattenNode, recencyOf, spawnedBy, threadTitle, type ProjectNode, type ThreadNode } from "../state/projects";
+import { flattenNode, recencyOf, spawnedBy, threadTitle, type ProjectNode, type ThreadNode } from "../state/projects";
+import { useProjectTree } from "../state/projectTree";
+import { useHosts } from "../state/hosts";
+import { scopedKey } from "../state/projects";
+import { hostOf } from "@shared/bridge";
 import { addProject, archiveThread, forkThread, newThread, openThread, renameThread, updateProject } from "../state/actions";
 import { StatusDot, useThreadState, type ThreadState } from "./StatusDot";
 import { Menu, type MenuItem } from "./Menu";
@@ -33,15 +40,12 @@ import { ThreadTime } from "./ThreadTime";
 const RECENT_LIMIT = 6;
 
 export function Sidebar() {
-  const threads = useThreads((s) => s.threads);
-  const workspaces = useThreads((s) => s.workspaces);
   const listLoaded = useThreads((s) => s.listLoaded);
-  const { projects, threadProject, checkouts } = useUI(useShallow((s) => ({ projects: s.projects, threadProject: s.threadProject, checkouts: s.checkouts })));
   const docked = useUI((s) => s.sidebarOpen);
   const [filter, setFilter] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
-  const tree = useMemo(() => buildProjects(threads, projects, threadProject, workspaces, checkouts), [threads, projects, threadProject, workspaces, checkouts]);
+  const tree = useProjectTree();
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -58,6 +62,23 @@ export function Sidebar() {
     e.stopPropagation();
     setMenu({ x: e.clientX, y: e.clientY, items });
   }, []);
+
+  // Paired devices: each gets a section of its own projects, after this computer's.
+  const hosts = useHosts((s) => s.hosts);
+  const sections = useMemo(() => {
+    const remote = Object.values(hosts);
+    if (!remote.length) return null;
+    const by = new Map<string | null, ProjectNode[]>();
+    for (const p of filtered) {
+      const list = by.get(p.host);
+      if (list) list.push(p);
+      else by.set(p.host, [p]);
+    }
+    return [
+      { host: null, name: "This computer", projects: by.get(null) ?? [] },
+      ...remote.map((h) => ({ host: h.key, name: h.name, projects: by.get(h.key) ?? [] })),
+    ];
+  }, [filtered, hosts]);
 
   return (
     <aside className="sidebar">
@@ -90,9 +111,9 @@ export function Sidebar() {
             </button>
           </div>
         )}
-        {filtered.map((p) => (
-          <ProjectFolder key={p.key} project={p} forceOpen={!!filter} showMenu={showMenu} />
-        ))}
+        {sections
+          ? sections.map((sec) => <HostSection key={sec.host ?? "local"} {...sec} forceOpen={!!filter} showMenu={showMenu} />)
+          : filtered.map((p) => <ProjectFolder key={p.key} project={p} forceOpen={!!filter} showMenu={showMenu} />)}
       </div>
       <SidebarFooter />
       <ResizeHandle />
@@ -126,6 +147,66 @@ function ResizeHandle() {
 
 type ShowMenu = (e: React.MouseEvent, items: MenuItem[]) => void;
 
+/** One device's projects: this computer's, or a paired device's (with whether it's reachable). */
+const HostSection = memo(function HostSection({
+  host,
+  name,
+  projects,
+  forceOpen,
+  showMenu,
+}: {
+  host: string | null;
+  name: string;
+  projects: ProjectNode[];
+  forceOpen: boolean;
+  showMenu: ShowMenu;
+}) {
+  const key = host ?? "local";
+  const collapsed = useUI((s) => !!s.hostsCollapsed?.[key]);
+  const info = useHosts((s) => (host ? s.hosts[host] : undefined));
+  const open = forceOpen || !collapsed;
+  const state = !host ? null : info?.connected ? "connected" : info?.online ? "connecting" : "offline";
+  const toggle = () => useUI.setState((s) => ({ hostsCollapsed: { ...s.hostsCollapsed, [key]: !collapsed } }));
+  const add = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    void addProject(undefined, host);
+  };
+  const ids = useMemo(() => projects.flatMap((p) => p.roots.flatMap((r) => flattenNode(r).map((t) => t.id))), [projects]);
+  const { running, attention } = useAggregate(ids);
+  const menuItems: MenuItem[] = [
+    { label: host ? `Add a project on ${name}` : "Add project folder", icon: <FolderPlus size={14} />, onClick: () => add() },
+    ...(host ? [{ label: "Remote access settings", icon: <SettingsIcon size={14} />, onClick: () => useUI.setState({ settingsOpen: true }) }] : []),
+  ];
+
+  return (
+    <div className={`host-section ${open ? "open" : ""} ${state ?? ""}`}>
+      <div className="host-head" onClick={toggle} onContextMenu={(e) => showMenu(e, menuItems)} title={host ? `${name}: ${state}` : "This computer"}>
+        <ChevronRight className="chev" size={11} />
+        {host ? <Monitor size={12} /> : <Laptop size={12} />}
+        <span className="host-name">{name}</span>
+        {state && <span className={`host-state ${state}`}>{state}</span>}
+        {!open && attention > 0 && <span className="pill attention">{attention}</span>}
+        {!open && running > 0 && <span className="pill running">{running}</span>}
+        <button className="icon-btn tiny hover-only" title={host ? `Add a project on ${name}` : "Add project folder"} onClick={add}>
+          <FolderPlus size={12} />
+        </button>
+      </div>
+      {open && (
+        <div className="host-body">
+          {projects.map((p) => (
+            <ProjectFolder key={p.key} project={p} forceOpen={forceOpen} showMenu={showMenu} />
+          ))}
+          {!projects.length && !forceOpen && (
+            <div className="host-empty">
+              {state === "offline" ? `Offline. Its threads come back when it's reachable.` : state === "connecting" ? "Connecting…" : "No threads yet."}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+
 const ProjectFolder = memo(function ProjectFolder({ project, forceOpen, showMenu }: { project: ProjectNode; forceOpen: boolean; showMenu: ShowMenu }) {
   const collapsed = useUI((s) => s.projects[project.key]?.collapsed ?? false);
   const showAll = useUI((s) => !!s.showAll[project.key]);
@@ -144,7 +225,8 @@ const ProjectFolder = memo(function ProjectFolder({ project, forceOpen, showMenu
     { label: "New thread", icon: <Plus size={14} />, onClick: () => create(), hint: "Ctrl+N" },
     { label: project.conf?.pinned ? "Unpin" : "Pin to top", icon: <Pin size={14} />, onClick: () => updateProject(project.key, { pinned: !project.conf?.pinned }, project.path) },
     { label: "Rename", icon: <Pencil size={14} />, onClick: () => setRenaming(true) },
-    ...(isDesktop ? [{ label: "Open folder", icon: <FolderOpen size={14} />, onClick: () => void bridge.shell.openPath(project.path) }] : []),
+    // A paired device's folder can't be opened here.
+    ...(isDesktop && !project.host ? [{ label: "Open folder", icon: <FolderOpen size={14} />, onClick: () => void bridge.shell.openPath(project.path) }] : []),
     {
       label: "Open all in canvas",
       icon: <AppWindow size={14} />,
@@ -394,7 +476,8 @@ const ThreadRow = memo(function ThreadRow({
 }) {
   const t = node.thread;
   const active = useIsActive(t.id);
-  const worktree = useUI((s) => !!s.worktrees[t.id] || !!s.checkouts[t.cwd]);
+  const host = useThreads((s) => hostOf(s.owner[t.id] ?? "codex"));
+  const worktree = useUI((s) => !!s.worktrees[t.id] || !!s.checkouts[scopedKey(host, t.cwd)]);
   const state: ThreadState = useThreadState(t.id);
   const [renaming, setRenaming] = useState(false);
 

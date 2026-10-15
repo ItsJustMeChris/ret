@@ -4,7 +4,7 @@ import type { ThreadGoal, ThreadGoalStatus } from "@shared/protocol/generated/v2
 import { FreezeContext, useThread } from "../../state/useThread";
 import { ownerOf } from "../../state/threads";
 import { clearGoal, setGoalStatus } from "../../state/actions";
-import { PROVIDERS } from "../../agents";
+import { agentOf } from "../../agents";
 import { compactNumber, duration, sinceWhen } from "../../lib/format";
 import { useVisibility } from "../ui/Kept";
 
@@ -42,7 +42,7 @@ export const GoalBar = memo(function GoalBar({ threadId }: { threadId: string })
   };
   // Another app runs it: Ret only watches (as the composer won't send to it either).
   const locked = busy || elsewhere;
-  const why = elsewhere ? ` (it's running in another ${PROVIDERS[ownerOf(threadId)].name} app)` : "";
+  const why = elsewhere ? ` (it's running in another ${agentOf(ownerOf(threadId)).name} app)` : "";
 
   return (
     <div className={`goal-bar ${goal.status} ${expanded ? "expanded" : ""}`}>

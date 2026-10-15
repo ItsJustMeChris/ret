@@ -1,4 +1,6 @@
 import type { AppUpdateState, EngineStatus, ProviderId, ProvidersSettings, RetBridge, UpdaterState } from "@shared/bridge";
+import { providerOf } from "@shared/bridge";
+import { noRemoteAccess } from "@shared/remote";
 
 declare global {
   interface Window {
@@ -83,7 +85,8 @@ function createWebBridge(base: string): RetBridge {
     platform: navigator.platform.toLowerCase().includes("win") ? "win32" : "web",
     appVersion: "web",
     agents: {
-      send: (provider, line) => pipes[provider].send(line),
+      // Only this computer's engines: the browser can't pair.
+      send: (engine, line) => pipes[providerOf(engine)].send(line),
       onMessages: (cb) => {
         messageSubs.add(cb);
         return () => messageSubs.delete(cb);
@@ -92,8 +95,8 @@ function createWebBridge(base: string): RetBridge {
         statusSubs.add(cb);
         return () => statusSubs.delete(cb);
       },
-      getStatus: async (provider) => pipes[provider].status,
-      restart: async (provider) => pipes[provider].restart(),
+      getStatus: async (engine) => pipes[providerOf(engine)].status,
+      restart: async (engine) => pipes[providerOf(engine)].restart(),
       getSettings: async () => settings,
       onSettings: (cb) => {
         settingsSubs.add(cb);
@@ -160,6 +163,7 @@ function createWebBridge(base: string): RetBridge {
         new Notification(title, { body });
       }
     },
+    remoteAccess: noRemoteAccess("Remote access needs the desktop app"),
   };
 }
 

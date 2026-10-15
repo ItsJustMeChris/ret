@@ -39,10 +39,13 @@ export function onFsChanged(params: { watchId: string; changedPaths: string[] })
   watchers.get(params.watchId)?.(params.changedPaths ?? []);
 }
 
-/** Watch `path`; returns a function that stops watching. Quietly does nothing if watching isn't available. */
-export async function watchPath(path: string, onChange: (paths: string[]) => void): Promise<() => void> {
+/**
+ * Watch `path` (on this computer, or the paired device `host`); returns a function that stops
+ * watching. Quietly does nothing if watching isn't available.
+ */
+export async function watchPath(path: string, onChange: (paths: string[]) => void, host: string | null = null): Promise<() => void> {
   const { fsClient } = await import("../rpc/client");
-  const rpc = fsClient();
+  const rpc = fsClient(host);
   const watchId = `ret-${Math.random().toString(36).slice(2, 10)}`;
   watchers.set(watchId, onChange);
   try {

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ProviderId } from "@shared/bridge";
+import { hostOf, type EngineId } from "@shared/bridge";
 import type {
   BackgroundTask,
   ServerRequest,
@@ -65,9 +65,9 @@ export interface LiveThread {
 }
 
 export interface PendingRequest {
-  /** `<provider>:<id>`: request ids are only unique per engine. */
+  /** `<engine>:<id>`: request ids are only unique per engine. */
   key: string;
-  provider: ProviderId;
+  engine: EngineId;
   id: number | string;
   method: ServerRequest["method"] | (string & {});
   params: any;
@@ -77,8 +77,8 @@ export interface PendingRequest {
 
 export interface ThreadsState {
   threads: Record<string, Thread>;
-  /** Which provider's engine each thread lives in. */
-  owner: Record<string, ProviderId>;
+  /** Which engine each thread lives in (an agent here, or on a paired device). */
+  owner: Record<string, EngineId>;
   listLoaded: boolean;
   live: Record<string, LiveThread>;
   requests: Record<string, PendingRequest>;
@@ -350,21 +350,26 @@ export function delegated(thread: Thread | undefined, turn: Turn): boolean {
   return !!turn.rootTurnId && turn.rootTurnId !== turn.id;
 }
 
-/** The provider a thread belongs to (Codex until known: it was the only one). */
-export function ownerOf(threadId: string): ProviderId {
+/** The engine a thread belongs to (this computer's Codex until known: it was the only one). */
+export function ownerOf(threadId: string): EngineId {
   return useThreads.getState().owner[threadId] ?? "codex";
 }
 
+/** The paired device a thread runs on; null for this computer. */
+export function hostOfThread(threadId: string): string | null {
+  return hostOf(ownerOf(threadId));
+}
+
 /** Applies a single server notification to the draft state. */
-function apply(d: Draft, provider: ProviderId, method: string, p: any, hooks: Hooks) {
+function apply(d: Draft, engine: EngineId, method: string, p: any, hooks: Hooks) {
   switch (method) {
     case "thread/started": {
       const t: Thread = p.thread;
       d.threads = own(d.threads);
       d.threads[t.id] = mergeThread(d.threads[t.id], t);
-      if (d.owner[t.id] !== provider) {
+      if (d.owner[t.id] !== engine) {
         d.owner = own(d.owner);
-        d.owner[t.id] = provider;
+        d.owner[t.id] = engine;
       }
       break;
     }
@@ -525,7 +530,7 @@ function apply(d: Draft, provider: ProviderId, method: string, p: any, hooks: Ho
       break;
     }
     case "serverRequest/resolved": {
-      const key = `${provider}:${p.requestId}`;
+      const key = `${engine}:${p.requestId}`;
       if (!d.requests[key]) break;
       d.requests = own(d.requests);
       delete d.requests[key];
@@ -561,7 +566,7 @@ function apply(d: Draft, provider: ProviderId, method: string, p: any, hooks: Ho
 // spend every one of its frames rendering it.
 // ---------------------------------------------------------------------------
 const FLUSH_EVERY = 32;
-let queue: { provider: ProviderId; method: string; params: any }[] = [];
+let queue: { engine: EngineId; method: string; params: any }[] = [];
 let scheduled = false;
 let lastFlush = 0;
 let hooks: Hooks = {};
@@ -578,9 +583,9 @@ function flush() {
   queue = [];
   fresh = new WeakSet();
   const d: Draft = { ...useThreads.getState() };
-  for (const { provider, method, params } of batch) {
+  for (const { engine, method, params } of batch) {
     try {
-      apply(d, provider, method, params, hooks);
+      apply(d, engine, method, params, hooks);
     } catch (err) {
       console.error("reducer failed for", method, err);
     }
@@ -588,8 +593,8 @@ function flush() {
   useThreads.setState(d, true);
 }
 
-export function enqueueNotification(provider: ProviderId, method: string, params: any) {
-  queue.push({ provider, method, params });
+export function enqueueNotification(engine: EngineId, method: string, params: any) {
+  queue.push({ engine, method, params });
   if (scheduled) return;
   scheduled = true;
   let done = false;
@@ -612,12 +617,12 @@ export function flushNow() {
   if (scheduled) flush();
 }
 
-export function addPendingRequest(provider: ProviderId, req: ServerRequest) {
+export function addPendingRequest(engine: EngineId, req: ServerRequest) {
   const p: any = req.params;
   const threadId: string | null = p?.threadId ?? p?.conversationId ?? null;
-  const key = `${provider}:${req.id}`;
+  const key = `${engine}:${req.id}`;
   useThreads.setState((s) => ({
-    requests: { ...s.requests, [key]: { key, provider, id: req.id, method: req.method, params: p, threadId, receivedAt: Date.now() } },
+    requests: { ...s.requests, [key]: { key, engine, id: req.id, method: req.method, params: p, threadId, receivedAt: Date.now() } },
   }));
 }
 
@@ -668,13 +673,13 @@ export function setGoal(threadId: string, goal: ThreadGoal | null, mark?: number
 const sameGoal = (a: ThreadGoal, b: ThreadGoal) =>
   a.updatedAt === b.updatedAt && a.status === b.status && a.objective === b.objective && a.tokensUsed === b.tokensUsed && a.timeUsedSeconds === b.timeUsedSeconds;
 
-export function upsertThreads(provider: ProviderId, list: Thread[]) {
+export function upsertThreads(engine: EngineId, list: Thread[]) {
   useThreads.setState((s) => {
     const threads = { ...s.threads };
     const owner = { ...s.owner };
     for (const t of list) {
       threads[t.id] = mergeThread(threads[t.id], t);
-      owner[t.id] = provider;
+      owner[t.id] = engine;
     }
     return { threads, owner };
   });

@@ -3,12 +3,14 @@ import { AppWindow, FolderPlus, GitFork, LayoutGrid, MessageSquarePlus, PanelLef
 import { useUI, activeBoard, isThread } from "../state/ui";
 import { useThreads } from "../state/threads";
 import { useConn } from "../state/conn";
-import { buildProjects, flattenNode, spawnedBy, threadTitle } from "../state/projects";
+import { flattenNode, spawnedBy, threadTitle } from "../state/projects";
+import { useProjectTree } from "../state/projectTree";
 import { addProject, forkThread, newThread, openThread } from "../state/actions";
 import { timeAgo } from "../lib/format";
 import { StatusDot } from "./StatusDot";
 import { bridge, isDesktop } from "../bridge";
 import { fitAll, tidy } from "./canvas/viewport";
+import { hostName } from "../state/hosts";
 
 interface Entry {
   id: string;
@@ -59,21 +61,17 @@ function PaletteInner() {
   const [sel, setSel] = useState(0);
   const list = useRef<HTMLDivElement>(null);
   const threads = useThreads((s) => s.threads);
-  const workspaces = useThreads((s) => s.workspaces);
-  const projects = useUI((s) => s.projects);
-  const threadProject = useUI((s) => s.threadProject);
-  const checkouts = useUI((s) => s.checkouts);
+  const tree = useProjectTree();
   const close = () => useUI.setState({ paletteOpen: false });
 
   const entries = useMemo<Entry[]>(() => {
     const cur = currentThreadId();
     const curReal = cur && isThread(cur) ? cur : null;
-    const tree = buildProjects(threads, projects, threadProject, workspaces, checkouts);
     const commands: Entry[] = [
       ...tree.slice(0, 30).map((p) => ({
         id: `new:${p.key}`,
         kind: "command" as const,
-        title: `New thread in ${p.name}`,
+        title: `New thread in ${p.name}${p.host ? ` on ${hostName(p.host)}` : ""}`,
         sub: p.path,
         icon: <MessageSquarePlus size={14} />,
         run: () => newThread(p.key, p.path),
@@ -103,7 +101,8 @@ function PaletteInner() {
       { id: "settings", kind: "command", title: "Settings", icon: <Settings size={14} />, run: () => useUI.setState({ settingsOpen: true }) },
     ];
     const projectName = new Map<string, string>();
-    for (const p of tree) for (const r of p.roots) for (const t of flattenNode(r)) projectName.set(t.id, p.name);
+    // A paired device's projects are named with the device.
+    for (const p of tree) for (const r of p.roots) for (const t of flattenNode(r)) projectName.set(t.id, p.host ? `${p.name} on ${hostName(p.host)}` : p.name);
     const threadEntries: Entry[] = Object.values(threads)
       .sort((a, b) => (b.recencyAt ?? b.updatedAt) - (a.recencyAt ?? a.updatedAt))
       .map((t) => ({
@@ -115,7 +114,7 @@ function PaletteInner() {
         run: () => openThread(t.id),
       }));
     return [...threadEntries, ...commands];
-  }, [threads, projects, threadProject, workspaces, checkouts]);
+  }, [threads, tree]);
 
   const results = useMemo(() => {
     const query = q.trim().toLowerCase();

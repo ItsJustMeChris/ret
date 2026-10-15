@@ -4,10 +4,13 @@ import { IMAGE_SCHEME, imageType } from "../../shared/files";
 
 export { imageType };
 
-/** A URL the page can show a local image from (desktop only; the web build has no file access). */
-export function imageUrl(path: string, cwd?: string | null): string | null {
+/**
+ * A URL the page can show an image file from (desktop only; the web build has no file access):
+ * one on this computer, or on the paired device `host`.
+ */
+export function imageUrl(path: string, cwd?: string | null, host?: string | null): string | null {
   if (!isDesktop || !imageType(path)) return null;
-  return `${IMAGE_SCHEME}://local/${encodeURIComponent(resolvePath(path, cwd))}`;
+  return `${IMAGE_SCHEME}://${host || "local"}/${encodeURIComponent(resolvePath(path, cwd))}`;
 }
 
 export interface FileRef {
@@ -77,18 +80,18 @@ export const revealLabel =
  * Open a referenced file the way you'd expect: text/code in VS Code at the referenced line
  * (if installed), everything else with its default app. Programs are revealed, never run.
  */
-export async function openFileRef(ref: FileRef, cwd?: string | null) {
+export async function openFileRef(ref: FileRef, cwd?: string | null, host?: string | null) {
   const path = resolvePath(ref.path, cwd);
-  const st = await bridge.files.stat(path);
+  const st = await bridge.files.stat(path, host);
   if (!st.exists) {
     toast(`Not found: ${path}`, "error");
     return;
   }
-  if (!st.isDir && !NOT_TEXT.test(path) && (await bridge.editor.available())) {
-    await bridge.editor.open(path, ref.line, ref.col);
+  if (!st.isDir && !NOT_TEXT.test(path) && (await bridge.editor.available(host))) {
+    await bridge.editor.open(path, ref.line, ref.col, host);
     return;
   }
-  const err = await bridge.shell.openPath(path);
+  const err = await bridge.shell.openPath(path, host);
   if (err) toast(err, "error");
 }
 

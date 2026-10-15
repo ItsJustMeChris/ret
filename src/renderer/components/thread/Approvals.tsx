@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { FilePen, Globe, KeyRound, MessageCircleQuestion, ShieldAlert, SquareTerminal, Wrench } from "lucide-react";
+import { hostOf } from "@shared/bridge";
 import { type PendingRequest } from "../../state/threads";
 import { useThread } from "../../state/useThread";
 import { shallowEqual } from "../../lib/shallow";
-import { PROVIDERS } from "../../agents";
+import { agentOf } from "../../agents";
 import { respondToRequest } from "../../state/actions";
 import { bridge } from "../../bridge";
 import { Select } from "../ui/Select";
@@ -197,7 +198,7 @@ function UserInputCard({ req }: { req: PendingRequest }) {
       answers: Object.fromEntries(questions.map((q) => [q.id, { answers: values[q.id]?.trim() ? [values[q.id].trim()] : [] }])),
     });
   const single = questions.length === 1 && !!questions[0].options?.length && !questions[0].isOther;
-  const name = PROVIDERS[req.provider].name;
+  const name = agentOf(req.engine).name;
   return (
     <div className="approval asking">
       <div className="approval-title">
@@ -274,7 +275,8 @@ function PermissionAskCard({ req, compact }: { req: PendingRequest; compact?: bo
   });
   const details = displayParams(meta.tool_params_display).filter((d) => !(app && d.name === "app"));
   const [sure, setSure] = useState(false);
-  const what = app ? appLabel(app) : "this tool";
+  const host = hostOf(req.engine);
+  const what = app ? appLabel(app, null, host) : "this tool";
   const send = (action: "accept" | "decline" | "cancel", remember?: "session" | "always") =>
     respondToRequest(req.key, { action, content: action === "accept" ? {} : null, _meta: remember ? { persist: remember } : null });
   return (
@@ -282,7 +284,7 @@ function PermissionAskCard({ req, compact }: { req: PendingRequest; compact?: bo
       <div className="approval-title">
         {app ? (
           <>
-            <AppIcon use={app} size={16} /> Let {PROVIDERS[req.provider].name} use <AppName use={app} />?
+            <AppIcon use={app} host={host} size={16} /> Let {agentOf(req.engine).name} use <AppName use={app} host={host} />?
           </>
         ) : (
           <>
@@ -308,7 +310,7 @@ function PermissionAskCard({ req, compact }: { req: PendingRequest; compact?: bo
             ? [
                 {
                   label: sure ? `Click again to always allow ${what}` : `Always allow ${what}…`,
-                  hint: `${PROVIDERS[req.provider].name} remembers this and won't ask again, in later sessions too`,
+                  hint: `${agentOf(req.engine).name} remembers this and won't ask again, in later sessions too`,
                   onClick: () => (sure ? send("accept", "always") : setSure(true)),
                 },
               ]

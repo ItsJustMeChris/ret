@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Gauge, ListChecks, LoaderCircle, LogIn, Paperclip, Rocket, Settings2, Shield, ShieldAlert, ShieldCheck, Square, X, Zap } from "lucide-react";
-import type { ProviderId } from "@shared/bridge";
+import { engineId, hostOf, providerOf, type ProviderId } from "@shared/bridge";
 import { useThread } from "../../state/useThread";
 import { useUI, isDraft, type ComposerPrefs } from "../../state/ui";
-import { useConn, useEnabledProviders } from "../../state/conn";
+import { useConn, useEnabledProvidersOn } from "../../state/conn";
+import { hostName } from "../../state/hosts";
+import { hostOfKey } from "../../state/projects";
 import { interrupt, isWritingFinalAnswer, sendMessage, setDraftProvider, startLogin, type Attachment, type TurnOverrides } from "../../state/actions";
-import { PROVIDERS, accessFor, pickProvider } from "../../agents";
+import { PROVIDERS, accessFor, agentOf, pickProvider } from "../../agents";
 import { bridge, isDesktop } from "../../bridge";
 import { toast } from "../../state/toasts";
 import { Select, type SelectOption } from "../ui/Select";
@@ -117,18 +119,22 @@ export function Composer({
   const draft = isDraft(threadId);
   const owner = useThread(threadId, (s) => s.owner[threadId]);
   const chosen = useUI((s) => s.drafts[threadId]?.provider);
+  const draftProject = useUI((s) => s.drafts[threadId]?.projectKey);
   const lastAgent = useUI((s) => s.lastAgent);
-  const enabled = useEnabledProviders();
-  const provider: ProviderId = draft ? pickProvider(enabled, chosen, lastAgent) : (owner ?? "codex");
+  // The device it runs on: the draft's project's, or the thread's engine's. Its agents, models and sign-in are that device's.
+  const host = draft ? (draftProject ? hostOfKey(draftProject) : null) : owner ? hostOf(owner) : null;
+  const enabled = useEnabledProvidersOn(host);
+  const provider: ProviderId = draft ? pickProvider(enabled, chosen, lastAgent) : providerOf(owner ?? "codex");
+  const engine = engineId(provider, host);
   const agent = PROVIDERS[provider];
   const needsSignIn = useConn((s) => {
-    const c = s.providers[provider];
-    return c.status?.state === "running" && c.accountLoaded && !c.account?.account && !!c.account?.requiresOpenaiAuth;
+    const c = s.providers[engine];
+    return !!c && c.status?.state === "running" && c.accountLoaded && !c.account?.account && !!c.account?.requiresOpenaiAuth;
   });
   // What the thread actually runs with, once its engine has said (see hydrateThread).
   const threadAccess = useThread(threadId, (s) => {
     const st = s.live[threadId]?.settings;
-    return st ? (st.access ?? PROVIDERS[s.owner[threadId] ?? "codex"].accessOf?.(st.approvalPolicy, st.sandbox) ?? null) : null;
+    return st ? (st.access ?? agentOf(s.owner[threadId] ?? "codex").accessOf?.(st.approvalPolicy, st.sandbox) ?? null) : null;
   });
   const threadModel = useThread(threadId, (s) => s.live[threadId]?.settings?.model ?? s.threads[threadId]?.model ?? null);
   const threadEffort = useThread(threadId, (s) => s.live[threadId]?.settings?.effort ?? s.threads[threadId]?.reasoningEffort ?? null);
@@ -138,10 +144,11 @@ export function Composer({
     return st ? (st.serviceTier ?? "default") : undefined;
   });
   const conns = useConn((s) => s.providers);
-  const models = conns[provider].models;
-  const hasModes = useConn((s) => s.providers[provider].modes.some((m) => m.mode === "plan"));
+  const modelsOf = (p: ProviderId) => conns[engineId(p, host)]?.models ?? [];
+  const models = modelsOf(provider);
+  const hasModes = useConn((s) => !!s.providers[engine]?.modes.some((m) => m.mode === "plan"));
   const threadMode = useThread(threadId, (s) => s.live[threadId]?.settings?.mode ?? null);
-  const configTier = useConn((s) => s.providers[provider].defaults.serviceTier);
+  const configTier = useConn((s) => s.providers[engine]?.defaults.serviceTier ?? null);
   // New threads start from the last-used settings for their agent; existing threads from their own.
   const [over, setOver] = useState<TurnOverrides>(() => overrides.get(threadId) ?? (draft ? lastUsed(provider) : {}));
   const setPrefs = (patch: TurnOverrides) => {
@@ -355,10 +362,10 @@ export function Composer({
   }
 
   // A new thread lists every agent's models (picking one picks the agent); a thread keeps to its own agent's.
-  const pickable = draft ? enabled.filter((p) => p === provider || conns[p].models.length) : [provider];
+  const pickable = draft ? enabled.filter((p) => p === provider || modelsOf(p).length) : [provider];
   const grouped = pickable.length > 1;
   const modelOptions: SelectOption[] = pickable.flatMap((p) => {
-    const opts: SelectOption[] = conns[p].models.map((m) => ({ value: modelKey(p, m.id), label: m.displayName || m.id, description: m.description || undefined }));
+    const opts: SelectOption[] = modelsOf(p).map((m) => ({ value: modelKey(p, m.id), label: m.displayName || m.id, description: m.description || undefined }));
     if (p === provider && currentModel && !modelInfo) opts.unshift({ value: modelKey(p, currentModel), label: currentModel });
     return grouped ? opts.map((o) => ({ ...o, group: PROVIDERS[p].name })) : opts;
   });
@@ -404,10 +411,19 @@ export function Composer({
       {needsSignIn && (
         <div className="composer-elsewhere">
           <LogIn size={12} />
-          <span>Sign in to {agent.name} to send this.</span>
-          <button className="link small" onClick={() => void startLogin(provider)}>
-            Sign in
-          </button>
+          {host ? (
+            // Signing in happens where the agent runs.
+            <span>
+              Sign in to {agent.name} on {hostName(host)} to send this.
+            </span>
+          ) : (
+            <>
+              <span>Sign in to {agent.name} to send this.</span>
+              <button className="link small" onClick={() => void startLogin(provider)}>
+                Sign in
+              </button>
+            </>
+          )}
         </div>
       )}
       {attachments.length > 0 && (

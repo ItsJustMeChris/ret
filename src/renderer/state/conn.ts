@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { AppUpdateState, EngineStatus, ProviderId, ProvidersSettings, UpdaterState } from "@shared/bridge";
-import { PROVIDER_IDS } from "@shared/bridge";
+import type { AppUpdateState, EngineId, EngineStatus, ProviderId, ProvidersSettings, UpdaterState } from "@shared/bridge";
+import { PROVIDER_IDS, engineId } from "@shared/bridge";
 import type { Account, GetAccountRateLimitsResponse, InitializeResponse, Model } from "@shared/protocol";
 
 export interface LoginFlow {
@@ -41,7 +41,11 @@ export interface ProviderConn {
 }
 
 export interface ConnState {
-  providers: Record<ProviderId, ProviderConn>;
+  /**
+   * By engine: this computer's under their provider ("codex", always there), paired devices'
+   * as "codex@<host>" (while the device is paired).
+   */
+  providers: Record<EngineId, ProviderConn>;
   /** Which providers are on, the default for new threads, where Claude Code lives. */
   settings: ProvidersSettings | null;
   /** Codex's self-updater (its managed copy). */
@@ -70,21 +74,51 @@ export const useConn = create<ConnState>(() => ({
   appUpdate: null,
 }));
 
-export function patchProvider(provider: ProviderId, patch: Partial<ProviderConn> | ((c: ProviderConn) => Partial<ProviderConn>)) {
+export function patchProvider(engine: EngineId, patch: Partial<ProviderConn> | ((c: ProviderConn) => Partial<ProviderConn>)) {
   useConn.setState((s) => {
-    const cur = s.providers[provider];
-    return { providers: { ...s.providers, [provider]: { ...cur, ...(typeof patch === "function" ? patch(cur) : patch) } } };
+    const cur = s.providers[engine] ?? emptyProviderConn();
+    return { providers: { ...s.providers, [engine]: { ...cur, ...(typeof patch === "function" ? patch(cur) : patch) } } };
   });
 }
 
-/** One provider's slice of the connection state. */
-export function useProvider<T>(provider: ProviderId, select: (c: ProviderConn) => T): T {
-  return useConn((s) => select(s.providers[provider]));
+/** A paired device's engine went away with it. */
+export function dropProvider(engine: EngineId) {
+  useConn.setState((s) => {
+    if (!s.providers[engine]) return s;
+    const providers = { ...s.providers };
+    delete providers[engine];
+    return { providers };
+  });
+}
+
+const NO_CONN = emptyProviderConn();
+
+/** One engine's slice of the connection state (an empty one for an engine not heard from). */
+export function useProvider<T>(engine: EngineId, select: (c: ProviderConn) => T): T {
+  return useConn((s) => select(s.providers[engine] ?? NO_CONN));
 }
 
 /** Providers turned on in Settings (all of them until settings load). */
 export function enabledProviders(s: ConnState = useConn.getState()): ProviderId[] {
   return PROVIDER_IDS.filter((p) => s.settings?.enabled[p] ?? true);
+}
+
+/**
+ * Agents on a device: this computer's per Settings, a paired device's as its engines report
+ * (all of them until they do).
+ */
+export function enabledProvidersOn(host: string | null, s: ConnState = useConn.getState()): ProviderId[] {
+  if (!host) return enabledProviders(s);
+  return PROVIDER_IDS.filter((p) => {
+    const st = s.providers[engineId(p, host)]?.status?.state;
+    return st !== "disabled" && st !== "missing";
+  });
+}
+
+/** The agents on a device (see enabledProvidersOn), kept current. */
+export function useEnabledProvidersOn(host: string | null): ProviderId[] {
+  const key = useConn((s) => enabledProvidersOn(host, s).join(","));
+  return key ? (key.split(",") as ProviderId[]) : [];
 }
 
 export function useEnabledProviders(): ProviderId[] {

@@ -10,7 +10,9 @@ import { threadTitle } from "../state/projects";
 import { plainText, sinceWhen } from "../lib/format";
 import { backgroundLabel, STATE_LABEL, useBackgroundOnly, useRunsElsewhere, useThreadState } from "./StatusDot";
 import type { EngineStatus, ProviderId, UpdaterState } from "../../shared/bridge";
-import { PROVIDERS } from "../agents";
+import { PROVIDERS, agentOf } from "../agents";
+import { hostOfView } from "../state/projectTree";
+import { hostName } from "../state/hosts";
 
 const DELAY = 500;
 /** After a card closes, moving onto another card target within this window shows it at once. */
@@ -24,7 +26,7 @@ type Card =
   | { kind: "thread"; id: string; forks: number }
   | { kind: "engine"; provider: ProviderId }
   | { kind: "url"; href: string; note: string | null }
-  | { kind: "file"; path: string; line?: number; col?: number; cwd: string | null; clickable: boolean };
+  | { kind: "file"; path: string; line?: number; col?: number; cwd: string | null; host: string | null; clickable: boolean };
 
 /** What card, if any, an element under the pointer should show. */
 function classify(el: HTMLElement): Card | null {
@@ -33,7 +35,8 @@ function classify(el: HTMLElement): Card | null {
   const cwd = el.closest("[data-cwd]")?.getAttribute("data-cwd") ?? null;
   if (el.dataset.path) {
     const n = (v?: string) => Number(v) || undefined;
-    return { kind: "file", path: el.dataset.path, line: n(el.dataset.line), col: n(el.dataset.col), cwd, clickable: el.matches("a.file-link") || (!!el.closest(".transcript") && !el.closest(".thread-img")) };
+    const host = hostOfView(el.closest("[data-thread]")?.getAttribute("data-thread"));
+    return { kind: "file", path: el.dataset.path, line: n(el.dataset.line), col: n(el.dataset.col), cwd, host, clickable: el.matches("a.file-link") || (!!el.closest(".transcript") && !el.closest(".thread-img")) };
   }
   const href = el.getAttribute("href");
   if (el.tagName === "A" && href && /^(https?:|mailto:)/i.test(href)) {
@@ -44,7 +47,7 @@ function classify(el: HTMLElement): Card | null {
   if (el.tagName === "CODE" && !el.closest("pre")) {
     const text = el.textContent ?? "";
     const ref = looksLikePath(text) ? parseFileRef(text) : null;
-    if (ref) return { kind: "file", ...ref, cwd, clickable: false };
+    if (ref) return { kind: "file", ...ref, cwd, host: hostOfView(el.closest("[data-thread]")?.getAttribute("data-thread")), clickable: false };
   }
   return null;
 }
@@ -242,18 +245,18 @@ function relativeDir(dir: string, cwd: string | null): string | null {
   return null;
 }
 
-function FileCard({ path, line, col, cwd, clickable }: { path: string; line?: number; col?: number; cwd: string | null; clickable: boolean }) {
+function FileCard({ path, line, col, cwd, host, clickable }: { path: string; line?: number; col?: number; cwd: string | null; host: string | null; clickable: boolean }) {
   const abs = resolvePath(path, cwd);
   // What's actually there decides what a click does (desktop only: the web build can't look).
   const [info, setInfo] = useState<{ exists: boolean; isDir: boolean; editor: boolean } | null>(null);
   useEffect(() => {
     if (!isDesktop) return;
     let live = true;
-    void Promise.all([bridge.files.stat(abs), bridge.editor.available()]).then(([st, editor]) => live && setInfo({ ...st, editor }));
+    void Promise.all([bridge.files.stat(abs, host), bridge.editor.available(host)]).then(([st, editor]) => live && setInfo({ ...st, editor }));
     return () => {
       live = false;
     };
-  }, [abs]);
+  }, [abs, host]);
 
   const name = basename(abs);
   const dirPath = abs.slice(0, abs.length - name.length).replace(/[\\/]+$/, "");
@@ -267,7 +270,9 @@ function FileCard({ path, line, col, cwd, clickable }: { path: string; line?: nu
   // with their app (programs are only ever revealed).
   const external = info?.editor && !NOT_TEXT.test(name) ? "VS Code" : "its app";
   let action: string;
-  if (!clickable) action = `Right-click to view, open, ${reveal} or copy`;
+  // A paired device's file: Ret can show it, but this computer's apps can't open it.
+  if (host) action = isDir ? `In a folder on ${hostName(host)}` : clickable ? `Click to view${line ? ` at line ${line}` : ""} · on ${hostName(host)}` : `On ${hostName(host)}: right-click to view or copy`;
+  else if (!clickable) action = `Right-click to view, open, ${reveal} or copy`;
   else if (isDir) action = `Click to open the folder · Alt+click to ${reveal}`;
   else if (RUNNABLE.test(name) && NOT_TEXT.test(name)) action = `Click to ${reveal} (programs are never run)`;
   else if (NOT_TEXT.test(name)) action = `Click to open · Alt+click to ${reveal}`;
@@ -333,7 +338,7 @@ function ThreadCard({ id, forks }: { id: string; forks: number }) {
   // An unnamed thread's title is just its first message, so the message alone leads.
   const named = !!t.name?.trim();
   const preview = previewText(t.preview ?? "");
-  const status = elsewhere ? `Running in another ${PROVIDERS[owner].name} app` : background && state === "running" ? backgroundLabel(background) : state === "idle" ? null : STATE_LABEL[state];
+  const status = elsewhere ? `Running in another ${agentOf(owner).name} app` : background && state === "running" ? backgroundLabel(background) : state === "idle" ? null : STATE_LABEL[state];
   const origin = originLabel(t.originator, t.source);
   const branch = t.gitInfo?.branch;
   const meta = [status, `Updated ${sinceWhen(t.updatedAt)}`, origin].filter(Boolean);

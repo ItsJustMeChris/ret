@@ -1,11 +1,25 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, Notification, protocol, shell, screen } from "electron";
+import type { BrowserWindowConstructorOptions, WebPreferences } from "electron";
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import { tmpdir } from "node:os";
-import { IPC, type EditCommand, type ProviderId, type ProvidersSettings, type ProvidersSettingsPatch, type UpdaterSettings } from "../shared/bridge";
+import {
+  IPC,
+  PROVIDER_IDS,
+  hostOf,
+  providerOf,
+  type AppInfo,
+  type EditCommand,
+  type EngineId,
+  type EngineStatus,
+  type ProviderId,
+  type ProvidersSettings,
+  type ProvidersSettingsPatch,
+  type UpdaterSettings,
+} from "../shared/bridge";
 import { IMAGE_SCHEME, RUNNABLE, imageType } from "../shared/files";
 import { AppServer, type LaunchTarget } from "./codex/appServer";
 import { CodexUpdater } from "./codex/updater";
@@ -15,6 +29,7 @@ import { ClaudeEngine } from "./claude/engine";
 import { findSystemClaude, openLoginTerminal, probeClaudeVersion } from "./claude/platform";
 import { ClaudeUpdater } from "./claude/updater";
 import { createWorktree, gitInfo, mainCheckouts } from "./git";
+import { AgentMux, RemoteAccess, type HostCalls, type MuxClient } from "./remote";
 import { appInfo } from "./apps";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
@@ -25,15 +40,39 @@ const isDev = !!process.env.VITE_DEV_SERVER_URL;
 protocol.registerSchemesAsPrivileged([{ scheme: IMAGE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 const IMAGE_MAX_BYTES = 64 * 1024 * 1024;
 
+/** An image file for ret-img://, or the HTTP status to answer with instead. */
+async function readImage(path: string): Promise<{ type: string; data: Buffer<ArrayBuffer> } | number> {
+  const type = imageType(path);
+  if (!type || !isAbsolute(path)) return 403;
+  try {
+    const st = await stat(path);
+    if (!st.isFile() || st.size > IMAGE_MAX_BYTES) return 404;
+    return { type, data: await readFile(path) };
+  } catch {
+    return 404;
+  }
+}
+
+const imageResponse = (type: string, data: Buffer<ArrayBuffer>) => new Response(data, { headers: { "content-type": type, "cache-control": "no-cache" } });
+
+/**
+ * ret-img://local/<path> is a file here; ret-img://<host key>/<path> one on a paired device,
+ * fetched over its link (with the same checks on that side).
+ */
 function serveImages() {
   protocol.handle(IMAGE_SCHEME, async (req) => {
     try {
-      const path = decodeURIComponent(new URL(req.url).pathname.slice(1));
-      const type = imageType(path);
-      if (!type || !isAbsolute(path)) return new Response(null, { status: 403 });
-      const st = await stat(path);
-      if (!st.isFile() || st.size > IMAGE_MAX_BYTES) return new Response(null, { status: 404 });
-      return new Response(await readFile(path), { headers: { "content-type": type, "cache-control": "no-cache" } });
+      const url = new URL(req.url);
+      const path = decodeURIComponent(url.pathname.slice(1));
+      if (url.hostname !== "local") {
+        const type = imageType(path);
+        const link = remote?.linkFor(url.hostname);
+        if (!type || !link) return new Response(null, { status: type ? 404 : 403 });
+        const data: string | null = await link.call("image", path);
+        return data ? imageResponse(type, Buffer.from(data, "base64")) : new Response(null, { status: 404 });
+      }
+      const r = await readImage(path);
+      return typeof r === "number" ? new Response(null, { status: r }) : imageResponse(r.type, r.data);
     } catch {
       return new Response(null, { status: 404 });
     }
@@ -79,17 +118,52 @@ const send = (channel: string, payload: unknown) => {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 };
 
+// Every window talks to the engines through a mux: this computer's window, and other devices'
+// through remote access. Each gets its own request ids, generations and thread subscriptions.
+const muxes = {} as Record<ProviderId, AgentMux>;
+
 const appServer = new AppServer(
-  (lines) => send(IPC.agentMessages, { provider: "codex", lines }),
-  (status) => send(IPC.agentStatus, status),
+  (lines) => muxes.codex.fromEngine(lines),
+  (status) => muxes.codex.setEngineStatus(status),
 );
 
 const claude = new ClaudeEngine(
   join(userData, "claude-state.json"),
   app.getVersion(),
-  (lines) => send(IPC.agentMessages, { provider: "claude", lines }),
-  (status) => send(IPC.agentStatus, status),
+  (lines) => muxes.claude.fromEngine(lines),
+  (status) => muxes.claude.setEngineStatus(status),
 );
+
+muxes.codex = new AgentMux((line) => appServer.send(line), true, appServer.status);
+muxes.claude = new AgentMux((line) => claude.send(line), false, claude.status);
+
+/** This computer's window, as a client of each engine's mux. */
+const localClients = Object.fromEntries(
+  PROVIDER_IDS.map((provider) => [
+    provider,
+    { deliver: (lines) => send(IPC.agentMessages, { engine: provider, lines }), status: (status) => send(IPC.agentStatus, status) } satisfies MuxClient,
+  ]),
+) as Record<ProviderId, MuxClient>;
+for (const p of PROVIDER_IDS) muxes[p].attach(localClients[p]);
+
+let remote!: RemoteAccess;
+
+/** The link for a call about a paired device's engines or files (by its host key); null for this computer's. */
+/** An app's name and icon as a paired device sent them: only a short name and a PNG data URL get through. */
+function appInfoFrom(v: unknown): AppInfo {
+  const o = (v ?? {}) as { name?: unknown; icon?: unknown };
+  return {
+    name: typeof o.name === "string" ? o.name.slice(0, 200) : null,
+    icon: typeof o.icon === "string" && o.icon.startsWith("data:image/png;base64,") && o.icon.length < 512 * 1024 ? o.icon : null,
+  };
+}
+
+function linkTo(host: string | null | undefined) {
+  if (!host) return null;
+  const link = remote.linkFor(host);
+  if (!link) throw new Error("That device isn't paired any more");
+  return link;
+}
 
 const claudeUpdater = new ClaudeUpdater({
   binary: () => claude.status.binaryPath,
@@ -134,6 +208,7 @@ async function setProviders(patch: ProvidersSettingsPatch): Promise<ProvidersSet
   };
   await writeFile(providersFile, JSON.stringify(providers, null, 2));
   send(IPC.providersState, providers);
+  remote?.broadcastProviders(providers);
   if (prev.enabled.codex !== providers.enabled.codex) {
     if (providers.enabled.codex) void bootCodex();
     else {
@@ -236,7 +311,7 @@ async function doLaunch(target: LaunchTarget | null, restart: boolean) {
     void probeVersion(target.binary).then((version) => {
       if (appServer.status.binaryPath !== target.binary) return;
       appServer.status = { ...appServer.status, version };
-      send(IPC.agentStatus, appServer.status);
+      muxes.codex.setEngineStatus(appServer.status);
       updater.setRunning(version, target.source === "managed");
     });
   }
@@ -291,14 +366,20 @@ async function bootCodex() {
 }
 
 /**
- * A renderer reload starts a fresh JSON-RPC client, but codex only accepts one
- * `initialize` per connection — so give every page load after the first a new connection.
+ * A renderer reload starts a fresh JSON-RPC client. The engines stay up (other devices may be
+ * using them, and turns keep running): the window gets a new generation from each mux, which
+ * hands it Codex's cached `initialize` (codex takes only one per connection).
  */
 let pageLoads = 0;
-async function onPageLoad() {
+function onPageLoad() {
   if (++pageLoads === 1) return;
-  claude.reconnect();
-  if (providers.enabled.codex) await launch(await resolveTarget(), true);
+  for (const p of PROVIDER_IDS) muxes[p].reset(localClients[p]);
+  remote?.resetLinks();
+}
+
+async function restartProvider(provider: ProviderId) {
+  if (provider === "claude") return bootClaude();
+  if (providers.enabled.codex) return launch(await resolveTarget(), true);
 }
 
 function loadWindowState() {
@@ -324,13 +405,11 @@ function devIcon(file: string): string | undefined {
   return existsSync(p) ? p : undefined;
 }
 
-function createWindow() {
-  const saved = loadWindowState();
-  win = new BrowserWindow({
-    width: saved?.width ?? 1480,
-    height: saved?.height ?? 940,
-    x: saved?.x,
-    y: saved?.y,
+/** How every Ret window looks and runs; `prefs` adds to its webPreferences. */
+function windowOptions(opts: BrowserWindowConstructorOptions, prefs: WebPreferences = {}): BrowserWindowConstructorOptions {
+  return {
+    width: 1480,
+    height: 940,
     minWidth: 720,
     minHeight: 480,
     show: false,
@@ -339,6 +418,7 @@ function createWindow() {
     titleBarStyle: "hidden",
     titleBarOverlay: process.platform === "darwin" ? undefined : { color: "#00000000", symbolColor: "#a1a1aa", height: 38 },
     trafficLightPosition: { x: 14, y: 12 },
+    ...opts,
     webPreferences: {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,
@@ -347,21 +427,47 @@ function createWindow() {
       spellcheck: true,
       backgroundThrottling: false,
       additionalArguments: [`--ret-version=${app.getVersion()}`],
+      ...prefs,
     },
+  };
+}
+
+/** What every window needs: its own spellcheck suggestions, links out to the browser, a reload after a crash. */
+function wireWindow(w: BrowserWindow) {
+  // The renderer draws its own context menus; it only needs the spellchecker's view of the click.
+  w.webContents.on("context-menu", (_e, params) => {
+    if (params.isEditable && params.misspelledWord) {
+      w.webContents.send(IPC.spelling, { word: params.misspelledWord, suggestions: params.dictionarySuggestions.slice(0, 5) });
+    }
   });
+  w.webContents.on("render-process-gone", (_e, details) => {
+    if (details.reason !== "clean-exit" && !w.isDestroyed()) w.webContents.reload();
+  });
+  w.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  w.webContents.on("will-navigate", (e, url) => {
+    const devUrl = process.env.VITE_DEV_SERVER_URL;
+    if (devUrl && url.startsWith(devUrl)) return;
+    e.preventDefault();
+    if (/^https?:/i.test(url)) void shell.openExternal(url);
+  });
+}
+
+function loadRenderer(w: BrowserWindow) {
+  if (isDev) void w.loadURL(process.env.VITE_DEV_SERVER_URL!);
+  else void w.loadFile(join(__dirname, "../renderer/index.html"));
+}
+
+function createWindow() {
+  const saved = loadWindowState();
+  win = new BrowserWindow(windowOptions({ width: saved?.width ?? 1480, height: saved?.height ?? 940, x: saved?.x, y: saved?.y }));
   if (saved?.maximized) win.maximize();
 
   win.once("ready-to-show", () => win?.show());
-  win.webContents.on("did-finish-load", () => void onPageLoad());
-  // The renderer draws its own context menus; it only needs the spellchecker's view of the click.
-  win.webContents.on("context-menu", (_e, params) => {
-    if (params.isEditable && params.misspelledWord) {
-      send(IPC.spelling, { word: params.misspelledWord, suggestions: params.dictionarySuggestions.slice(0, 5) });
-    }
-  });
-  win.webContents.on("render-process-gone", (_e, details) => {
-    if (details.reason !== "clean-exit") win?.webContents.reload();
-  });
+  win.webContents.on("did-finish-load", () => onPageLoad());
+  wireWindow(win);
 
   const persist = () => {
     if (!win || win.isDestroyed()) return;
@@ -370,19 +476,7 @@ function createWindow() {
   };
   win.on("close", persist);
 
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/i.test(url)) void shell.openExternal(url);
-    return { action: "deny" };
-  });
-  win.webContents.on("will-navigate", (e, url) => {
-    const devUrl = process.env.VITE_DEV_SERVER_URL;
-    if (devUrl && url.startsWith(devUrl)) return;
-    e.preventDefault();
-    if (/^https?:/i.test(url)) void shell.openExternal(url);
-  });
-
-  if (isDev) void win.loadURL(process.env.VITE_DEV_SERVER_URL!);
-  else void win.loadFile(join(__dirname, "../renderer/index.html"));
+  loadRenderer(win);
 
   // Diagnostics: RET_EVAL=<js> runs an expression in the page after load and prints the result.
   const evalSrc = process.env.RET_EVAL;
@@ -410,12 +504,59 @@ function createWindow() {
   }
 }
 
+const statPath = async (p: string) => {
+  try {
+    const st = await stat(p);
+    return { exists: true, isDir: st.isDirectory(), size: st.size };
+  } catch {
+    return { exists: false, isDir: false, size: 0 };
+  }
+};
+
+async function saveImage(data: Buffer, ext: string) {
+  const dir = join(tmpdir(), "ret-images");
+  await mkdir(dir, { recursive: true });
+  const file = join(dir, `${randomUUID()}.${ext.replace(/[^a-z0-9]/gi, "") || "png"}`);
+  await writeFile(file, data);
+  return file;
+}
+
+/** What a paired device can ask of this one besides the engines' JSON-RPC. */
+const hostCalls: HostCalls = {
+  "agents.restart": (provider: unknown) => (PROVIDER_IDS.includes(provider as ProviderId) ? restartProvider(provider as ProviderId) : undefined),
+  "git.info": (p: unknown) => gitInfo(String(p)),
+  "git.mainCheckouts": (cwds: unknown) => mainCheckouts(Array.isArray(cwds) ? cwds.map(String) : []),
+  "git.createWorktree": (cwd: unknown, label: unknown) => createWorktree(join(userData, "worktrees"), String(cwd), String(label)),
+  "files.stat": (p: unknown) => statPath(String(p)),
+  "files.saveImage": (data: unknown, ext: unknown) => saveImage(Buffer.from(String(data), "base64"), String(ext)),
+  "apps.info": (appId: unknown) => appInfo(appId),
+  image: async (p: unknown) => {
+    const r = await readImage(String(p));
+    return typeof r === "number" ? null : r.data.toString("base64");
+  },
+};
+
 function registerIpc() {
-  ipcMain.on(IPC.agentSend, (_e, provider: ProviderId, line: string) => (provider === "claude" ? claude.send(line) : appServer.send(line)));
-  ipcMain.handle(IPC.agentGetStatus, (_e, provider: ProviderId) => (provider === "claude" ? claude.status : appServer.status));
-  ipcMain.handle(IPC.agentRestart, async (_e, provider: ProviderId) => {
-    if (provider === "claude") return bootClaude();
-    if (providers.enabled.codex) return launch(await resolveTarget(), true);
+  // A paired device's engines (and files, git) are reached through its link; this computer's through the muxes.
+  ipcMain.on(IPC.agentSend, (_e, engine: EngineId, line: string) => {
+    const host = hostOf(engine);
+    const provider = providerOf(engine);
+    if (host) remote.linkFor(host)?.send(provider, line);
+    else if (muxes[provider]) muxes[provider].fromClient(localClients[provider], line);
+  });
+  ipcMain.handle(IPC.agentGetStatus, (_e, engine: EngineId): EngineStatus => {
+    const host = hostOf(engine);
+    const provider = providerOf(engine);
+    if (!host) return muxes[provider].statusFor(localClients[provider]);
+    // A view still showing a device that was just forgotten: say so rather than fail.
+    const link = remote.linkFor(host);
+    return link
+      ? link.status(provider)
+      : { provider, host, state: "error", generation: 0, version: null, binaryPath: null, source: null, engine: "dedicated", error: "That device isn't paired any more", stderrTail: [] };
+  });
+  ipcMain.handle(IPC.agentRestart, (_e, engine: EngineId) => {
+    const link = linkTo(hostOf(engine));
+    return link ? link.call("agents.restart", providerOf(engine)) : restartProvider(providerOf(engine));
   });
   ipcMain.handle(IPC.agentUpdate, (_e, provider: ProviderId) => {
     if (provider === "claude") return claudeUpdater.check({ install: true });
@@ -463,7 +604,8 @@ function registerIpc() {
   ipcMain.handle(IPC.openExternal, (_e, url: string) => {
     if (/^(https?|mailto):/i.test(url)) return shell.openExternal(url);
   });
-  ipcMain.handle(IPC.openPath, async (_e, p: string) => {
+  ipcMain.handle(IPC.openPath, async (_e, p: string, host?: string | null) => {
+    if (host) return `That file is on ${remote.state().hosts.find((h) => h.key === host)?.name ?? "another device"}.`;
     // Never launch programs from a link in a transcript; show them instead.
     if (RUNNABLE.test(p)) {
       shell.showItemInFolder(p);
@@ -471,23 +613,26 @@ function registerIpc() {
     }
     return shell.openPath(p);
   });
-  ipcMain.handle(IPC.reveal, (_e, p: string) => shell.showItemInFolder(p));
-  ipcMain.handle(IPC.stat, async (_e, p: string) => {
-    try {
-      const st = await stat(p);
-      return { exists: true, isDir: st.isDirectory(), size: st.size };
-    } catch {
-      return { exists: false, isDir: false, size: 0 };
-    }
+  ipcMain.handle(IPC.reveal, (_e, p: string, host?: string | null) => {
+    if (!host) shell.showItemInFolder(p);
   });
-  ipcMain.handle(IPC.editorAvailable, () => vscodeInstalled());
-  ipcMain.handle(IPC.editorOpen, (_e, p: string, line?: number, col?: number) => {
+  ipcMain.handle(IPC.stat, (_e, p: string, host?: string | null) => {
+    const link = linkTo(host);
+    return link ? link.call("files.stat", p) : statPath(p);
+  });
+  // VS Code here can't open another device's files.
+  ipcMain.handle(IPC.editorAvailable, (_e, host?: string | null) => (host ? false : vscodeInstalled()));
+  ipcMain.handle(IPC.editorOpen, (_e, p: string, line?: number, col?: number, host?: string | null) => {
+    if (host) return;
     const target = p.replace(/\\/g, "/");
     const loc = line ? `:${line}${col ? `:${col}` : ""}` : "";
     return shell.openExternal(`vscode://file${target.startsWith("/") ? "" : "/"}${encodeURI(target)}${loc}`);
   });
   ipcMain.handle(IPC.copy, (_e, text: string) => clipboard.writeText(String(text)));
-  ipcMain.handle(IPC.appInfo, (_e, appId: unknown) => appInfo(appId));
+  ipcMain.handle(IPC.appInfo, async (_e, appId: unknown, host?: string | null) => {
+    const link = linkTo(host);
+    return link ? appInfoFrom(await link.call("apps.info", appId)) : appInfo(appId);
+  });
   ipcMain.on(IPC.edit, (e, command: EditCommand, arg?: string) => {
     const wc = e.sender;
     switch (command) {
@@ -508,16 +653,23 @@ function registerIpc() {
     }
   });
 
-  ipcMain.handle(IPC.gitInfo, (_e, p: string) => gitInfo(p));
-  ipcMain.handle(IPC.gitCheckouts, (_e, cwds: string[]) => mainCheckouts(cwds));
-  ipcMain.handle(IPC.gitWorktree, (_e, cwd: string, label: string) => createWorktree(join(userData, "worktrees"), cwd, label));
+  ipcMain.handle(IPC.gitInfo, (_e, p: string, host?: string | null) => {
+    const link = linkTo(host);
+    return link ? link.call("git.info", p) : gitInfo(p);
+  });
+  ipcMain.handle(IPC.gitCheckouts, (_e, cwds: string[], host?: string | null) => {
+    const link = linkTo(host);
+    return link ? link.call("git.mainCheckouts", cwds) : mainCheckouts(cwds);
+  });
+  ipcMain.handle(IPC.gitWorktree, (_e, cwd: string, label: string, host?: string | null) => {
+    const link = linkTo(host);
+    return link ? link.call("git.createWorktree", cwd, label) : createWorktree(join(userData, "worktrees"), cwd, label);
+  });
 
-  ipcMain.handle(IPC.saveImage, async (_e, data: ArrayBuffer, ext: string) => {
-    const dir = join(tmpdir(), "ret-images");
-    await mkdir(dir, { recursive: true });
-    const file = join(dir, `${randomUUID()}.${ext.replace(/[^a-z0-9]/gi, "") || "png"}`);
-    await writeFile(file, Buffer.from(data));
-    return file;
+  // Pasted images go where the agent that reads them runs.
+  ipcMain.handle(IPC.saveImage, (_e, data: ArrayBuffer, ext: string, host?: string | null) => {
+    const link = linkTo(host);
+    return link ? link.call("files.saveImage", Buffer.from(data).toString("base64"), ext) : saveImage(Buffer.from(data), ext);
   });
 
   ipcMain.on(IPC.setTheme, (_e, theme: "dark" | "light") => {
@@ -537,6 +689,16 @@ function registerIpc() {
     });
     n.show();
   });
+
+  ipcMain.handle(IPC.remoteGet, () => remote.state());
+  ipcMain.handle(IPC.remoteSetHosting, (_e, on: boolean) => remote.setHosting(!!on));
+  ipcMain.handle(IPC.remoteSetName, (_e, name: string) => remote.setName(String(name)));
+  ipcMain.handle(IPC.remotePairStart, () => remote.startPairing());
+  ipcMain.handle(IPC.remotePairStop, () => remote.stopPairing());
+  ipcMain.handle(IPC.remoteRevoke, (_e, id: string) => remote.revoke(String(id)));
+  ipcMain.handle(IPC.remotePair, (_e, target: { address: string; port: number }, code: string) => remote.pair(target, String(code)));
+  ipcMain.handle(IPC.remoteForget, (_e, id: string) => remote.forget(String(id)));
+  ipcMain.on(IPC.remoteDiscover, () => remote.discover());
 }
 
 function installMenu() {
@@ -555,9 +717,23 @@ app.whenReady().then(() => {
   const dock = process.platform === "darwin" ? devIcon("icon.png") : undefined;
   if (dock) app.dock?.setIcon(dock);
   installMenu();
+  // Needs the app ready: the device key is sealed with the OS's encryption.
+  remote = new RemoteAccess({
+    userData,
+    muxes,
+    providers: () => providers,
+    calls: hostCalls,
+    state: (state) => send(IPC.remoteState, state),
+    notify: (title, body) => {
+      if (Notification.isSupported()) new Notification({ title, body }).show();
+    },
+    engineLines: (engine, lines) => send(IPC.agentMessages, { engine, lines }),
+    engineStatus: (status) => send(IPC.agentStatus, status),
+  });
   registerIpc();
   createWindow();
   void boot();
+  void remote.init();
   appUpdate.schedule();
 });
 
@@ -576,5 +752,5 @@ app.on("before-quit", (e) => {
   e.preventDefault();
   claudeUpdater.stop();
   claude.stop();
-  void appServer.stop().finally(() => app.quit());
+  void Promise.all([appServer.stop(), remote?.shutdown()]).finally(() => app.quit());
 });
