@@ -120,9 +120,9 @@ export class ClaudeSession {
   private input: Inbox<SDKUserMessage> | null = null;
   turn: LiveTurn | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
-  /** Settings the running process has (so changes are pushed only when they differ). */
   /** The latest checklist, which a later turn's `update_plan` may move along without restating. */
   private lastPlan: TurnPlanStep[] | null = null;
+  /** Settings the running process has (so changes are pushed only when they differ). */
   private applied: { model: string | null; effort: string | null; mode: PermissionMode | null } | null = null;
   usage: ThreadTokenUsage | null = null;
   /** Model the session reports running (system/init), for the thread's settings. */
@@ -135,6 +135,11 @@ export class ClaudeSession {
     readonly config: ThreadConfig,
     private readonly host: SessionHost,
   ) {}
+
+  /** The checklist a resumed session's transcript ended with: its next `update_plan` may build on it. */
+  resumePlan(plan: TurnPlanStep[] | null) {
+    this.lastPlan = plan;
+  }
 
   get status(): ThreadStatus {
     if (this.turn) return { type: "active", activeFlags: [] };

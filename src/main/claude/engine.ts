@@ -604,6 +604,7 @@ export class ClaudeEngine {
       ...(pend?.fork && !info ? { fork: { from: pend.fork.from, at: pend.fork.at } } : {}),
     };
     const s = new ClaudeSession(config, this.host);
+    if (info) s.resumePlan((await this.history(threadId).catch(() => [] as HistoryTurn[])).findLast((t) => t.plan)?.plan ?? null);
     this.sessions.set(threadId, s);
     return s;
   }

@@ -178,6 +178,16 @@ function mergeItemIds(turn: Turn, prev?: TurnState): string[] {
   return added.length ? [...prev.itemIds, ...added] : prev.itemIds;
 }
 
+/**
+ * A turn's checklist as history reports it (only Ret's Claude engine does), or the one already
+ * held. Unchanged steps keep the object they had, so views showing the plan don't re-render.
+ */
+function planFrom(steps: TurnPlanStep[] | null | undefined, prev: TurnState["plan"] | undefined): TurnState["plan"] {
+  if (!steps) return prev ?? null;
+  const same = prev && prev.steps.length === steps.length && prev.steps.every((s, i) => s.step === steps[i].step && s.status === steps[i].status);
+  return same ? prev : { explanation: prev?.explanation ?? null, steps };
+}
+
 export function turnStateFrom(turn: TurnWithPlan, prev?: TurnState): TurnState {
   return {
     id: turn.id,
@@ -188,7 +198,7 @@ export function turnStateFrom(turn: TurnWithPlan, prev?: TurnState): TurnState {
     completedAt: turn.completedAt,
     durationMs: turn.durationMs,
     diff: prev?.diff ?? null,
-    plan: turn.plan ? { explanation: null, steps: turn.plan } : (prev?.plan ?? null),
+    plan: planFrom(turn.plan, prev?.plan),
   };
 }
 
