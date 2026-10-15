@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { useShallow } from "../../lib/shallow";
 import { ChevronRight, File as FileIcon, FileCode2, Folder, FolderOpen, MessageSquarePlus, RefreshCw, X } from "lucide-react";
 import { fsClient } from "../../rpc/client";
 import { useThreads } from "../../state/threads";

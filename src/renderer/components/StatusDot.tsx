@@ -1,12 +1,32 @@
 import { memo } from "react";
 import { useThreads } from "../state/threads";
+import { useThread } from "../state/useThread";
 import { PROVIDERS } from "../agents";
 
 export type ThreadState = "attention" | "running" | "error" | "unread" | "idle";
 
+/**
+ * Each thread's state, worked out once per store state: the canvas's beacons and minimap, the inbox
+ * and every window ask for it on each store update, for every window on the board.
+ */
+let statesOf: ReturnType<typeof useThreads.getState> | null = null;
+let states = new Map<string, ThreadState>();
+let asking = new Set<string | null>();
+
 /** What a thread wants from you right now, most urgent first. */
 export function threadStateOf(s: ReturnType<typeof useThreads.getState>, threadId: string): ThreadState {
-  for (const r of Object.values(s.requests)) if (r.threadId === threadId) return "attention";
+  if (s !== statesOf) {
+    statesOf = s;
+    states = new Map();
+    asking = new Set(Object.values(s.requests).map((r) => r.threadId));
+  }
+  let state = states.get(threadId);
+  if (!state) states.set(threadId, (state = stateOf(s, threadId)));
+  return state;
+}
+
+function stateOf(s: ReturnType<typeof useThreads.getState>, threadId: string): ThreadState {
+  if (asking.has(threadId)) return "attention";
   const t = s.threads[threadId];
   if (s.external[threadId]) return "running";
   if (s.live[threadId]?.activeTurnId || t?.status.type === "active") {
@@ -28,13 +48,13 @@ export function backgroundOnly(s: ReturnType<typeof useThreads.getState>, thread
 }
 
 export function useBackgroundOnly(threadId: string): number {
-  return useThreads((s) => backgroundOnly(s, threadId));
+  return useThread(threadId, (s) => backgroundOnly(s, threadId));
 }
 
 export const backgroundLabel = (n: number) => (n === 1 ? "Waiting on background work" : `Waiting on ${n} background tasks`);
 
 export function useThreadState(threadId: string): ThreadState {
-  return useThreads((s) => threadStateOf(s, threadId));
+  return useThread(threadId, (s) => threadStateOf(s, threadId));
 }
 
 export const STATE_LABEL: Record<ThreadState, string> = {
@@ -47,14 +67,14 @@ export const STATE_LABEL: Record<ThreadState, string> = {
 
 /** True when the thread's current turn is running in another process of its agent (VS Code, the CLI, a desktop app…). */
 export function useRunsElsewhere(threadId: string) {
-  return useThreads((s) => !!s.external[threadId]);
+  return useThread(threadId, (s) => !!s.external[threadId]);
 }
 
 export const StatusDot = memo(function StatusDot({ threadId }: { threadId: string }) {
   const state = useThreadState(threadId);
   const elsewhere = useRunsElsewhere(threadId);
   const background = useBackgroundOnly(threadId);
-  const agent = useThreads((s) => PROVIDERS[s.owner[threadId] ?? "codex"].name);
+  const agent = useThread(threadId, (s) => PROVIDERS[s.owner[threadId] ?? "codex"].name);
   const shown = state === "running" && background > 0;
   return (
     <span
