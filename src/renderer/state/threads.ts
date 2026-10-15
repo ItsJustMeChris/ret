@@ -49,6 +49,7 @@ export interface LiveThread {
   subscribed: boolean;
   turnOrder: string[];
   turns: Record<string, TurnState>;
+  /** Updated in place as items arrive (see putItem): look at its entries, never at the map's identity. */
   items: Record<string, ThreadItem>;
   olderCursor: string | null;
   loadingOlder: boolean;
@@ -231,8 +232,13 @@ function turnOf(lt: LiveThread, turnId: string): TurnState {
   return (lt.turns[turnId] = own(t));
 }
 
+/**
+ * A thread's items map is the one structure here updated in place, not copied: copying it for every
+ * flush of a streaming reply costs over a millisecond each time for a thread with a few thousand
+ * items. Its entries are still replaced, never changed, and the thread's LiveThread is new whenever
+ * one is, so nothing can (or may) tell from the map's identity whether something changed.
+ */
 function putItem(lt: LiveThread, turnId: string, item: ThreadItem) {
-  lt.items = own(lt.items);
   lt.items[item.id] = item;
   const turn = turnOf(lt, turnId);
   if (!turn.itemIds.includes(item.id)) {
@@ -267,7 +273,6 @@ function mutItem<T extends ThreadItem["type"]>(
     putItem(lt, turnId, init());
     item = lt.items[itemId] as Extract<ThreadItem, { type: T }>;
   }
-  lt.items = own(lt.items);
   const copy = own(item);
   lt.items[itemId] = copy;
   return copy;

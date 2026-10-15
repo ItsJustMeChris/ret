@@ -189,14 +189,6 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     else if (autoFocus) ta.current?.focus();
   }, [threadId]); // on appear only, never when the pane merely regains focus
 
-  // Auto-size the textarea.
-  useEffect(() => {
-    const el = ta.current;
-    if (!el) return;
-    el.style.height = "0px";
-    el.style.height = `${Math.min(el.scrollHeight, 320)}px`;
-  }, [text]);
-
   const submit = async (how: "auto" | "steer" | "queue" = "auto") => {
     const value = text;
     if ((!value.trim() && !attachments.length) || sending || elsewhere) return;

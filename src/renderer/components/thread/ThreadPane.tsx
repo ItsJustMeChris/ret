@@ -43,12 +43,14 @@ interface Props {
   onHeaderPointerDown?: (e: React.PointerEvent) => void;
   onHeaderDoubleClick?: () => void;
   windowControls?: React.ReactNode;
+  /** The size class it'll most likely have, when it's built before it's shown (a canvas window off screen). */
+  initialSize?: SizeClass;
 }
 
 export const ThreadPane = memo(function ThreadPane(props: Props) {
   const { threadId } = props;
   const ref = useRef<HTMLDivElement>(null);
-  const size = useSizeClass(ref);
+  const size = useSizeClass(ref, props.initialSize);
   const showDetails = useUI((s) => s.showDetails);
   // Relative file references in this thread resolve against its working directory.
   const cwd = useThread(threadId, (s) => s.threads[threadId]?.cwd) ?? useUI.getState().drafts[threadId]?.cwd;

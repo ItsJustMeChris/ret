@@ -1,4 +1,5 @@
 import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Maximize2, Minimize2, X, GitFork, FolderGit2, Copy } from "lucide-react";
 import { activeBoard, updateBoard, useUI, isApp, isDraft, isFile, isThread, filePath, type CanvasWin } from "../../state/ui";
 import { FilePane, FileTile } from "../code/FilePane";
@@ -17,6 +18,8 @@ import { toggleMaximize, viewport, viewportSize } from "./viewport";
 import { setLiveRect } from "./live";
 import { lodAtMount, registerWindow, type Lod } from "./lod";
 import { plainText } from "../../lib/format";
+import { classify } from "../../lib/useSize";
+import { holdCursor } from "../../lib/cursorShield";
 
 const MIN_W = 220;
 const MIN_H = 130;
@@ -109,12 +112,19 @@ export const CanvasWindow = memo(function CanvasWindow({ win, focused }: { win: 
   const selected = useUI((s) => s.selectedWindows.includes(win.id));
 
   // How much of the window is drawn (see lod.ts): set on the DOM as the view moves, never by a render.
-  // Zoomed out it shows a summary card over its full view, which stays mounted underneath (unrendered)
-  // once it's been shown and is built in the background otherwise, so zooming back in never has to
-  // build every window's transcript in one frame. The same goes for a window that opens away from the
-  // view (a big board loading): it's built when the app is idle, or as soon as the view comes near it.
+  // The full view renders into a host element of its own, which is in the window only while the full
+  // view shows (or lingers, just culled): zoomed out to its card, or culled a while, the view stays
+  // built (React keeps it, scroll and all) but is out of the document, so the browser has nothing of
+  // it to style, lay out or walk. A view that hasn't been shown yet (zoomed out, or opened away from
+  // the view on a big board) is built when the app is idle, or as soon as the view comes near it, so
+  // zooming in or panning over never has to build every window's transcript in one frame.
   const [start] = useState(() => lodAtMount(win, activeBoard().id, activeBoard().viewport));
   const lod = useRef<Lod>(start);
+  const [host] = useState(() => {
+    const el = document.createElement("div");
+    el.className = "cwin-body";
+    return el;
+  });
   const [warm, setWarm] = useState(!start.card && !start.culled);
   const warmNow = useRef(warm);
   warmNow.current = warm;
@@ -127,27 +137,43 @@ export const CanvasWindow = memo(function CanvasWindow({ win, focused }: { win: 
   useLayoutEffect(() => gate.connect(), [gate]);
   useLayoutEffect(() => cardGate.connect(), [cardGate]);
   useLayoutEffect(() => {
-    const apply = ({ culled, card }: Lod) => {
-      const was = lod.current;
-      lod.current = { culled, card };
-      // Attributes, not classes: React owns className and would drop them on the next render.
-      const el = ref.current;
-      if (el) {
-        if (culled) el.setAttribute("data-culled", "");
-        else el.removeAttribute("data-culled");
-        if (card) el.setAttribute("data-lod", "card");
-        else el.removeAttribute("data-lod");
-      }
-      gate.set(culled || card);
-      cardGate.set(culled || !card);
+    const el = ref.current!;
+    /** Take the full view out of the document. */
+    const detach = () => {
+      if (!host.isConnected) return;
       // The hidden view mustn't keep taking keystrokes.
       const active = document.activeElement;
-      if (card && !was.card && active instanceof HTMLElement && el?.querySelector(":scope > .thread-pane")?.contains(active)) active.blur();
-      if (!culled && !card && !warmNow.current) startTransition(() => setWarm(true));
+      if (active instanceof HTMLElement && host.contains(active)) active.blur();
+      host.remove();
+    };
+    const apply = ({ culled, card }: Lod) => {
+      lod.current = { culled, card };
+      const full = !culled && !card;
+      // Back in front of the resize handles (React keeps the rest of the window's children in order).
+      if (full && !host.isConnected) el.insertBefore(host, el.querySelector(":scope > .rz"));
+      if (card) detach();
+      // Attributes, not classes: React owns className and would drop them on the next render.
+      // Culled with its full view still laid out, it stays displayed (off screen) until lod.ts lets
+      // it go (`release`); with nothing laid out to keep, it goes at once.
+      if (!culled) el.removeAttribute("data-culled");
+      else if (!host.isConnected) el.setAttribute("data-culled", "");
+      if (card) el.setAttribute("data-lod", "card");
+      else el.removeAttribute("data-lod");
+      gate.set(!full);
+      cardGate.set(culled || !card);
+      if (full && !warmNow.current) startTransition(() => setWarm(true));
+    };
+    const release = () => {
+      detach();
+      el.setAttribute("data-culled", "");
     };
     apply(lod.current);
-    return registerWindow(win.id, ref.current!, apply, lod.current);
-  }, [win.id, gate, cardGate]);
+    const off = registerWindow(win.id, { apply, release, attached: () => host.isConnected }, lod.current);
+    return () => {
+      off();
+      host.remove();
+    };
+  }, [win.id, gate, cardGate, host]);
   useEffect(() => {
     if (warm) return;
     if (!lod.current.card && !lod.current.culled) return void startTransition(() => setWarm(true));
@@ -213,8 +239,21 @@ export const CanvasWindow = memo(function CanvasWindow({ win, focused }: { win: 
     let rect = orig;
     el.classList.add("gesturing");
     mates.forEach((m) => m.el?.classList.add("gesturing"));
-    document.body.classList.add(mode === "move" ? "dragging" : "resizing");
+    const releaseCursor = holdCursor(mode === "move" ? "grabbing" : getComputedStyle(target).cursor);
     holdViews("window", true);
+    // A drag moves windows by animations whose keyframes are set on each move: the compositor takes
+    // an animated transform as is, where a new transform style re-layerizes the whole canvas on every
+    // move. It's made a plain style again when the drag ends. (A resize lays out anyway.)
+    const moving = new Map<HTMLElement, { anim: Animation; rect: Rect }>();
+    const moveTo = (target: HTMLElement, r: Rect) => {
+      const t = `translate(${r.x}px, ${r.y}px)`;
+      const frames = [{ transform: t }, { transform: t }];
+      const m = moving.get(target);
+      if (m) {
+        (m.anim.effect as KeyframeEffect).setKeyframes(frames);
+        m.rect = r;
+      } else moving.set(target, { anim: target.animate(frames, { duration: 1e9, fill: "forwards" }), rect: r });
+    };
 
     const move = (ev: PointerEvent) => {
       const dx = (ev.clientX - start.x) / zoom;
@@ -225,9 +264,10 @@ export const CanvasWindow = memo(function CanvasWindow({ win, focused }: { win: 
         rect = s;
         for (const m of mates) {
           const r = { ...m.orig, x: m.orig.x + (s.x - orig.x), y: m.orig.y + (s.y - orig.y) };
-          if (m.el) applyRect(m.el, r);
+          if (m.el) moveTo(m.el, r);
           setLiveRect(m.id, r);
         }
+        moveTo(el, rect);
       } else {
         let { x, y, w, h } = orig;
         if (mode.includes("e")) w = snapEdge(orig.x + orig.w + dx, xEdges, threshold) - x;
@@ -251,8 +291,8 @@ export const CanvasWindow = memo(function CanvasWindow({ win, focused }: { win: 
           h = MIN_H;
         }
         rect = { x, y, w, h };
+        applyRect(el, rect);
       }
-      applyRect(el, rect);
       setLiveRect(win.id, rect);
     };
     let ended = false;
@@ -265,8 +305,13 @@ export const CanvasWindow = memo(function CanvasWindow({ win, focused }: { win: 
       target.removeEventListener("lostpointercapture", up);
       el.classList.remove("gesturing");
       mates.forEach((m) => m.el?.classList.remove("gesturing"));
-      document.body.classList.remove("dragging", "resizing");
+      releaseCursor();
       holdViews("window", false);
+      // Where the drag left them, as plain styles, in the frame the animations go.
+      for (const [target, m] of moving) {
+        applyRect(target, m.rect);
+        m.anim.cancel();
+      }
       if (rect !== orig) {
         if (mates.length) {
           const ddx = rect.x - orig.x, ddy = rect.y - orig.y;
@@ -350,7 +395,11 @@ export const CanvasWindow = memo(function CanvasWindow({ win, focused }: { win: 
     ),
     [win.id, maximized],
   );
-  const paneProps = { focused, onHeaderPointerDown, onHeaderDoubleClick, windowControls: controls };
+  // The size class the view will have: it may be built out of the document, where it can't measure.
+  const [initialSize] = useState(() => classify(win.w - 2, win.h - 2));
+  // Not `focused`: the window's frame shows that, and a chat or file view doesn't need it, so a click
+  // between windows re-renders neither view. (An Inbox or Code window takes keys when focused.)
+  const paneProps = { onHeaderPointerDown, onHeaderDoubleClick, windowControls: controls };
 
   return (
     <div
@@ -388,17 +437,19 @@ export const CanvasWindow = memo(function CanvasWindow({ win, focused }: { win: 
           <ThreadCard threadId={win.threadId} onPointerDown={onCardPointerDown} winId={win.id} />
         )}
       </FreezeContext.Provider>
-      {(warm || (!lod.current.card && !lod.current.culled)) && (
-        <FreezeContext.Provider value={gate}>
-          {isApp(win.threadId) ? (
-            <AppPane id={win.threadId} {...paneProps} />
-          ) : isFile(win.threadId) ? (
-            <FilePane id={win.threadId} chrome="window" {...paneProps} />
-          ) : (
-            <ThreadPane threadId={win.threadId} chrome="window" {...paneProps} />
-          )}
-        </FreezeContext.Provider>
-      )}
+      {(warm || (!lod.current.card && !lod.current.culled)) &&
+        createPortal(
+          <FreezeContext.Provider value={gate}>
+            {isApp(win.threadId) ? (
+              <AppPane id={win.threadId} focused={focused} {...paneProps} />
+            ) : isFile(win.threadId) ? (
+              <FilePane id={win.threadId} chrome="window" {...paneProps} />
+            ) : (
+              <ThreadPane threadId={win.threadId} chrome="window" initialSize={initialSize} {...paneProps} />
+            )}
+          </FreezeContext.Provider>,
+          host,
+        )}
       {HANDLES.map((h) => (
         <div key={h} className={`rz rz-${h}`} onPointerDown={(e) => startGesture(e, h)} />
       ))}

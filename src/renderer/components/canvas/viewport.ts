@@ -13,6 +13,19 @@ export const CARD_ZOOM = 0.5;
 
 type Listener = (vp: Viewport) => void;
 
+/** A flight to a view (animateTo): CanvasView flies the world there as an animation on the compositor. */
+export interface Flight {
+  from: Viewport;
+  to: Viewport;
+  ms: number;
+  /** As a CSS timing function; the same curve as `ease` below. */
+  easing: string;
+}
+
+/** Ease-out cubic, 1 - (1 - t)³, and as near as a CSS curve gets to it. */
+const ease = (t: number) => 1 - Math.pow(1 - t, 3);
+const EASE_OUT = "cubic-bezier(0.33, 1, 0.68, 1)";
+
 /**
  * Live viewport shared between the canvas, windows and minimap. Gestures write
  * here and paint straight to the DOM; the persisted store is updated lazily so
@@ -31,11 +44,24 @@ class ViewportController {
   private frame = 0;
   /** True while painting a jump to another board's view rather than a pan or zoom. */
   jumping = false;
+  /**
+   * The canvas's scroller, kept by CanvasView: a pan is its scroll offset, with the world's origin at
+   * `origin` in its content of `extent` square. Replaced (not changed) whenever the origin moves. Lets
+   * things that follow pans do it on the compositor (see Minimap).
+   */
+  scroll: { el: HTMLElement; origin: { x: number; y: number }; extent: number } | null = null;
   /** The board whose view this is. */
   board: string | null = null;
+  /** The flight under way (animateTo), if any; any other move ends it. */
+  flight: Flight | null = null;
+  /**
+   * How far along (eased, 0 to 1) the compositor has a flight, reported by CanvasView once it runs
+   * one: the view follows that, so what's laid out and placed agrees with what's drawn.
+   */
+  flightProgress: ((f: Flight) => number | null) | null = null;
 
   load(vp: Viewport, board: string | null = this.board) {
-    cancelAnimationFrame(this.anim);
+    this.land();
     this.board = board;
     this.vp = { ...vp };
     this.jumping = true;
@@ -59,6 +85,7 @@ class ViewportController {
   }
 
   set(vp: Viewport, commit = true) {
+    this.land();
     this.vp = { x: vp.x, y: vp.y, zoom: clamp(vp.zoom, MIN_ZOOM, MAX_ZOOM) };
     if (!this.frame) this.frame = requestAnimationFrame(() => this.flush());
     if (commit) {
@@ -79,21 +106,28 @@ class ViewportController {
     this.set({ zoom: next, x: cx - (cx - x) * k, y: cy - (cy - y) * k });
   }
 
-  animateTo(target: Viewport, ms = 240) {
+  /** End a flight where it is (another move takes over). */
+  private land() {
     cancelAnimationFrame(this.anim);
-    const from = { ...this.vp };
+    this.flight = null;
+  }
+
+  animateTo(target: Viewport, ms = 240) {
+    this.land();
+    const f: Flight = { from: { ...this.vp }, to: { ...target, zoom: clamp(target.zoom, MIN_ZOOM, MAX_ZOOM) }, ms, easing: EASE_OUT };
+    this.flight = f;
     const t0 = performance.now();
     const step = (now: number) => {
+      if (this.flight !== f) return;
       const t = Math.min(1, (now - t0) / ms);
-      const e = 1 - Math.pow(1 - t, 3);
-      this.set(
-        {
-          x: from.x + (target.x - from.x) * e,
-          y: from.y + (target.y - from.y) * e,
-          zoom: from.zoom + (target.zoom - from.zoom) * e,
-        },
-        t === 1,
-      );
+      const e = t === 1 ? 1 : (this.flightProgress?.(f) ?? ease(t));
+      const { from, to } = f;
+      this.vp = { x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e, zoom: from.zoom + (to.zoom - from.zoom) * e };
+      if (t === 1) {
+        this.flight = null;
+        clearTimeout(this.commitTimer);
+        this.commitTimer = window.setTimeout(() => this.commit(), 180);
+      }
       this.flush(); // already inside a frame
       if (t < 1) this.anim = requestAnimationFrame(step);
     };

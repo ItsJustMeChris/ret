@@ -30,16 +30,31 @@ export function Beacons({ board, viewportEl }: { board: Board; viewportEl: React
   useLayoutEffect(() => {
     // Placing runs every pan and zoom frame, so it doesn't read layout then (that would force one
     // right after the canvas has moved): the view's size is kept by CanvasView, and the toolbar
-    // and minimap are measured at most a couple of times a second.
+    // and minimap are measured when they change size, when layout is fresh anyway.
+    // (They're the viewport's siblings: searching the canvas for them would walk every window's DOM.)
+    if (!flagged.length) return;
     let blockers: { x0: number; y0: number; x1: number; y1: number }[] = [];
-    let measuredAt = -Infinity;
+    const view = viewportEl.current;
+    const siblings = view ? [...view.parentElement!.children].filter((c) => c.matches(".canvas-toolbar, .canvas-minimap")) : [];
+    const measure = () => {
+      if (!view) return;
+      const vr = view.getBoundingClientRect();
+      blockers = siblings.map((b) => {
+        const r = b.getBoundingClientRect();
+        return { x0: r.left - vr.left - 16, y0: r.top - vr.top - 16, x1: r.right - vr.left + 16, y1: r.bottom - vr.top + 16 };
+      });
+    };
+    // Also called once just after observing, before the beacons are first painted.
+    const ro = new ResizeObserver(() => {
+      measure();
+      place(viewport.vp);
+    });
+    for (const el of [view, ...siblings]) if (el) ro.observe(el);
     const place = (vp: Viewport) => {
-      const el = viewportEl.current;
-      if (!el || !flagged.length) return;
       const { w: W, h: H } = viewport.size;
       const box = { x0: INSET, y0: INSET, x1: W - INSET, y1: H - INSET };
       const ox = W / 2, oy = H / 2;
-      const placed: { el: HTMLButtonElement; edge: string; x: number; y: number }[] = [];
+      const placed: { el: HTMLButtonElement; edge: string; x: number; y: number; a: number }[] = [];
 
       for (const { win } of flagged) {
         const b = refs.current.get(win.id);
@@ -60,8 +75,7 @@ export function Beacons({ board, viewportEl }: { board: Board; viewportEl: React
         const x = ox + dx * t, y = oy + dy * t;
         const edge = tx < ty ? (dx > 0 ? "r" : "l") : dy > 0 ? "b" : "t";
         b.hidden = false;
-        b.style.setProperty("--a", `${Math.atan2(dy, dx)}rad`);
-        placed.push({ el: b, edge, x, y });
+        placed.push({ el: b, edge, x, y, a: Math.atan2(dy, dx) });
       }
 
       // Keep beacons on the same edge from stacking on top of each other.
@@ -72,27 +86,57 @@ export function Beacons({ board, viewportEl }: { board: Board; viewportEl: React
       }
       if (!placed.length) return;
       // Step out from under the toolbar and minimap: up off the bottom edge, left off the right one.
-      // (They're the viewport's siblings: searching the canvas for them would walk every window's DOM.)
-      if (performance.now() - measuredAt > 500) {
-        measuredAt = performance.now();
-        const vr = el.getBoundingClientRect();
-        const siblings = [...el.parentElement!.children].filter((c) => c.matches(".canvas-toolbar, .canvas-minimap"));
-        blockers = siblings.map((b) => {
-          const r = b.getBoundingClientRect();
-          return { x0: r.left - vr.left - 16, y0: r.top - vr.top - 16, x1: r.right - vr.left + 16, y1: r.bottom - vr.top + 16 };
-        });
-      }
       for (const p of placed) {
         for (const b of blockers) {
           if (p.x < b.x0 || p.x > b.x1 || p.y < b.y0 || p.y > b.y1) continue;
           if (p.edge === "r") p.x = b.x0;
           else p.y = b.y0;
         }
-        p.el.style.translate = `${p.x}px ${p.y}px`;
+        steer(p.el, `${Math.round(p.x * 10) / 10}px ${Math.round(p.y * 10) / 10}px`, `${Math.round(p.a * 1000) / 1000}rad`);
       }
     };
-    place(viewport.vp);
-    return viewport.subscribe(place);
+    // While the view moves, each beacon is placed and aimed by two animations whose keyframes are set
+    // as it goes (the button's translate, its arrow's rotate): the compositor takes animated values as
+    // they are, where a new style from script would re-layerize the whole canvas on every frame of a
+    // pan. Once the view is still they become plain styles again, so nothing ticks while nothing moves.
+    const steering = new Map<HTMLElement, { arrow: HTMLElement; move: Animation; aim: Animation; translate: string; rotate: string }>();
+    /** Where each beacon was left as plain styles. */
+    const rested = new Map<HTMLElement, string>();
+    let still = 0;
+    const settle = () => {
+      for (const [el, s] of steering) {
+        rested.set(el, `${s.translate}|${s.rotate}`);
+        el.style.translate = s.translate;
+        s.arrow.style.rotate = s.rotate;
+        s.move.cancel();
+        s.aim.cancel();
+      }
+      steering.clear();
+    };
+    const steer = (el: HTMLButtonElement, translate: string, rotate: string) => {
+      const s = steering.get(el);
+      if (s ? s.translate === translate && s.rotate === rotate : rested.get(el) === `${translate}|${rotate}`) return;
+      const move = [{ translate }, { translate }];
+      const aim = [{ rotate }, { rotate }];
+      if (s) {
+        (s.move.effect as KeyframeEffect).setKeyframes(move);
+        (s.aim.effect as KeyframeEffect).setKeyframes(aim);
+        Object.assign(s, { translate, rotate });
+      } else {
+        const arrow = el.querySelector<HTMLElement>(".beacon-arrow")!;
+        const opts = { duration: 1e9, fill: "forwards" } as const;
+        steering.set(el, { arrow, move: el.animate(move, opts), aim: arrow.animate(aim, opts), translate, rotate });
+      }
+      clearTimeout(still);
+      still = window.setTimeout(settle, 200);
+    };
+    const off = viewport.subscribe(place);
+    return () => {
+      off();
+      ro.disconnect();
+      clearTimeout(still);
+      settle();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, viewportEl]);
 

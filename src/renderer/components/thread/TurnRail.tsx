@@ -184,7 +184,6 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
     const root = scroller.current;
     const target = root?.querySelector<HTMLElement>(`section.turn[data-turn="${CSS.escape(id)}"]`);
     if (!root || !target) return;
-    root.dispatchEvent(new Event("ret:unstick"));
     // The rects are screen px (zoomed on the canvas); scrollTop is layout px.
     const top = (target.getBoundingClientRect().top - root.getBoundingClientRect().top) / scaleOf(root) + root.scrollTop - 12;
     root.scrollTo({ top, behavior: "smooth" });
@@ -193,16 +192,17 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
     target.classList.add("flash");
   };
 
-  // Track the rail's usable height; back to even spacing when it or the turn count changes.
+  // Track the rail's usable height (its content box); back to even spacing when it or the turn count
+  // changes. From the observer, which also reports it once on observing: nothing measured here forces
+  // a layout.
   useLayoutEffect(() => {
     const el = rail.current;
     if (!el) return;
-    const measure = () => {
-      height.current = Math.max(1, el.clientHeight - PAD * 2);
+    const ro = new ResizeObserver(([e]) => {
+      if (!e.contentRect.height) return; // out of the document (a canvas window off screen)
+      height.current = Math.max(1, e.contentRect.height);
       arrange(null);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
+    });
     ro.observe(el);
     return () => {
       ro.disconnect();
@@ -219,7 +219,9 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
     const el = rail.current;
     const wrap = el?.parentElement;
     if (!el || !wrap) return;
+    // From the observer (which also calls it once on observing), where layout is fresh.
     const place = () => {
+      if (!wrap.isConnected) return; // out of the document (a canvas window off screen)
       // Measured in screen px but written in layout px, so divide out a canvas window's zoom.
       const scale = scaleOf(wrap);
       const w = wrap.getBoundingClientRect();
@@ -227,7 +229,6 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
       const left = inner ? (inner.left - w.left) / scale - 14 : 8;
       el.style.left = `${Math.max(6, Math.round(left))}px`;
     };
-    place();
     const ro = new ResizeObserver(place);
     ro.observe(wrap);
     return () => ro.disconnect();

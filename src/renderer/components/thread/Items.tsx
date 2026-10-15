@@ -3,7 +3,6 @@ import {
   Bot,
   Brain,
   Check,
-  ChevronRight,
   FileText,
   FolderOpen,
   Globe,
@@ -19,6 +18,7 @@ import {
   FilePen,
   Layers,
 } from "lucide-react";
+import { Chevron } from "../ui/Chevron";
 import type { FileUpdateChange, ThreadItem } from "@shared/protocol";
 import { useThread } from "../../state/useThread";
 import { changeStats, duration, shortPath, unwrapCommand } from "../../lib/format";
@@ -60,7 +60,7 @@ function Disclosure({
         <span className="tool-icon">{icon}</span>
         <span className="tool-label">{label}</span>
         {meta && <span className="tool-meta">{meta}</span>}
-        {expandable && <ChevronRight className="tool-chev" size={13} />}
+        {expandable && <Chevron className="tool-chev" size={13} />}
       </button>
       {open && expandable && <div className="tool-body">{children}</div>}
     </div>
@@ -220,7 +220,7 @@ function FileRow({ change, cwd }: { change: FileUpdateChange; cwd: string | null
   return (
     <div className={`file-row ${open ? "open" : ""}`}>
       <button className="file-head" onClick={() => setOpen(!open)}>
-        <ChevronRight className="tool-chev" size={12} />
+        <Chevron className="tool-chev" size={12} />
         <span className={`kind kind-${kind}`}>{kind === "add" ? "A" : kind === "delete" ? "D" : "M"}</span>
         <span className="path" data-path={change.path}>{shortPath(change.path, cwd)}</span>
         <span className="stat">

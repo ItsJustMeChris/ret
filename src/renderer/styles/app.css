@@ -145,15 +145,12 @@ kbd {
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
-body.dragging,
-body.dragging * {
-  cursor: grabbing !important;
+/* A gesture's cursor over everything while it lasts (lib/cursorShield.ts). */
+.cursor-shield {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
 }
-body.resizing,
-body.resizing * {
-  cursor: col-resize;
-}
-body.dragging iframe,
 body.resizing .transcript {
   pointer-events: none;
 }
@@ -1181,6 +1178,9 @@ body.resizing .transcript {
   flex-direction: column;
 }
 
+/* Laid out from its end: the scroll origin is the bottom, so a view there stays there as a reply grows
+   and one scrolled up stays on what it shows (scroll anchoring), with nothing to do in script
+   (Transcript). */
 .transcript {
   flex: 1;
   min-height: 0;
@@ -1188,19 +1188,22 @@ body.resizing .transcript {
   overflow-x: hidden;
   overflow-anchor: auto;
   user-select: text;
+  display: flex;
+  flex-direction: column-reverse;
+}
+.transcript.center {
+  display: grid;
 }
 .transcript-inner {
+  flex: none;
+  width: 100%;
   max-width: 860px;
-  margin: 0 auto;
+  /* The bottom margin takes up the room a short transcript leaves, so it sits at the top. */
+  margin: 0 auto auto;
   padding: 20px 28px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-/* The end of the transcript, watched to tell whether the view is at the bottom (no space of its own). */
-.transcript-end {
-  height: 0;
-  margin-top: -4px;
 }
 .load-older {
   align-self: center;
@@ -1227,8 +1230,7 @@ body.resizing .transcript {
   content-visibility: auto;
   contain-intrinsic-size: auto 400px;
 }
-.turn.live,
-.turn[data-warm] {
+.turn.live {
   content-visibility: visible;
 }
 .turn + .turn {
@@ -2452,6 +2454,8 @@ body.resizing .transcript {
 .composer textarea {
   display: block;
   width: 100%;
+  /* Grows with what's typed (up to max-height) with no measuring per keystroke. */
+  field-sizing: content;
   resize: none;
   border: 0;
   outline: none;
@@ -2757,24 +2761,43 @@ body.resizing .transcript {
   cursor: default;
   touch-action: none;
 }
-/* The dots: one spacing bigger than the view, sliding (mod one spacing) as you pan. */
-.canvas-grid {
+/* Pans scroll this (CanvasView): a scroll offset goes to the GPU layer directly, with no repaint or
+   re-layering. Its scrollbars are hidden, and the canvas takes the wheel itself. Its background is
+   opaque and scrolls with it, so the text it scrolls keeps ClearType. */
+.canvas-scroller {
   position: absolute;
-  inset: -48px; /* GRID_PAD in CanvasView */
-  background-image: radial-gradient(circle at 1px 1px, var(--grid-dot) 1px, transparent 1.2px);
+  inset: 0;
+  overflow: scroll;
+  scrollbar-width: none;
+  overscroll-behavior: none;
+  contain: strict;
+  background: var(--bg) local;
+}
+/* The dot grid, in world units like the windows (placed, and its dots sized, from JS): a zoom scales
+   it along with them. */
+.canvas-dots {
+  position: absolute;
+  background-size: 24px 24px; /* GRID in CanvasView */
   pointer-events: none;
 }
-/* While the view moves (.moving, from CanvasView), the grid and the windows are GPU layers: the
-   compositor moves and scales them as last drawn instead of repainting them every frame. When it
-   settles they go back to being painted with the page, where text gets ClearType instead of the
-   grayscale antialiasing a layer of its own gets. The grid would hold the windows on a layer too,
-   being under them. CanvasView drops will-change for a frame (.redraw) to redraw the windows at a
-   new zoom mid-gesture. */
-.canvas-viewport.moving > .canvas-grid,
-.canvas-viewport.moving > .canvas-world {
+/* The scroller's content: room to pan (ORIGIN in CanvasView). */
+.canvas-extent {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 262144px;
+  height: 262144px;
+  pointer-events: none;
+}
+/* While the view zooms (.scaling, from CanvasView), the windows are a GPU layer: the compositor
+   scales them as last drawn instead of repainting them every frame. When it settles they go back to
+   being painted with the page, where text gets ClearType instead of the grayscale antialiasing a
+   layer of its own gets. CanvasView drops will-change for a frame (.redraw) to redraw the windows at
+   a new zoom mid-gesture. */
+.canvas-viewport.scaling .canvas-world {
   will-change: transform;
 }
-.canvas-viewport.moving > .canvas-world.redraw {
+.canvas-viewport.scaling .canvas-world.redraw {
   will-change: auto;
 }
 .canvas-viewport.panning,
@@ -2862,34 +2885,32 @@ html.autoscrolling[data-autoscroll="down"] * {
      the glows and resize handles reach past the edge.) */
   contain: size layout style;
 }
-/* Away from the view (lod.ts): nothing inside is styled, laid out or painted. */
+/* Away from the view (lod.ts): not displayed at all, and its full view is out of the document. (Not
+   content-visibility: hidden. That keeps everything inside in the layout tree, which Chromium walks
+   after every layout and scroll, and an animation that starts in a skipped subtree never finishes,
+   so Chrome then produces a frame for it on every vsync.) */
 .cwin[data-culled] {
-  content-visibility: hidden;
-  animation: none;
+  display: none;
 }
-/* Nothing animates where nobody can see it: in a culled window, or in a full view under its card.
-   An animation or transition that starts in a skipped subtree (a hidden window catching up, say)
-   never finishes, and Chrome produces a frame for it on every vsync from then on. */
-.cwin[data-culled]::before,
-.cwin[data-culled]::after,
-.cwin[data-culled] *,
-.cwin[data-culled] *::before,
-.cwin[data-culled] *::after,
-.cwin[data-lod="card"] > .thread-pane *,
-.cwin[data-lod="card"] > .thread-pane *::before,
-.cwin[data-lod="card"] > .thread-pane *::after {
-  animation: none !important;
-  transition: none !important;
+/* The canvas is a scroller (CanvasView), so a scroll that runs out in a window's outermost scrolling
+   parts mustn't carry on into it and pan the canvas (keys; the wheel is guarded in CanvasView too). */
+.cwin :is(.transcript, .side-panel, .pane-body.draft, .glance, .queue-tray, .ask-dock, .tree-rows, .inbox-list, .code-tabs, textarea) {
+  overscroll-behavior: contain;
 }
-.cwin > .thread-pane {
+/* The full view's host (CanvasWindow): there only while the full view shows, and no box of its own. */
+.cwin-body {
+  display: contents;
+}
+.cwin-body > .thread-pane {
   border-radius: 11px;
 }
 .cwin.focused {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--line-2));
   box-shadow: var(--shadow-lg), 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
 }
+/* No will-change: a press that doesn't move would promote the window to a layer of its own and back,
+   re-rastering it twice. A drag moves it by an animation, which puts it on one once it moves. */
 .cwin.gesturing {
-  will-change: transform, width, height;
   transition: none;
   box-shadow: var(--shadow-lg);
 }
@@ -3036,18 +3057,6 @@ html.autoscrolling[data-autoscroll="down"] * {
   border-color: color-mix(in srgb, var(--red) 70%, var(--line-2));
   border-width: var(--px);
 }
-/* The window's own frame shows it working or waiting for you (the lit edge, the glow), so the dot in
-   its title bar doesn't ping too, and in windows you're not working in, the live bits inside the
-   transcript (spinners, the Working pulse and shimmer) hold still. Chrome often runs those on the
-   main thread (they start while the transcript scrolls to follow new text, or in the header), and
-   each frame of one re-layers the whole canvas, for as long as the thread runs. */
-.cwin .pane-header .status-dot::after,
-.cwin:not(.focused) .thread-pane .shimmer-light {
-  display: none;
-}
-.cwin:not(.focused) .thread-pane :is(.spin, .pulse, .loading-pulse) {
-  animation: none;
-}
 
 @media (prefers-reduced-motion: reduce) {
   .cwin.state-unread::before,
@@ -3056,7 +3065,7 @@ html.autoscrolling[data-autoscroll="down"] * {
   .cwin.state-running::before,
   .link-label.running::after,
   .beacon.unread .beacon-dot::after,
-  .mm-win.unread,
+  .mm-win.unread::after,
   .mm-win.attention,
   .beacon,
   .beacon::before,
@@ -3127,8 +3136,8 @@ html.autoscrolling[data-autoscroll="down"] * {
   background: var(--bg-1);
 }
 /* The card is always there, hidden until the window is zoomed out, so switching is a style change
-   and not a render. It covers the window; the full view stays mounted underneath, its contents
-   skipped by style, layout and paint, so zooming back in is a repaint instead of a rebuild. */
+   and not a render. It covers the window; the full view stays built but out of the document
+   (CanvasWindow), so zooming back in puts it back instead of rebuilding it. */
 .cwin > .tcard {
   display: none;
 }
@@ -3138,9 +3147,6 @@ html.autoscrolling[data-autoscroll="down"] * {
   inset: 0;
   z-index: 1;
   background: inherit;
-}
-.cwin[data-lod="card"] > .thread-pane {
-  content-visibility: hidden;
 }
 .cwin[data-lod="card"] > .rz {
   display: none;
@@ -3302,7 +3308,8 @@ html.autoscrolling[data-autoscroll="down"] * {
   transition-duration: 0.15s;
 }
 /* Don't keep animating pulses and sweeps nobody can see. */
-.canvas-minimap:not(.awake, :hover) .mm-win {
+.canvas-minimap:not(.awake, :hover) .mm-win,
+.canvas-minimap:not(.awake, :hover) .mm-win::after {
   animation-play-state: paused;
 }
 .mm-win {
@@ -3325,17 +3332,23 @@ html.autoscrolling[data-autoscroll="down"] * {
   background: color-mix(in srgb, var(--red) 55%, var(--bg-4));
   border-color: var(--red);
 }
-/* Finished while you weren't looking: a light sweep runs across it until you click the window. */
+/* Finished while you weren't looking: a light sweep runs across it until you click the window. The
+   light is a band three times its width sliding across (a transform, on the compositor: sliding the
+   background itself would repaint the minimap every frame of a pan). */
 .mm-win.unread {
   border-color: var(--accent);
-  background: linear-gradient(
-    105deg,
-    color-mix(in srgb, var(--accent) 38%, var(--bg-4)) 35%,
-    color-mix(in srgb, var(--accent) 35%, #fff) 50%,
-    color-mix(in srgb, var(--accent) 38%, var(--bg-4)) 65%
-  );
-  background-size: 300% 100%;
+  background: color-mix(in srgb, var(--accent) 38%, var(--bg-4));
   box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 55%, transparent);
+  overflow: hidden;
+}
+.mm-win.unread::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 300%;
+  height: 100%;
+  background: linear-gradient(105deg, transparent 35%, color-mix(in srgb, var(--accent) 35%, #fff) 50%, transparent 65%);
   animation: sweep 1.6s ease-in-out infinite alternate;
 }
 .mm-win.focused {
@@ -3345,10 +3358,10 @@ html.autoscrolling[data-autoscroll="down"] * {
 /* The light glides from just past one edge to just past the other and back (used with alternate). */
 @keyframes sweep {
   from {
-    background-position: 87.5% 0;
+    transform: translateX(-58.333%);
   }
   to {
-    background-position: 12.5% 0;
+    transform: translateX(-8.333%);
   }
 }
 @keyframes mm-pulse {
@@ -3357,7 +3370,7 @@ html.autoscrolling[data-autoscroll="down"] * {
   }
 }
 
-/* Off-screen beacons: placed (translate) and aimed (--a) from JS. */
+/* Off-screen beacons: placed (translate) and aimed (the arrow's rotate) by animations from JS (Beacons). */
 .beacons {
   position: absolute;
   inset: 0;
@@ -3385,8 +3398,6 @@ html.autoscrolling[data-autoscroll="down"] * {
     scale 0.15s var(--ease),
     opacity 0.2s;
   animation: beacon-in 0.25s var(--ease);
-  /* Moved and aimed every pan frame: as compositor layers, that doesn't re-layer the page. */
-  will-change: translate;
 }
 .beacon[hidden] {
   display: none;
@@ -3403,9 +3414,7 @@ html.autoscrolling[data-autoscroll="down"] * {
 .beacon-arrow {
   position: absolute;
   inset: 0;
-  rotate: var(--a, 0rad);
   pointer-events: none;
-  will-change: rotate;
 }
 .beacon-arrow::after {
   content: "";
@@ -3465,15 +3474,19 @@ html.autoscrolling[data-autoscroll="down"] * {
     scale: 0.6;
   }
 }
+/* The view's frame: moved along x (outer) and y (inner) by animations driven by the canvas's scroll
+   offset, on the compositor (Minimap). */
+.mm-frame-x,
 .mm-frame {
   position: absolute;
   left: 0;
   top: 0;
+  pointer-events: none;
+}
+.mm-frame {
   border: 1.5px solid var(--accent);
   border-radius: 3px;
   background: var(--accent-soft);
-  pointer-events: none;
-  will-change: transform; /* follows every pan frame */
 }
 
 /* ==========================================================================
@@ -5367,7 +5380,7 @@ body.resizing .sidebar-dock {
 
 /* Black theme: canvas windows sit one step above the canvas */
 [data-theme="dark"] .cwin,
-[data-theme="dark"] .cwin > .thread-pane {
+[data-theme="dark"] .cwin-body > .thread-pane {
   background: var(--bg-1);
 }
 [data-theme="dark"] .cwin .pane-header {

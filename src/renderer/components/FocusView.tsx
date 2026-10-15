@@ -2,6 +2,7 @@ import { memo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Columns2, FileCode2, GitFork, Plus, X } from "lucide-react";
 import { useUI, isDraft, isFile, isThread, filePath, type FocusSplit } from "../state/ui";
 import { useFiles } from "../state/files";
+import { holdCursor } from "../lib/cursorShield";
 import { FilePane } from "./code/FilePane";
 import { useThreads } from "../state/threads";
 import { closePane, closeTab, newThreadNear, openThread, setSplitRatio } from "../state/actions";
@@ -202,6 +203,7 @@ function SplitView({ left, split, focusedSide }: { left: string; split: FocusSpl
     const rect = box.current.getBoundingClientRect();
     let ratio = split.ratio;
     document.body.classList.add("resizing");
+    const release = holdCursor("col-resize");
     const move = (ev: PointerEvent) => {
       ratio = Math.min(0.8, Math.max(0.2, (ev.clientX - rect.left) / rect.width));
       setGrid(ratio);
@@ -211,6 +213,7 @@ function SplitView({ left, split, focusedSide }: { left: string; split: FocusSpl
       gutter.removeEventListener("pointerup", up);
       gutter.removeEventListener("lostpointercapture", up);
       document.body.classList.remove("resizing");
+      release();
       setSplitRatio(left, ratio);
     };
     gutter.addEventListener("pointermove", move);

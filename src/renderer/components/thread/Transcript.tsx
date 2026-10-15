@@ -1,5 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronRight, CircleAlert, CircleDashed, FileDiff, GitFork, LoaderCircle, Radar, SquareTerminal, Workflow } from "lucide-react";
+import { Bot, CircleAlert, CircleDashed, FileDiff, GitFork, LoaderCircle, Radar, SquareTerminal, Workflow } from "lucide-react";
+import { Chevron } from "../ui/Chevron";
 import { ownerOf } from "../../state/threads";
 import { useThread } from "../../state/useThread";
 import { shallowEqual } from "../../lib/shallow";
@@ -42,7 +43,7 @@ function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: bool
   return (
     <div className={`activity ${open ? "open" : ""}`}>
       <button className="activity-head" onClick={() => setOpen(!open)}>
-        <ChevronRight className="tool-chev" size={13} />
+        <Chevron className="tool-chev" size={13} />
         <span>{activitySummary(items)}</span>
         {failed && <span className="badge err">failed step</span>}
       </button>
@@ -231,46 +232,37 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
     shallowEqual,
   );
   const scroller = useRef<HTMLDivElement>(null);
-  const content = useRef<HTMLDivElement>(null);
-  const end = useRef<HTMLDivElement>(null);
-  const stick = useRef(true);
   const ctx = useMemo(() => ({ threadId, cwd }), [threadId, cwd]);
   const loading = !lt || lt.loading;
 
-  // Stick to the bottom while content grows, unless the user scrolled up.
-  // Re-attaches once history has loaded (the scroller doesn't exist while the spinner shows).
+  // The transcript is laid out from its end (column-reverse, see .transcript): its scroll origin is the
+  // bottom, so a view at the bottom stays there as replies grow, and one scrolled up stays on what it
+  // shows (scroll anchoring), with no script setting scroll offsets on every token. Each of those cost
+  // a layout and, in Electron, a walk of the whole page for its draggable regions.
+  //
+  // Out of the document (a canvas window off screen, or zoomed out to its card) it forgets where it
+  // was, so that's kept, and put back when it's back. (The bottom is offset 0: nothing to put back.)
   useLayoutEffect(() => {
     const el = scroller.current;
-    const inner = content.current;
-    const bottom = end.current;
-    if (!el || !inner || !bottom) return;
-    stick.current = true;
-    // At the bottom = the end marker within 80px of the view. Watched rather than measured on each
-    // scroll: reading the scroll height in a scroll event forces a layout of whatever just changed.
-    const io = new IntersectionObserver(
-      ([e]) => {
-        // A hidden view (a culled canvas window, one under its card) has no bounds: keep what it was.
-        if (e.rootBounds?.height) stick.current = e.isIntersecting;
-      },
-      { root: el, rootMargin: "0px 0px 80px 0px" },
-    );
-    const ro = new ResizeObserver(() => {
-      if (stick.current) el.scrollTop = el.scrollHeight;
-    });
-    // Programmatic jumps (turn rail) must not be pulled back to the bottom while
-    // off-screen turns render at their real size along the way.
-    const unstick = () => {
-      stick.current = false;
+    if (!el) return;
+    let top = 0;
+    let away = false;
+    const onScroll = () => {
+      if (!away && el.isConnected) top = el.scrollTop;
     };
-    io.observe(bottom);
-    ro.observe(inner);
-    ro.observe(el); // the composer growing (a question docking on it) shrinks the view from below
-    el.addEventListener("ret:unstick", unstick);
-    el.scrollTop = el.scrollHeight;
+    const ro = new ResizeObserver(() => {
+      if (!el.isConnected) {
+        away = true;
+        return;
+      }
+      if (away && top) el.scrollTop = top;
+      away = false;
+    });
+    ro.observe(el);
+    el.addEventListener("scroll", onScroll, { passive: true });
     return () => {
-      io.disconnect();
       ro.disconnect();
-      el.removeEventListener("ret:unstick", unstick);
+      el.removeEventListener("scroll", onScroll);
     };
   }, [threadId, loading]);
 
@@ -285,7 +277,7 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
   return (
     <div className="transcript-wrap">
     <div className="transcript" ref={scroller}>
-      <div className="transcript-inner" ref={content}>
+      <div className="transcript-inner">
         {lt.olderCursor && (
           <button className="load-older" onClick={() => void loadOlder(threadId)} disabled={lt.loadingOlder}>
             {lt.loadingOlder ? <LoaderCircle className="spin" size={12} /> : null} Load earlier turns
@@ -303,7 +295,6 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
           </div>
         )}
         <Approvals threadId={threadId} />
-        <div className="transcript-end" ref={end} />
       </div>
     </div>
     <TurnRail threadId={threadId} scroller={scroller} />
