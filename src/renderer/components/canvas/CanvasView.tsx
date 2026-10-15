@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { Check, ChevronDown, Command, Copy, Folder, GitFork, LayoutGrid, MessageSquarePlus, Minus, Pencil, Plus, Scan, SquareDashed, Trash2, X, Code2, Inbox } from "lucide-react";
-import { activeBoard, appId, newId, updateBoard, useUI, type AppKind, type Board } from "../../state/ui";
+import { activeBoard, appId, newId, updateBoard, useUI, type AppKind, type Board, type CanvasWin } from "../../state/ui";
 import { DRAG_APP } from "../Titlebar";
 import { closeWindow, focusWindow, newThread, openThread } from "../../state/actions";
 import { useThreads } from "../../state/threads";
@@ -10,12 +10,14 @@ import { CanvasWindow } from "./CanvasWindow";
 import { Minimap } from "./Minimap";
 import { Beacons } from "./Beacons";
 import { CARD_ZOOM, fitAll, revealWindow, tidy, viewport, type Flight, type Viewport } from "./viewport";
-import { updateLod } from "./lod";
+import { nearView, updateLod } from "./lod";
 import { onLiveRect } from "./live";
 import { holdViews } from "../../state/useThread";
 import { Menu, type MenuItem } from "../Menu";
 import { promptText } from "../ui/Dialog";
 import { startAutoscroll } from "../../lib/autoscroll";
+import { Kept, useRecent, useVisibility } from "../ui/Kept";
+import { useShallow } from "../../lib/shallow";
 
 /** Dot spacing at 100%. */
 const GRID = 24;
@@ -35,9 +37,86 @@ const PAN_SLOP = 4;
 /** Keys that scroll whatever was last clicked: on the canvas, the canvas. */
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"]);
 
+/**
+ * Which of the board's windows are mounted. Switching to a board (or opening the app on one) mounts
+ * those near the view at once and the rest a few at a time when the app is idle, nearest first: a
+ * board of a hundred windows used to build every one before its first frame. One that comes near
+ * the view meanwhile (a pan, a flight to it) mounts then, and one added to the board mounts at once.
+ */
+function useMountedWindows(board: Board, active: boolean): CanvasWin[] {
+  const later = useRef<{ board: string; ids: Set<string> } | null>(null);
+  const [, bump] = useReducer((n: number) => n + 1, 0);
+  if (later.current?.board !== board.id) {
+    const vp = viewport.board === board.id ? viewport.vp : board.viewport;
+    later.current = { board: board.id, ids: new Set(board.windows.filter((w) => !nearView(w, vp)).map((w) => w.id)) };
+  }
+  const ids = later.current.ids;
+
+  useEffect(() => {
+    // (Near and far are the view's: a board kept while another shows waits until it's back.)
+    if (!ids.size || !active) return;
+    const take = (wins: CanvasWin[]) => {
+      for (const w of wins) ids.delete(w.id);
+      if (!ids.size) stop();
+      bump();
+    };
+    const waiting = () => (useUI.getState().boards.find((b) => b.id === board.id)?.windows ?? []).filter((w) => ids.has(w.id));
+    // Come near the view: now.
+    let idle = 0;
+    let off = () => {};
+    const stop = () => {
+      off();
+      cancelIdleCallback(idle);
+    };
+    off = viewport.subscribe((vp) => {
+      const near = waiting().filter((w) => nearView(w, vp));
+      if (near.length) take(near);
+    });
+    // The rest, a few per idle moment, nearest first. (A transition: a key or click never waits on them.)
+    const next = () => {
+      idle = requestIdleCallback(
+        () => {
+          const vp = viewport.vp;
+          const { w: W, h: H } = viewport.size;
+          const cx = (W / 2 - vp.x) / vp.zoom, cy = (H / 2 - vp.y) / vp.zoom;
+          const far = waiting().sort((a, b) => Math.hypot(a.x + a.w / 2 - cx, a.y + a.h / 2 - cy) - Math.hypot(b.x + b.w / 2 - cx, b.y + b.h / 2 - cy));
+          if (far.length > 6) next();
+          else ids.clear(); // and any that left the board meanwhile
+          startTransition(() => take(far.slice(0, 6)));
+        },
+        { timeout: 300 },
+      );
+    };
+    // (Subscribing calls it at once, which may have taken the last of them.)
+    if (ids.size) next();
+    else off();
+    return stop;
+  }, [ids, active, board.id]);
+
+  return ids.size ? board.windows.filter((w) => !ids.has(w.id)) : board.windows;
+}
+
+/** Boards kept built after you switch away (see Kept): switching between them neither builds nor takes down a window. */
+const KEEP_BOARDS = 3;
+
+/** A board's windows. */
+function BoardWindows({ boardId, active, focused }: { boardId: string; active: boolean; focused: string | null }) {
+  const board = useUI((s) => s.boards.find((b) => b.id === boardId));
+  if (!board) return null;
+  return <Windows board={board} active={active} focused={focused} />;
+}
+
+function Windows({ board, active, focused }: { board: Board; active: boolean; focused: string | null }) {
+  const mounted = useMountedWindows(board, active);
+  return mounted.map((w) => <CanvasWindow key={w.id} win={w} focused={focused === w.id} />);
+}
+
 export function CanvasView() {
   const board = useUI((s) => activeBoard(s));
   const focused = useUI((s) => s.focusedWindow);
+  const visibility = useVisibility();
+  const boardIds = useUI(useShallow((s) => s.boards.map((b) => b.id)));
+  const keptBoards = useRecent(board.id, KEEP_BOARDS, (id) => boardIds.includes(id));
   const vpRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
@@ -268,6 +347,20 @@ export function CanvasView() {
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
     viewport.scroll = { el: scroller, origin, extent: 2 * ORIGIN };
+    // Out of the document (another mode showing: see Kept), the scroller forgets its offset: put it
+    // back when it's back. (Where the view is lives in the viewport, and that's where it goes.)
+    let away = false;
+    const back = new ResizeObserver(() => {
+      if (!scroller.isConnected) {
+        away = true;
+        return;
+      }
+      if (!away) return;
+      away = false;
+      scrolled = { left: -1, top: -1 };
+      place(viewport.vp);
+    });
+    back.observe(scroller);
     const settled = () => {
       counterScale(viewport.vp.zoom);
       setMoving(false);
@@ -312,6 +405,7 @@ export function CanvasView() {
       viewport.flightProgress = null;
       viewport.scroll = null;
       scroller.removeEventListener("scroll", onScroll);
+      back.disconnect();
       clearTimeout(settle);
       cancelAnimationFrame(undo);
       holdViews("view", false);
@@ -321,6 +415,8 @@ export function CanvasView() {
   useLayoutEffect(() => {
     const el = vpRef.current!;
     const measure = () => {
+      // Out of the document it measures nothing: the view keeps the size it had.
+      if (!el.isConnected || !el.clientWidth) return;
       viewport.size = { w: el.clientWidth, h: el.clientHeight };
       const r = el.getBoundingClientRect();
       viewOrigin.current = { x: r.left, y: r.top };
@@ -372,6 +468,7 @@ export function CanvasView() {
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
+      if (!visibility.shown) return; // another mode is showing
       if (e.code === "Space" && !isTyping()) {
         spaceDown.current = true;
         vpRef.current?.classList.add("space-pan");
@@ -546,7 +643,7 @@ export function CanvasView() {
         }}
       >
         {/* Pans scroll this (see the viewport effect). */}
-        <div ref={scrollerRef} className="canvas-scroller">
+        <div ref={scrollerRef} className="canvas-scroller" data-own-scroll="">
           <div className="canvas-extent" />
           <div ref={worldRef} className="canvas-world">
             <div ref={dotsRef} className="canvas-dots" />
@@ -554,8 +651,10 @@ export function CanvasView() {
                 the windows opt in to inheriting --inv-zoom, so they'd be restyled every frame too. */}
             <div ref={itemsRef} className="canvas-items">
               <Links board={board} />
-              {board.windows.map((w) => (
-                <CanvasWindow key={w.id} win={w} focused={focused === w.id} />
+              {keptBoards.map((id) => (
+                <Kept key={id} shown={id === board.id} className="board-windows">
+                  <BoardWindows boardId={id} active={id === board.id} focused={focused} />
+                </Kept>
               ))}
             </div>
           </div>

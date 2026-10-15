@@ -49,6 +49,9 @@ function listen(threadId: string, l: Listener) {
 // dragged or resized, every window holds still the same way and catches up when the gesture ends:
 // a reply streaming into a window costs a layout and repaint of the canvas each time it grows,
 // which a moving canvas can't fit into its frames.
+//
+// A view kept built while another shows (a mode, a tab: see Kept) freezes the same way, and so does
+// everything in it: a gate inside another follows it, and catches up when it's let go.
 // ---------------------------------------------------------------------------
 
 /** Least time between two idle catch-ups of the same frozen view, and the most one waits for a quiet moment. */
@@ -62,24 +65,61 @@ const holds = new Set<string>();
 export class FreezeGate {
   /** Whether the view should be frozen (off screen, under a card). */
   private want = false;
-  /** Whether it is right now (a frozen view thaws briefly to catch up; a gesture holds it). */
-  frozen = false;
+  /** Whether it is right now, by itself (a frozen view thaws briefly to catch up; a gesture holds it). */
+  private own = false;
   private stale = false;
   private staleSince = 0;
   private lastThaw = 0;
   private listeners = new Set<Listener>();
 
-  /** `idle`: catch up now and then while frozen. Without it, a view only catches up when it's unfrozen. */
-  constructor(private readonly idle = true) {}
+  /**
+   * `idle`: catch up now and then while frozen. Without it, a view only catches up when it's unfrozen.
+   * `parent`: the gate of the view this one is in, which freezes it too (see `follow`).
+   */
+  constructor(
+    private readonly idle = true,
+    private readonly parent: FreezeGate | null = null,
+  ) {}
 
-  /** Join the canvas (gestures hold it still); returns the leave. */
+  /** Whether the view holds still right now: frozen itself, or the view it's in is. */
+  get frozen(): boolean {
+    return this.own || !!this.parent?.frozen;
+  }
+
+  /** Join the canvas (gestures hold it still) and follow the view it's in; returns the leave. */
   connect() {
     gates.add(this);
-    if (holds.size) this.frozen = true;
+    if (holds.size) this.own = true;
+    const unfollow = this.follow();
     return () => {
       gates.delete(this);
       stale.delete(this);
+      unfollow();
     };
+  }
+
+  /** Catch up when the view it's in is let go; returns the stop. */
+  follow() {
+    return this.parent?.subscribe(() => this.parentReleased()) ?? (() => {});
+  }
+
+  /** Gestures on the canvas hold its windows' gates only. */
+  private held() {
+    return holds.size > 0 && gates.has(this);
+  }
+
+  private parentReleased() {
+    if (this.frozen) {
+      // Still frozen itself: back to catching up when idle, if that's what it does.
+      if (this.stale && this.want && this.idle) {
+        stale.add(this);
+        scheduleThaw();
+      }
+      return;
+    }
+    if (!this.stale) return;
+    this.stale = false;
+    this.release();
   }
 
   subscribe(l: Listener) {
@@ -93,11 +133,15 @@ export class FreezeGate {
     if (frozen === this.want) return;
     this.want = frozen;
     if (frozen) {
-      this.frozen = true;
+      this.own = true;
       return;
     }
     stale.delete(this);
-    if (holds.size) return; // catches up when the gesture ends
+    if (this.held()) return; // catches up when the gesture ends
+    if (this.parent?.frozen) {
+      this.own = false; // catches up when the view it's in is let go
+      return;
+    }
     this.stale = false;
     this.release();
   }
@@ -107,19 +151,19 @@ export class FreezeGate {
     if (this.stale || !this.frozen) return;
     this.stale = true;
     this.staleSince = performance.now();
-    if (!this.want || !this.idle) return; // catches up when it's let go
+    if (!this.want || !this.idle || this.parent?.frozen) return; // catches up when it's let go
     stale.add(this);
     scheduleThaw();
   }
 
   /** Thaw just long enough to render what changed (React renders store updates in a microtask). */
   thaw() {
-    if (!this.want || holds.size) return;
+    if (!this.want || this.held() || this.parent?.frozen) return;
     this.stale = false;
     this.lastThaw = performance.now();
     this.release();
     setTimeout(() => {
-      if (this.want || holds.size) this.frozen = true;
+      if (this.want || this.held()) this.own = true;
     });
   }
 
@@ -133,20 +177,21 @@ export class FreezeGate {
   }
 
   hold() {
-    this.frozen = true;
+    this.own = true;
   }
 
   /** The gesture is over: show what changed meanwhile (or go back to waiting for an idle moment). */
   unhold() {
     if (this.want) {
-      if (this.stale && this.idle) {
+      if (this.stale && this.idle && !this.parent?.frozen) {
         stale.add(this);
         scheduleThaw();
       }
       return;
     }
-    if (!this.stale) {
-      this.frozen = false; // nothing it shows changed: nothing to re-render
+    // Nothing it shows changed: nothing to re-render. (Or the view it's in is frozen: it catches up then.)
+    if (!this.stale || this.parent?.frozen) {
+      this.own = false;
       return;
     }
     this.stale = false;
@@ -154,7 +199,7 @@ export class FreezeGate {
   }
 
   private release() {
-    this.frozen = false;
+    this.own = false;
     for (const l of this.listeners) l();
   }
 }

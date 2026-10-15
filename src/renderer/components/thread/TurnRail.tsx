@@ -49,7 +49,16 @@ function layoutTicks(n: number, H: number, focus: number | null): { top: number[
  * to hit however long the thread is; hovering shows the turn's opening message, and clicking
  * smooth-scrolls there.
  */
-export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadId: string; scroller: React.RefObject<HTMLDivElement | null> }) {
+export const TurnRail = memo(function TurnRail({
+  threadId,
+  scroller,
+  showFrom,
+}: {
+  threadId: string;
+  scroller: React.RefObject<HTMLDivElement | null>;
+  /** Draw the transcript down to a turn it hasn't drawn yet (a long one is drawn from its end). */
+  showFrom: (turnId: string) => void;
+}) {
   const turns = useThread(
     threadId,
     (s) => {
@@ -182,7 +191,12 @@ export const TurnRail = memo(function TurnRail({ threadId, scroller }: { threadI
 
   const jump = (id: string) => {
     const root = scroller.current;
-    const target = root?.querySelector<HTMLElement>(`section.turn[data-turn="${CSS.escape(id)}"]`);
+    const find = () => root?.querySelector<HTMLElement>(`section.turn[data-turn="${CSS.escape(id)}"]`);
+    let target = find();
+    if (root && !target) {
+      showFrom(id);
+      target = find();
+    }
     if (!root || !target) return;
     // The rects are screen px (zoomed on the canvas); scrollTop is layout px.
     const top = (target.getBoundingClientRect().top - root.getBoundingClientRect().top) / scaleOf(root) + root.scrollTop - 12;

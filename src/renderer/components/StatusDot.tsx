@@ -5,9 +5,28 @@ import { PROVIDERS } from "../agents";
 
 export type ThreadState = "attention" | "running" | "error" | "unread" | "idle";
 
+/**
+ * Each thread's state, worked out once per store state: the canvas's beacons and minimap, the inbox
+ * and every window ask for it on each store update, for every window on the board.
+ */
+let statesOf: ReturnType<typeof useThreads.getState> | null = null;
+let states = new Map<string, ThreadState>();
+let asking = new Set<string | null>();
+
 /** What a thread wants from you right now, most urgent first. */
 export function threadStateOf(s: ReturnType<typeof useThreads.getState>, threadId: string): ThreadState {
-  for (const r of Object.values(s.requests)) if (r.threadId === threadId) return "attention";
+  if (s !== statesOf) {
+    statesOf = s;
+    states = new Map();
+    asking = new Set(Object.values(s.requests).map((r) => r.threadId));
+  }
+  let state = states.get(threadId);
+  if (!state) states.set(threadId, (state = stateOf(s, threadId)));
+  return state;
+}
+
+function stateOf(s: ReturnType<typeof useThreads.getState>, threadId: string): ThreadState {
+  if (asking.has(threadId)) return "attention";
   const t = s.threads[threadId];
   if (s.external[threadId]) return "running";
   if (s.live[threadId]?.activeTurnId || t?.status.type === "active") {

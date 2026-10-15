@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { useUI, activeBoard, isThread } from "./state/ui";
+import { useEffect, useRef, type ComponentType, type ReactElement } from "react";
+import { useUI, activeBoard, isThread, type ViewMode } from "./state/ui";
 import { useConn } from "./state/conn";
 import { useThreads } from "./state/threads";
 import { closeCodeTab, closePane, closeTab, closeWindow, focusWindow, forkThread, newThreadNear } from "./state/actions";
@@ -18,6 +18,7 @@ import { TooltipHost } from "./components/ui/Tooltip";
 import { HoverCardHost } from "./components/HoverCards";
 import { ImageViewer } from "./components/ImageViewer";
 import { ContextMenuHost } from "./components/ContextMenuHost";
+import { Kept } from "./components/ui/Kept";
 import { fitAll, toggleMaximize, viewport } from "./components/canvas/viewport";
 import { bridge } from "./bridge";
 
@@ -141,6 +142,26 @@ function useShortcuts() {
   }, []);
 }
 
+const VIEWS: Record<ViewMode, ComponentType> = { focus: FocusView, canvas: CanvasView, code: CodeView, inbox: InboxView };
+
+/**
+ * The mode's view. Each is built the first time you go to it and kept from then on, so switching
+ * back is instant: leaving the canvas used to take down every window, and coming back build them all.
+ */
+function Views({ mode }: { mode: ViewMode }) {
+  // The same element each time: switching shows and hides them without re-rendering any.
+  const built = useRef(new Map<ViewMode, ReactElement>());
+  if (!built.current.has(mode)) {
+    const View = VIEWS[mode];
+    built.current.set(mode, <View />);
+  }
+  return [...built.current].map(([m, view]) => (
+    <Kept key={m} shown={m === mode}>
+      {view}
+    </Kept>
+  ));
+}
+
 export function App() {
   const mode = useUI((s) => s.mode);
   useTheme();
@@ -153,7 +174,7 @@ export function App() {
       <div className="app-body">
         <SidebarShell />
         <main className="main">
-          {mode === "focus" ? <FocusView /> : mode === "canvas" ? <CanvasView /> : mode === "code" ? <CodeView /> : <InboxView />}
+          <Views mode={mode} />
         </main>
       </div>
       <CommandPalette />

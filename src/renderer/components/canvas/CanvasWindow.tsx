@@ -1,4 +1,4 @@
-import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, startTransition, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Maximize2, Minimize2, X, GitFork, FolderGit2, Copy } from "lucide-react";
 import { activeBoard, updateBoard, useUI, isApp, isDraft, isFile, isThread, filePath, type CanvasWin } from "../../state/ui";
@@ -7,6 +7,7 @@ import { AppPane, AppTile } from "./AppPane";
 import { copyText } from "../../lib/files";
 import { markAttended, markSeen, useThreads } from "../../state/threads";
 import { FreezeContext, FreezeGate, holdViews, useThread } from "../../state/useThread";
+import { useShown } from "../ui/Kept";
 import { closeWindow, focusWindow, forkThread, renameThread } from "../../state/actions";
 import { threadTitle } from "../../state/projects";
 import { ThreadPane, threadMoreItems } from "../thread/ThreadPane";
@@ -131,9 +132,11 @@ export const CanvasWindow = memo(function CanvasWindow({ win, focused }: { win: 
   // A view nobody can see (culled, or the full view under the card, or the card over the full view)
   // is frozen: it stops following the store, catches up now and then when the app is idle, and all
   // at once when it's back.
-  const gate = useMemo(() => new FreezeGate(), []);
+  // (Both also freeze while another mode shows: they follow the canvas's own gate, see Kept.)
+  const shownGate = useContext(FreezeContext);
+  const gate = useMemo(() => new FreezeGate(true, shownGate), [shownGate]);
   // The card only shows zoomed out, and catches up then: no idle catch-ups behind the full view.
-  const cardGate = useMemo(() => new FreezeGate(false), []);
+  const cardGate = useMemo(() => new FreezeGate(false, shownGate), [shownGate]);
   useLayoutEffect(() => gate.connect(), [gate]);
   useLayoutEffect(() => cardGate.connect(), [cardGate]);
   useLayoutEffect(() => {
@@ -182,17 +185,20 @@ export const CanvasWindow = memo(function CanvasWindow({ win, focused }: { win: 
   }, [warm]);
   const isCard = () => lod.current.card;
 
-  // On a canvas everything is on screen; only the window you've clicked counts as seen.
+  // On a canvas everything is on screen; only the window you've clicked counts as seen (and only
+  // while the canvas is what you're looking at).
+  const shown = useShown(focused);
+  const attended = focused && shown;
   useEffect(() => {
-    if (!focused || !isThread(win.threadId)) return;
+    if (!attended || !isThread(win.threadId)) return;
     markAttended(win.threadId, 1);
     return () => markAttended(win.threadId, -1);
-  }, [focused, win.threadId]);
+  }, [attended, win.threadId]);
   // ...and it stays seen: whatever marks it as new activity while you're on it, it never shimmers
   // for a click (before paint, so not even for a frame).
   useLayoutEffect(() => {
-    if (focused && state === "unread") markSeen(win.threadId);
-  }, [focused, state, win.threadId]);
+    if (attended && state === "unread") markSeen(win.threadId);
+  }, [attended, state, win.threadId]);
 
   const commit = useCallback(
     (r: Rect) => updateBoard((b) => ({ ...b, windows: b.windows.map((w) => (w.id === win.id ? { ...w, ...r, prev: undefined } : w)) })),

@@ -1,7 +1,8 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Bot, CircleAlert, CircleDashed, FileDiff, GitFork, LoaderCircle, Radar, SquareTerminal, Workflow } from "lucide-react";
 import { Chevron } from "../ui/Chevron";
-import { ownerOf } from "../../state/threads";
+import { ownerOf, useThreads } from "../../state/threads";
 import { useThread } from "../../state/useThread";
 import { shallowEqual } from "../../lib/shallow";
 import { PROVIDERS } from "../../agents";
@@ -221,6 +222,26 @@ function BackgroundWork({ threadId }: { threadId: string }) {
   );
 }
 
+/**
+ * A long thread is drawn from its end: the newest turns first (about FIRST_ITEMS items' worth, the
+ * view opens at the bottom), then older ones a chunk at a time when the app is idle. Opening a
+ * thread of thousands of items used to build all of it before the first frame.
+ */
+const FIRST_ITEMS = 120;
+const CHUNK_ITEMS = 160;
+
+/** Where to start drawing so the turns from there to `end` come to about `items` items (at least one turn). */
+function startFor(threadId: string, order: string[], end: number, items: number): number {
+  const turns = useThreads.getState().live[threadId]?.turns;
+  let i = end;
+  let n = 0;
+  while (i > 0 && (i === end || n < items)) {
+    i--;
+    n += 1 + (turns?.[order[i]]?.itemIds.length ?? 0);
+  }
+  return i;
+}
+
 export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | null }) {
   // Only what this level shows: a token streaming into an item re-renders that item, not the transcript.
   const lt = useThread(
@@ -234,6 +255,21 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
   const scroller = useRef<HTMLDivElement>(null);
   const ctx = useMemo(() => ({ threadId, cwd }), [threadId, cwd]);
   const loading = !lt || lt.loading;
+
+  // The oldest turn drawn so far (null: just the newest few). Older ones are added in idle time, as
+  // a transition, so a key or a click never waits on them; the view, laid out from its end, doesn't
+  // move as they come in above it.
+  const [oldest, setOldest] = useState<string | null>(null);
+  const order = lt?.turnOrder;
+  const found = order && oldest ? order.indexOf(oldest) : -1;
+  const start = !order ? 0 : found >= 0 ? found : startFor(threadId, order, order.length, FIRST_ITEMS);
+  useEffect(() => {
+    if (!order || !start) return;
+    const idle = requestIdleCallback(() => startTransition(() => setOldest(order[startFor(threadId, order, start, CHUNK_ITEMS)])), { timeout: 500 });
+    return () => cancelIdleCallback(idle);
+  }, [threadId, order, start]);
+  /** Draw down to `turnId` now (the rail jumping to a turn that isn't drawn yet). */
+  const showFrom = useCallback((turnId: string) => flushSync(() => setOldest(turnId)), []);
 
   // The transcript is laid out from its end (column-reverse, see .transcript): its scroll origin is the
   // bottom, so a view at the bottom stays there as replies grow, and one scrolled up stays on what it
@@ -276,14 +312,14 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
 
   return (
     <div className="transcript-wrap">
-    <div className="transcript" ref={scroller}>
+    <div className="transcript" ref={scroller} data-own-scroll="">
       <div className="transcript-inner">
-        {lt.olderCursor && (
+        {lt.olderCursor && !start && (
           <button className="load-older" onClick={() => void loadOlder(threadId)} disabled={lt.loadingOlder}>
             {lt.loadingOlder ? <LoaderCircle className="spin" size={12} /> : null} Load earlier turns
           </button>
         )}
-        {lt.turnOrder.map((id) => (
+        {(start ? lt.turnOrder.slice(start) : lt.turnOrder).map((id) => (
           <Turn key={id} turnId={id} ctx={ctx} />
         ))}
         <BackgroundWork threadId={threadId} />
@@ -297,7 +333,7 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
         <Approvals threadId={threadId} />
       </div>
     </div>
-    <TurnRail threadId={threadId} scroller={scroller} />
+    <TurnRail threadId={threadId} scroller={scroller} showFrom={showFrom} />
     </div>
   );
 }
