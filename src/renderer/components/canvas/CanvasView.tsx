@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Command, Copy, Folder, GitFork, LayoutGrid, MessageSquarePlus, Minus, Pencil, Plus, Scan, SquareDashed, Trash2, X, Code2, Inbox } from "lucide-react";
 import { activeBoard, appId, newId, updateBoard, useUI, type AppKind, type Board } from "../../state/ui";
 import { DRAG_APP } from "../Titlebar";
@@ -10,6 +10,9 @@ import { CanvasWindow } from "./CanvasWindow";
 import { Minimap } from "./Minimap";
 import { Beacons } from "./Beacons";
 import { CARD_ZOOM, MAX_ZOOM, fitAll, revealWindow, tidy, viewport, type Viewport } from "./viewport";
+import { updateLod } from "./lod";
+import { onLiveRect } from "./live";
+import { holdViews } from "../../state/useThread";
 import { Menu, type MenuItem } from "../Menu";
 import { promptText } from "../ui/Dialog";
 import { startAutoscroll } from "../../lib/autoscroll";
@@ -30,7 +33,6 @@ export function CanvasView() {
   const itemsRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const zoomLabelRef = useRef<HTMLButtonElement>(null);
-  const [card, setCard] = useState(board.viewport.zoom < CARD_ZOOM);
   const spaceDown = useRef(false);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const showLinks = useUI((s) => s.showLinks);
@@ -38,9 +40,30 @@ export function CanvasView() {
 
   // Load this board's saved viewport when switching boards.
   useLayoutEffect(() => {
-    viewport.load(board.viewport);
+    viewport.load(board.viewport, board.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [board.id]);
+
+  // Draw only the windows near the view, as cards when zoomed out (see lod.ts): again whenever
+  // windows move, come or go, or focus changes, and while a drag carries windows along.
+  useLayoutEffect(() => {
+    updateLod(viewport.vp, board.windows, focused);
+  }, [board.windows, focused]);
+  useEffect(() => {
+    let frame = 0;
+    const off = onLiveRect(() => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const ui = useUI.getState();
+        updateLod(viewport.vp, activeBoard(ui).windows, ui.focusedWindow);
+      });
+    });
+    return () => {
+      off();
+      cancelAnimationFrame(frame);
+    };
+  }, []);
 
   // Paint viewport changes straight to the DOM. While the view moves, the world and the dot grid are
   // GPU layers (.moving): the compositor moves and scales the windows as last drawn instead of
@@ -62,6 +85,8 @@ export function CanvasView() {
       moving = on;
       drawnAt = viewport.vp.zoom;
       view.classList.toggle("moving", on);
+      // Windows hold their views still while the canvas moves, and catch up once it settles.
+      holdViews("view", on);
       cancelAnimationFrame(undo);
       world.classList.remove("redraw");
     };
@@ -100,6 +125,8 @@ export function CanvasView() {
         setMoving(false);
       }
       place(vp);
+      const ui = useUI.getState();
+      updateLod(vp, activeBoard(ui).windows, ui.focusedWindow);
       if (vp.zoom === prev?.zoom) return;
 
       const g = GRID * vp.zoom;
@@ -108,11 +135,6 @@ export function CanvasView() {
       grid.hidden = vp.zoom < 0.45;
       zoomLabelRef.current!.textContent = `${Math.round(vp.zoom * 100)}%`;
       const nextCard = vp.zoom < CARD_ZOOM;
-      if (!prev || nextCard !== prev.zoom < CARD_ZOOM) {
-        // Back to full windows: render them without holding up the zoom (they're usually ready already).
-        if (nextCard) setCard(true);
-        else startTransition(() => setCard(false));
-      }
       // Things kept the same size on screen (window outlines and glows, link badges, card text)
       // follow a zoom live only on cards. Full windows catch up when it settles: restyling every
       // window each frame costs more than a moment of slightly-off outline shows.
@@ -125,6 +147,7 @@ export function CanvasView() {
       off();
       clearTimeout(settle);
       cancelAnimationFrame(undo);
+      holdViews("view", false);
     };
   }, []);
 
@@ -160,7 +183,7 @@ export function CanvasView() {
         viewport.zoomAt(factor, e.clientX - rect.left, e.clientY - rect.top);
         return;
       }
-      const inWindow = (e.target as HTMLElement).closest(".cwin:not(.card)");
+      const inWindow = (e.target as HTMLElement).closest(".cwin:not([data-lod])");
       if (inWindow && !e.shiftKey) return; // let transcripts scroll natively
       e.preventDefault();
       const k = e.deltaMode === 1 ? 32 : 1;
@@ -338,13 +361,13 @@ export function CanvasView() {
         }}
       >
         <div ref={gridRef} className="canvas-grid" />
-        <div ref={worldRef} className={`canvas-world ${card ? "lod-card" : ""}`}>
+        <div ref={worldRef} className="canvas-world">
           {/* Carries --inv-zoom. Not on the world itself: its transform changes every pan frame, and
               the windows opt in to inheriting --inv-zoom, so they'd be restyled every frame too. */}
           <div ref={itemsRef} className="canvas-items">
             <Links board={board} />
             {board.windows.map((w) => (
-              <CanvasWindow key={w.id} win={w} card={card} focused={focused === w.id} />
+              <CanvasWindow key={w.id} win={w} focused={focused === w.id} />
             ))}
           </div>
         </div>

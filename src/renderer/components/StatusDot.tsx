@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { useThreads } from "../state/threads";
+import { useThread } from "../state/useThread";
 import { PROVIDERS } from "../agents";
 
 export type ThreadState = "attention" | "running" | "error" | "unread" | "idle";
@@ -28,13 +29,13 @@ export function backgroundOnly(s: ReturnType<typeof useThreads.getState>, thread
 }
 
 export function useBackgroundOnly(threadId: string): number {
-  return useThreads((s) => backgroundOnly(s, threadId));
+  return useThread(threadId, (s) => backgroundOnly(s, threadId));
 }
 
 export const backgroundLabel = (n: number) => (n === 1 ? "Waiting on background work" : `Waiting on ${n} background tasks`);
 
 export function useThreadState(threadId: string): ThreadState {
-  return useThreads((s) => threadStateOf(s, threadId));
+  return useThread(threadId, (s) => threadStateOf(s, threadId));
 }
 
 export const STATE_LABEL: Record<ThreadState, string> = {
@@ -47,14 +48,14 @@ export const STATE_LABEL: Record<ThreadState, string> = {
 
 /** True when the thread's current turn is running in another process of its agent (VS Code, the CLI, a desktop app…). */
 export function useRunsElsewhere(threadId: string) {
-  return useThreads((s) => !!s.external[threadId]);
+  return useThread(threadId, (s) => !!s.external[threadId]);
 }
 
 export const StatusDot = memo(function StatusDot({ threadId }: { threadId: string }) {
   const state = useThreadState(threadId);
   const elsewhere = useRunsElsewhere(threadId);
   const background = useBackgroundOnly(threadId);
-  const agent = useThreads((s) => PROVIDERS[s.owner[threadId] ?? "codex"].name);
+  const agent = useThread(threadId, (s) => PROVIDERS[s.owner[threadId] ?? "codex"].name);
   const shown = state === "running" && background > 0;
   return (
     <span

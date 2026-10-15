@@ -31,9 +31,12 @@ class ViewportController {
   private frame = 0;
   /** True while painting a jump to another board's view rather than a pan or zoom. */
   jumping = false;
+  /** The board whose view this is. */
+  board: string | null = null;
 
-  load(vp: Viewport) {
+  load(vp: Viewport, board: string | null = this.board) {
     cancelAnimationFrame(this.anim);
+    this.board = board;
     this.vp = { ...vp };
     this.jumping = true;
     this.flush();

@@ -20,7 +20,7 @@ import {
   Layers,
 } from "lucide-react";
 import type { FileUpdateChange, ThreadItem } from "@shared/protocol";
-import { useThreads } from "../../state/threads";
+import { useThread } from "../../state/useThread";
 import { changeStats, duration, shortPath, unwrapCommand } from "../../lib/format";
 import { highlight } from "../../lib/markdown";
 import { Markdown } from "../Markdown";
@@ -122,7 +122,7 @@ function Reasoning({ item, live }: { item: Extract<ThreadItem, { type: "reasonin
       label={live ? <Shimmer text={heading ?? "Thinking"} /> : (heading ?? "Thought")}
       tone="muted"
     >
-      <Markdown text={text} className="md-muted" />
+      <Markdown text={text} className="md-muted" streaming={live} />
     </Disclosure>
   );
 }
@@ -325,7 +325,7 @@ function WebSearch({ item }: { item: Extract<ThreadItem, { type: "webSearch" }> 
  * down until it ends (early, if new input arrives), and then says how long it took.
  */
 function Sleep({ item, threadId, live }: { item: Extract<ThreadItem, { type: "sleep" }>; threadId: string; live: boolean }) {
-  const seen = useThreads((s) => s.live[threadId]?.sleeps[item.id]);
+  const seen = useThread(threadId, (s) => s.live[threadId]?.sleeps[item.id]);
   const waiting = live && seen?.endedAt == null;
   const [, tick] = useState(0);
   useEffect(() => {
@@ -415,7 +415,7 @@ export function activitySummary(items: ThreadItem[]): string {
 }
 
 export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: string; ctx: Ctx; live: boolean }) {
-  const item = useThreads((s) => s.live[ctx.threadId]?.items[itemId]);
+  const item = useThread(ctx.threadId, (s) => s.live[ctx.threadId]?.items[itemId]);
   if (!item) return null;
   switch (item.type) {
     case "userMessage":
@@ -440,7 +440,7 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
           <div className="plan-title">
             <ListChecks size={13} /> Plan
           </div>
-          <Markdown text={item.text} />
+          <Markdown text={item.text} streaming={live} />
           <PlanActions threadId={ctx.threadId} itemId={item.id} />
         </div>
       );

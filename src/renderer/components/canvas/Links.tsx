@@ -1,7 +1,8 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { useShallow } from "../../lib/shallow";
 import { GitFork } from "lucide-react";
 import { useThreads } from "../../state/threads";
+import { useThread } from "../../state/useThread";
 import { useUI, type Board, type CanvasWin } from "../../state/ui";
 import { openThread } from "../../state/actions";
 import { threadTitle } from "../../state/projects";
@@ -132,7 +133,7 @@ const LinkPath = memo(function LinkPath({ link }: { link: Link }) {
   const path = useRef<SVGPathElement>(null);
   const start = useRef<SVGCircleElement>(null);
   const focused = useUI((s) => s.focusedWindow === link.from.id || s.focusedWindow === link.to.id);
-  const running = useThreads((s) => !!s.live[link.to.threadId]?.activeTurnId || !!s.external[link.to.threadId]);
+  const running = useThread(link.to.threadId, (s) => !!s.live[link.to.threadId]?.activeTurnId || !!s.external[link.to.threadId]);
   useLinkGeometry(link, (g) => {
     path.current?.setAttribute("d", g.d);
     start.current?.setAttribute("cx", String(g.p1.x));
@@ -150,7 +151,8 @@ const LinkLabel = memo(function LinkLabel({ link }: { link: Link }) {
   const el = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const focused = useUI((s) => s.focusedWindow === link.from.id || s.focusedWindow === link.to.id);
-  const parentTitle = useThreads((s) => threadTitle(s.threads[link.from.threadId]));
+  const parentTitle = useThread(link.from.threadId, (s) => threadTitle(s.threads[link.from.threadId]));
+  const running = useThread(link.to.threadId, (s) => !!s.live[link.to.threadId]?.activeTurnId || !!s.external[link.to.threadId]);
   useLinkGeometry(link, (g) => {
     if (el.current) el.current.style.transform = `translate(${g.mid.x}px, ${g.mid.y}px) translate(-50%, -50%) scale(min(var(--inv-zoom, 1), 2.5))`;
   });
@@ -167,7 +169,7 @@ const LinkLabel = memo(function LinkLabel({ link }: { link: Link }) {
     <>
       <button
         ref={el}
-        className={`link-label ${focused ? "focused" : ""} ${link.direct ? "" : "indirect"}`}
+        className={`link-label ${focused ? "focused" : ""} ${running ? "running" : ""} ${link.direct ? "" : "indirect"}`}
         title={`${link.direct ? "Forked from" : "Descends from"} “${parentTitle}” — click to frame both, right-click for more`}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={frame}

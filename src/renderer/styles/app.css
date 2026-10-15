@@ -1197,6 +1197,11 @@ body.resizing .transcript {
   flex-direction: column;
   gap: 4px;
 }
+/* The end of the transcript, watched to tell whether the view is at the bottom (no space of its own). */
+.transcript-end {
+  height: 0;
+  margin-top: -4px;
+}
 .load-older {
   align-self: center;
   display: inline-flex;
@@ -1222,7 +1227,8 @@ body.resizing .transcript {
   content-visibility: auto;
   contain-intrinsic-size: auto 400px;
 }
-.turn.live {
+.turn.live,
+.turn[data-warm] {
   content-visibility: visible;
 }
 .turn + .turn {
@@ -2851,6 +2857,29 @@ html.autoscrolling[data-autoscroll="down"] * {
   box-shadow: var(--shadow);
   overflow: visible;
   transition: box-shadow 0.15s, border-color 0.15s;
+  /* Its size is its own (set from JS), and nothing inside lays out anything outside: a reply
+     growing in one window never sends layout up through the canvas. (No paint containment:
+     the glows and resize handles reach past the edge.) */
+  contain: size layout style;
+}
+/* Away from the view (lod.ts): nothing inside is styled, laid out or painted. */
+.cwin[data-culled] {
+  content-visibility: hidden;
+  animation: none;
+}
+/* Nothing animates where nobody can see it: in a culled window, or in a full view under its card.
+   An animation or transition that starts in a skipped subtree (a hidden window catching up, say)
+   never finishes, and Chrome produces a frame for it on every vsync from then on. */
+.cwin[data-culled]::before,
+.cwin[data-culled]::after,
+.cwin[data-culled] *,
+.cwin[data-culled] *::before,
+.cwin[data-culled] *::after,
+.cwin[data-lod="card"] > .thread-pane *,
+.cwin[data-lod="card"] > .thread-pane *::before,
+.cwin[data-lod="card"] > .thread-pane *::after {
+  animation: none !important;
+  transition: none !important;
 }
 .cwin > .thread-pane {
   border-radius: 11px;
@@ -2918,80 +2947,115 @@ html.autoscrolling[data-autoscroll="down"] * {
 .cwin::after {
   --px: inherit;
 }
-/* Unseen finish: a highlight travels around the border until you click in. */
+/* Unseen finish: an accent border with a light gliding along its top and bottom edges until you
+   click in. The lights are bars that slide (a transform, on the compositor): a light swept around
+   a masked ring would repaint, or stay off the compositor, every frame. */
+.cwin.state-unread {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-2));
+}
+.cwin.state-unread::before,
 .cwin.state-unread::after {
   content: "";
   position: absolute;
-  inset: calc(-1 * var(--px));
+  left: 10px;
   z-index: 3;
-  border-radius: inherit;
-  padding: calc(1.5 * var(--px));
-  background: linear-gradient(
-    105deg,
-    color-mix(in srgb, var(--accent) 45%, transparent) 30%,
-    color-mix(in srgb, var(--accent) 30%, #fff) 50%,
-    color-mix(in srgb, var(--accent) 45%, transparent) 70%
-  );
-  background-size: 300% 100%;
-  animation: sweep 2s ease-in-out infinite alternate;
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
+  width: calc((100% - 20px) * 0.4);
+  height: calc(1.5 * var(--px));
+  border-radius: var(--px);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 30%, #fff), transparent);
+  animation: glint 2s ease-in-out infinite alternate;
   pointer-events: none;
+}
+.cwin.state-unread::before {
+  top: calc(-1 * var(--px));
+}
+/* The bottom light trails the top one, so it reads as one light crossing the window at a slant. */
+.cwin.state-unread::after {
+  bottom: calc(-1 * var(--px));
+  animation-delay: -0.25s;
+}
+/* From the right end of the edge to the left and back (with alternate): (1 - 0.4) / 0.4 of its width. */
+@keyframes glint {
+  from {
+    transform: translateX(150%);
+  }
+  to {
+    transform: translateX(0);
+  }
 }
 .cwin.state-unread {
   box-shadow: var(--shadow), 0 0 calc(28 * var(--px)) calc(-8 * var(--px)) color-mix(in srgb, var(--accent) 70%, transparent);
 }
-/* Needs your input: a slow amber pulse. */
+/* Needs your input: a slow amber pulse. The glow is drawn once and faded in and out (opacity runs
+   on the compositor; an animated box-shadow would repaint the window every frame). */
 .cwin.state-attention {
   border-color: var(--amber);
   border-width: var(--px);
+  box-shadow: var(--shadow), 0 0 0 var(--px) color-mix(in srgb, var(--amber) 50%, transparent);
+}
+.cwin.state-attention::before {
+  content: "";
+  position: absolute;
+  inset: calc(-1 * var(--px));
+  border-radius: inherit;
+  box-shadow: 0 0 0 calc(3 * var(--px)) color-mix(in srgb, var(--amber) 35%, transparent), 0 0 calc(32 * var(--px)) calc(-6 * var(--px)) var(--amber);
+  opacity: 0;
   animation: attn-glow 1.8s ease-in-out infinite;
+  pointer-events: none;
 }
 @keyframes attn-glow {
-  0%,
-  100% {
-    box-shadow: var(--shadow), 0 0 0 var(--px) color-mix(in srgb, var(--amber) 50%, transparent);
-  }
   50% {
-    box-shadow: var(--shadow), 0 0 0 calc(3 * var(--px)) color-mix(in srgb, var(--amber) 35%, transparent), 0 0 calc(32 * var(--px)) calc(-6 * var(--px)) var(--amber);
+    opacity: 1;
   }
 }
-/* Working: a light runs along the top edge. */
+/* Working: a light runs along the top edge. It's a third of the edge long and slides (a transform,
+   on the compositor) from one end to the other: (1 - 0.35) / 0.35 of its own width. */
 .cwin.state-running::before {
   content: "";
   position: absolute;
   top: calc(-1 * var(--px));
   left: 14px;
-  right: 14px;
   z-index: 3;
+  width: calc((100% - 28px) * 0.35);
   height: calc(2 * var(--px));
   border-radius: var(--px);
-  background: linear-gradient(90deg, transparent, var(--green), transparent) no-repeat;
-  background-size: 35% 100%;
+  background: linear-gradient(90deg, transparent, var(--green), transparent);
   animation: run-sweep 1.4s ease-in-out infinite alternate;
   pointer-events: none;
 }
 /* Back and forth (alternate), easing at each end, so it never snaps back to the start. */
 @keyframes run-sweep {
   from {
-    background-position: 0% 0;
+    transform: translateX(0);
   }
   to {
-    background-position: 100% 0;
+    transform: translateX(185.71%);
   }
 }
 .cwin.state-error {
   border-color: color-mix(in srgb, var(--red) 70%, var(--line-2));
   border-width: var(--px);
 }
+/* The window's own frame shows it working or waiting for you (the lit edge, the glow), so the dot in
+   its title bar doesn't ping too, and in windows you're not working in, the live bits inside the
+   transcript (spinners, the Working pulse and shimmer) hold still. Chrome often runs those on the
+   main thread (they start while the transcript scrolls to follow new text, or in the header), and
+   each frame of one re-layers the whole canvas, for as long as the thread runs. */
+.cwin .pane-header .status-dot::after,
+.cwin:not(.focused) .thread-pane .shimmer-light {
+  display: none;
+}
+.cwin:not(.focused) .thread-pane :is(.spin, .pulse, .loading-pulse) {
+  animation: none;
+}
 
 @media (prefers-reduced-motion: reduce) {
+  .cwin.state-unread::before,
   .cwin.state-unread::after,
-  .cwin.state-attention,
+  .cwin.state-attention::before,
   .cwin.state-running::before,
+  .link-label.running::after,
+  .beacon.unread .beacon-dot::after,
   .mm-win.unread,
   .mm-win.attention,
   .beacon,
@@ -3058,20 +3122,28 @@ html.autoscrolling[data-autoscroll="down"] * {
   cursor: nwse-resize;
 }
 
-/* Semantic zoom: summary cards. Text is counter-scaled to stay legible. */
-.cwin.card {
+/* Semantic zoom: summary cards (lod.ts sets data-lod). Text is counter-scaled to stay legible. */
+.cwin[data-lod="card"] {
   background: var(--bg-1);
 }
-/* The card covers the window. A full view that's been shown stays mounted underneath, its contents
+/* The card is always there, hidden until the window is zoomed out, so switching is a style change
+   and not a render. It covers the window; the full view stays mounted underneath, its contents
    skipped by style, layout and paint, so zooming back in is a repaint instead of a rebuild. */
-.cwin.card > .tcard {
+.cwin > .tcard {
+  display: none;
+}
+.cwin[data-lod="card"] > .tcard {
+  display: flex;
   position: absolute;
   inset: 0;
   z-index: 1;
   background: inherit;
 }
-.cwin.card > .thread-pane {
+.cwin[data-lod="card"] > .thread-pane {
   content-visibility: hidden;
+}
+.cwin[data-lod="card"] > .rz {
+  display: none;
 }
 .tcard {
   --s: min(var(--inv-zoom, 1), 4);
@@ -3357,10 +3429,23 @@ html.autoscrolling[data-autoscroll="down"] * {
   animation: ping 1.6s var(--ease) infinite;
   pointer-events: none;
 }
+/* Unseen finish: the dot glints (a bright copy fading in and out, on the compositor). */
 .beacon.unread .beacon-dot {
-  background: linear-gradient(105deg, var(--accent) 35%, color-mix(in srgb, var(--accent) 30%, #fff) 50%, var(--accent) 65%);
-  background-size: 300% 100%;
-  animation: sweep 1.6s ease-in-out infinite alternate;
+  position: relative;
+}
+.beacon.unread .beacon-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 30%, #fff);
+  opacity: 0;
+  animation: glint-fade 1.6s ease-in-out infinite alternate;
+}
+@keyframes glint-fade {
+  to {
+    opacity: 1;
+  }
 }
 .beacon.error {
   --c: var(--red);
@@ -4877,15 +4962,11 @@ body.resizing .sidebar-dock {
   opacity: 0.95;
   stroke-width: 2.2;
 }
+/* Running: the line brightens and its badge pings. (Not flowing dashes: SVG strokes animate on
+   the main thread, repainting the canvas every frame for as long as the fork runs.) */
 .link.running .link-line {
   stroke-dasharray: 7 6;
-  animation: link-flow 0.9s linear infinite;
   opacity: 0.85;
-}
-@keyframes link-flow {
-  to {
-    stroke-dashoffset: -13;
-  }
 }
 .link-arrowhead {
   fill: var(--accent);
@@ -4923,6 +5004,15 @@ body.resizing .sidebar-dock {
 }
 .link-label.indirect {
   border-style: dashed;
+}
+.link-label.running::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  animation: ping 1.6s var(--ease) infinite;
+  pointer-events: none;
 }
 .icon-btn.on {
   color: var(--accent);
@@ -5135,6 +5225,9 @@ body.resizing .sidebar-dock {
   left: 0;
   top: 8px;
   width: 100%;
+  /* Evenly spaced at rest (layoutTicks without a focus); the fisheye under the pointer is set from JS. */
+  height: calc((100% - 16px) / var(--n));
+  transform: translateY(calc(var(--i) * 100%));
   display: flex;
   align-items: center;
   justify-content: center;

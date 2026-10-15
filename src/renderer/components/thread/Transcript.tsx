@@ -1,7 +1,8 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
 import { Bot, ChevronRight, CircleAlert, CircleDashed, FileDiff, GitFork, LoaderCircle, Radar, SquareTerminal, Workflow } from "lucide-react";
-import { ownerOf, useThreads } from "../../state/threads";
+import { ownerOf } from "../../state/threads";
+import { useThread } from "../../state/useThread";
+import { shallowEqual } from "../../lib/shallow";
 import { PROVIDERS } from "../../agents";
 import { forkThread, loadOlder, resendUnanswered } from "../../state/actions";
 import type { BackgroundTask, ThreadItem } from "@shared/protocol";
@@ -16,7 +17,7 @@ import { Shimmer } from "../ui/Shimmer";
 type Ctx = { threadId: string; cwd: string | null };
 
 function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: boolean }) {
-  const items = useThreads(useShallow((s) => ids.map((id) => s.live[ctx.threadId]?.items[id]).filter(Boolean) as ThreadItem[]));
+  const items = useThread(ctx.threadId, (s) => ids.map((id) => s.live[ctx.threadId]?.items[id]).filter(Boolean) as ThreadItem[], shallowEqual);
   const [open, setOpen] = useState(false);
   if (live) {
     // While the agent works, show the most recent steps live.
@@ -65,16 +66,18 @@ function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: bool
 }
 
 const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
-  const turn = useThreads((s) => s.live[ctx.threadId]?.turns[turnId]);
-  const types = useThreads(
-    useShallow((s) => {
+  const turn = useThread(ctx.threadId, (s) => s.live[ctx.threadId]?.turns[turnId]);
+  const types = useThread(
+    ctx.threadId,
+    (s) => {
       const lt = s.live[ctx.threadId];
       return turn ? turn.itemIds.map((id) => lt?.items[id]?.type ?? "") : [];
-    }),
+    },
+    shallowEqual,
   );
   const [showDiff, setShowDiff] = useState(false);
-  const elsewhere = useThreads((s) => s.external[ctx.threadId]?.turnId === turnId);
-  const background = useThreads((s) => s.background[ctx.threadId]?.length ?? 0);
+  const elsewhere = useThread(ctx.threadId, (s) => s.external[ctx.threadId]?.turnId === turnId);
+  const background = useThread(ctx.threadId, (s) => s.background[ctx.threadId]?.length ?? 0);
   if (!turn) return null;
   const live = turn.status === "inProgress" && !turn.stale;
 
@@ -149,7 +152,7 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
 
 /** A steer that landed after the final answer: the turn ended with the user's message unanswered. */
 function UnansweredNotice({ threadId, lastItemId, count }: { threadId: string; lastItemId: string | undefined; count: number }) {
-  const item = useThreads((s) => (lastItemId ? s.live[threadId]?.items[lastItemId] : undefined));
+  const item = useThread(threadId, (s) => (lastItemId ? s.live[threadId]?.items[lastItemId] : undefined));
   if (!item || item.type !== "userMessage" || count < 2) return null;
   return (
     <div className="unanswered">
@@ -187,8 +190,8 @@ const TASK_ICON: Record<BackgroundTask["kind"], typeof Bot> = { shell: SquareTer
  */
 function BackgroundWork({ threadId }: { threadId: string }) {
   const count = useBackgroundOnly(threadId);
-  const tasks = useThreads((s) => s.background[threadId]);
-  const agent = useThreads((s) => PROVIDERS[s.owner[threadId] ?? "codex"].name);
+  const tasks = useThread(threadId, (s) => s.background[threadId]);
+  const agent = useThread(threadId, (s) => PROVIDERS[s.owner[threadId] ?? "codex"].name);
   const [, tick] = useState(0);
   useEffect(() => {
     if (!count) return;
@@ -218,23 +221,39 @@ function BackgroundWork({ threadId }: { threadId: string }) {
 }
 
 export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | null }) {
-  const lt = useThreads((s) => s.live[threadId]);
+  // Only what this level shows: a token streaming into an item re-renders that item, not the transcript.
+  const lt = useThread(
+    threadId,
+    (s) => {
+      const l = s.live[threadId];
+      return l && { turnOrder: l.turnOrder, olderCursor: l.olderCursor, loadingOlder: l.loadingOlder, notice: l.notice, error: l.error, loading: !l.hydrated && l.hydrating };
+    },
+    shallowEqual,
+  );
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
+  const end = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const ctx = useMemo(() => ({ threadId, cwd }), [threadId, cwd]);
-  const loading = !lt || (!lt.hydrated && lt.hydrating);
+  const loading = !lt || lt.loading;
 
   // Stick to the bottom while content grows, unless the user scrolled up.
   // Re-attaches once history has loaded (the scroller doesn't exist while the spinner shows).
   useLayoutEffect(() => {
     const el = scroller.current;
     const inner = content.current;
-    if (!el || !inner) return;
+    const bottom = end.current;
+    if (!el || !inner || !bottom) return;
     stick.current = true;
-    const onScroll = () => {
-      stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    };
+    // At the bottom = the end marker within 80px of the view. Watched rather than measured on each
+    // scroll: reading the scroll height in a scroll event forces a layout of whatever just changed.
+    const io = new IntersectionObserver(
+      ([e]) => {
+        // A hidden view (a culled canvas window, one under its card) has no bounds: keep what it was.
+        if (e.rootBounds?.height) stick.current = e.isIntersecting;
+      },
+      { root: el, rootMargin: "0px 0px 80px 0px" },
+    );
     const ro = new ResizeObserver(() => {
       if (stick.current) el.scrollTop = el.scrollHeight;
     });
@@ -243,14 +262,14 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
     const unstick = () => {
       stick.current = false;
     };
+    io.observe(bottom);
     ro.observe(inner);
     ro.observe(el); // the composer growing (a question docking on it) shrinks the view from below
-    el.addEventListener("scroll", onScroll, { passive: true });
     el.addEventListener("ret:unstick", unstick);
     el.scrollTop = el.scrollHeight;
     return () => {
+      io.disconnect();
       ro.disconnect();
-      el.removeEventListener("scroll", onScroll);
       el.removeEventListener("ret:unstick", unstick);
     };
   }, [threadId, loading]);
@@ -284,6 +303,7 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
           </div>
         )}
         <Approvals threadId={threadId} />
+        <div className="transcript-end" ref={end} />
       </div>
     </div>
     <TurnRail threadId={threadId} scroller={scroller} />

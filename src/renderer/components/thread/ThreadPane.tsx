@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { useShallow } from "../../lib/shallow";
 import {
   Archive,
   ChevronDown,
@@ -16,6 +16,7 @@ import {
   Paperclip,
 } from "lucide-react";
 import { useThreads, markAttended, markVisible } from "../../state/threads";
+import { useThread } from "../../state/useThread";
 import { addFilesToThread } from "../../state/attach";
 import { viewFile } from "../../lib/viewFile";
 import { openFileRef, resolvePath } from "../../lib/files";
@@ -50,7 +51,7 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
   const size = useSizeClass(ref);
   const showDetails = useUI((s) => s.showDetails);
   // Relative file references in this thread resolve against its working directory.
-  const cwd = useThreads((s) => s.threads[threadId]?.cwd) ?? useUI.getState().drafts[threadId]?.cwd;
+  const cwd = useThread(threadId, (s) => s.threads[threadId]?.cwd) ?? useUI.getState().drafts[threadId]?.cwd;
 
   useEffect(() => {
     if (isDraft(threadId)) return;
@@ -170,15 +171,15 @@ export function threadMoreItems(threadId: string, rename: () => void): MenuItem[
 }
 
 function TranscriptFor({ threadId }: { threadId: string }) {
-  const cwd = useThreads((s) => s.threads[threadId]?.cwd ?? null);
+  const cwd = useThread(threadId, (s) => s.threads[threadId]?.cwd ?? null);
   return <Transcript threadId={threadId} cwd={cwd} />;
 }
 
 function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, windowControls, size }: Props & { size: SizeClass }) {
-  const thread = useThreads((s) => s.threads[threadId]);
+  const thread = useThread(threadId, (s) => s.threads[threadId]);
   const draft = useUI((s) => s.drafts[threadId]);
   const worktree = useUI((s) => s.worktrees[threadId]);
-  const usage = useThreads((s) => s.live[threadId]?.tokenUsage);
+  const usage = useThread(threadId, (s) => s.live[threadId]?.tokenUsage);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
@@ -294,7 +295,7 @@ function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, wi
 
 /** Tiny windows: just enough to monitor and unblock a thread. */
 function Glance({ threadId }: { threadId: string }) {
-  const last = useThreads((s) => {
+  const last = useThread(threadId, (s) => {
     const lt = s.live[threadId];
     if (!lt) return null;
     for (let i = lt.turnOrder.length - 1; i >= 0; i--) {
@@ -306,8 +307,8 @@ function Glance({ threadId }: { threadId: string }) {
     }
     return null;
   });
-  const preview = useThreads((s) => s.threads[threadId]?.preview);
-  const req = useThreads((s) => Object.values(s.requests).find((r) => r.threadId === threadId));
+  const preview = useThread(threadId, (s) => s.threads[threadId]?.preview);
+  const req = useThread(threadId, (s) => Object.values(s.requests).find((r) => r.threadId === threadId));
   return (
     <div className="glance">
       {req ? (
@@ -320,7 +321,7 @@ function Glance({ threadId }: { threadId: string }) {
 }
 
 function SidePanel({ threadId }: { threadId: string }) {
-  const lastTurn = useThreads((s) => {
+  const lastTurn = useThread(threadId, (s) => {
     const lt = s.live[threadId];
     if (!lt) return null;
     for (let i = lt.turnOrder.length - 1; i >= 0; i--) {
@@ -329,7 +330,7 @@ function SidePanel({ threadId }: { threadId: string }) {
     }
     return null;
   });
-  const usage = useThreads((s) => s.live[threadId]?.tokenUsage);
+  const usage = useThread(threadId, (s) => s.live[threadId]?.tokenUsage);
   const [openDiff, setOpenDiff] = useState(false);
   const files = lastTurn?.diff ? splitDiff(lastTurn.diff) : [];
   return (
@@ -393,7 +394,7 @@ function SidePanel({ threadId }: { threadId: string }) {
 
 /** Thread facts plus fork lineage: jump to the parent or any fork without hunting in the sidebar. */
 function ThreadInfo({ threadId }: { threadId: string }) {
-  const thread = useThreads((s) => s.threads[threadId]);
+  const thread = useThread(threadId, (s) => s.threads[threadId]);
   const parent = useThreads((s) => (thread?.forkedFromId ? s.threads[thread.forkedFromId] : undefined));
   const forks = useThreads(
     useShallow((s) =>
@@ -403,7 +404,7 @@ function ThreadInfo({ threadId }: { threadId: string }) {
     ),
   );
   const worktree = useUI((s) => s.worktrees[threadId]);
-  const owner = useThreads((s) => s.owner[threadId] ?? "codex");
+  const owner = useThread(threadId, (s) => s.owner[threadId] ?? "codex");
   if (!thread) return null;
   return (
     <section>
