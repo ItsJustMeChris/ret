@@ -4,7 +4,8 @@ import { Copy, ExternalLink, FolderOpen, X } from "lucide-react";
 import { bridge, isDesktop } from "../bridge";
 import { copyText, revealLabel } from "../lib/files";
 
-type Shown = { src: string; path?: string | null; alt?: string };
+/** `host`: the paired device the image's file is on (null: this computer). */
+type Shown = { src: string; path?: string | null; alt?: string; host?: string | null };
 
 const useViewer = create<{ shown: Shown | null }>(() => ({ shown: null }));
 
@@ -37,7 +38,8 @@ export function ImageViewer() {
         <span className="iv-name" title={shown.path ?? undefined}>
           {name}
         </span>
-        {shown.path && isDesktop && (
+        {/* Other apps here can't open a paired device's files. */}
+        {shown.path && isDesktop && !shown.host && (
           <>
             <button className="icon-btn" title="Open with default app" onClick={() => void bridge.shell.openPath(shown.path!)}>
               <ExternalLink size={14} />

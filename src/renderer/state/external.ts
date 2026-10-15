@@ -1,8 +1,9 @@
 import { bridge } from "../bridge";
-import { clients } from "../rpc/client";
-import { PROVIDER_IDS, type ProviderId } from "@shared/bridge";
-import { PROVIDERS } from "../agents";
+import { rpcFor } from "../rpc/client";
+import { PROVIDER_IDS, providerOf, type EngineId } from "@shared/bridge";
+import { PROVIDERS, agentOf } from "../agents";
 import { useConn } from "./conn";
+import { engineName, hostEngines, useHosts } from "./hosts";
 import type { Thread } from "@shared/protocol";
 import { loadGoal, mergeTurns } from "./actions";
 import { lineageRoot, spawnedBy, threadTitle } from "./projects";
@@ -20,6 +21,8 @@ import { agentsUnasked, backfillLineage, listAgentsOf } from "./lineage";
  *
  * Claude Code's engine answers the same way: a session another claude process is busy
  * with (per Claude Code's session registry) has its last turn unfinished.
+ *
+ * A paired device's engines are watched the same way, for the apps running on that device.
  */
 
 const POLL_FOCUSED_MS = 3000;
@@ -31,24 +34,41 @@ let timer = 0;
 let polling = false;
 let started = false;
 
-/** Providers whose threads can be seen running in other apps, and are on and connected. */
-const watched = () => PROVIDER_IDS.filter((p) => PROVIDERS[p].external && clients[p].info && useConn.getState().settings?.enabled[p] !== false);
+const hooked = new Set<EngineId>();
+
+/** Engines whose threads can be seen running in other apps, and are on and connected: here and on paired devices. */
+function watched(): EngineId[] {
+  const local = PROVIDER_IDS.filter((p) => useConn.getState().settings?.enabled[p] !== false);
+  const remote = Object.keys(useHosts.getState().hosts).flatMap(hostEngines);
+  return [...local, ...remote].filter((e) => {
+    if (!PROVIDERS[providerOf(e)].external) return false;
+    hook(e);
+    return !!rpcFor(e).info;
+  });
+}
+
+const kick = () => {
+  clearTimeout(timer);
+  void poll();
+};
+
+/** A fresh connection to an engine: look at all of its threads again, now. */
+function hook(e: EngineId) {
+  if (hooked.has(e)) return;
+  hooked.add(e);
+  rpcFor(e).onReady(() => {
+    for (const [id, owner] of Object.entries(useThreads.getState().owner)) if (owner === e) lastSeen.delete(id);
+    kick();
+  });
+}
 
 export function startExternalWatcher() {
   if (started) return;
   started = true;
-  const kick = () => {
-    clearTimeout(timer);
-    void poll();
-  };
   window.addEventListener("focus", kick);
-  for (const p of PROVIDER_IDS) {
-    if (!PROVIDERS[p].external) continue;
-    clients[p].onReady(() => {
-      for (const [id, owner] of Object.entries(useThreads.getState().owner)) if (owner === p) lastSeen.delete(id);
-      kick();
-    });
-  }
+  watched();
+  // A device paired later gets its engines watched from then on.
+  useHosts.subscribe(() => watched());
 }
 
 function schedule() {
@@ -79,16 +99,16 @@ const AGENT_ASKS = 5;
  * one of whose agents still runs elsewhere, to see that agent through. Threads loaded here need
  * none of this: their agents' events come here.
  */
-async function agentsAtWork(p: ProviderId, listed: Thread[], now: number): Promise<Thread[]> {
+async function agentsAtWork(p: EngineId, listed: Thread[], now: number): Promise<Thread[]> {
   const st = useThreads.getState();
-  const quiet = PROVIDERS[p].externalQuietS ?? 10 * 60;
+  const quiet = agentOf(p).externalQuietS ?? 10 * 60;
   const due: Thread[] = [];
   const seen = new Set<string>();
   const add = (t: Thread | undefined) => {
     if (t && !seen.has(t.id)) seen.add(t.id), due.push(t);
   };
   // An agent at work elsewhere is only listed (and so checked on) through its root: those go first.
-  for (const id of Object.keys(st.external)) if (spawnedBy(st.threads[id])) add(st.threads[lineageRoot(st.threads, id, spawnedBy)]);
+  for (const id of Object.keys(st.external)) if (st.owner[id] === p && spawnedBy(st.threads[id])) add(st.threads[lineageRoot(st.threads, id, spawnedBy)]);
   for (const t of listed) {
     if (spawnedBy(t) || t.status.type !== "notLoaded" || !agentsUnasked(t)) continue;
     if (st.external[t.id] || now - t.updatedAt < quiet) add(t);
@@ -96,10 +116,10 @@ async function agentsAtWork(p: ProviderId, listed: Thread[], now: number): Promi
   return listAgentsOf(p, due.slice(0, AGENT_ASKS));
 }
 
-async function pass(p: ProviderId) {
-  const res = await clients[p].request("thread/list", { limit: 40, sortKey: "updated_at", useStateDbOnly: true });
+async function pass(p: EngineId) {
+  const res = await rpcFor(p).request("thread/list", { limit: 40, sortKey: "updated_at", useStateDbOnly: true });
   const now = Date.now() / 1000;
-  if (PROVIDERS[p].subagentThreads) {
+  if (agentOf(p).subagentThreads) {
     const listed = new Set(res.data.map((t) => t.id));
     res.data.push(...(await agentsAtWork(p, res.data, now)).filter((t) => !listed.has(t.id)));
   }
@@ -127,7 +147,7 @@ async function pass(p: ProviderId) {
       if (marked) setExternal(t.id, null);
       continue;
     }
-    const quiet = PROVIDERS[p].externalQuietS;
+    const quiet = PROVIDERS[providerOf(p)].externalQuietS;
     if (quiet != null && now - t.updatedAt > quiet) {
       // Stopped changing: finished without us seeing it, or the other process died mid-turn.
       if (marked) setExternal(t.id, null);
@@ -139,8 +159,8 @@ async function pass(p: ProviderId) {
   await Promise.all(checks.map(({ thread, moved }) => check(p, thread, moved)));
 }
 
-async function check(p: ProviderId, t: Thread, moved: boolean) {
-  const res = await clients[p].request("thread/turns/list", { threadId: t.id, limit: 1, sortDirection: "desc", itemsView: "notLoaded" });
+async function check(p: EngineId, t: Thread, moved: boolean) {
+  const res = await rpcFor(p).request("thread/turns/list", { threadId: t.id, limit: 1, sortDirection: "desc", itemsView: "notLoaded" });
   const last = res.data[0];
   const st = useThreads.getState();
   const was = st.external[t.id];
@@ -160,7 +180,7 @@ async function check(p: ProviderId, t: Thread, moved: boolean) {
       useThreads.setState((s) => ({ unread: { ...s.unread, [t.id]: true } }));
     }
     if (!visible || !document.hasFocus()) {
-      bridge.notify(last?.status === "failed" ? "Turn failed elsewhere" : `${PROVIDERS[p].name} finished elsewhere`, threadTitle(t));
+      bridge.notify(last?.status === "failed" ? "Turn failed elsewhere" : `${engineName(p)} finished elsewhere`, threadTitle(t));
     }
   } else if (moved) {
     // A turn came and went between two looks (say one a background task's end woke): nothing to
@@ -185,7 +205,7 @@ function setExternal(threadId: string, run: ExternalRun | null) {
 }
 
 /** Bring a thread's transcript up to date: re-fetch the newest turns if it's on screen, else drop the stale cache. */
-function refresh(p: ProviderId, threadId: string) {
+function refresh(p: EngineId, threadId: string) {
   const st = useThreads.getState();
   const lt = st.live[threadId];
   if (!lt?.hydrated) return;
@@ -197,7 +217,7 @@ function refresh(p: ProviderId, threadId: string) {
     });
     return;
   }
-  void clients[p]
+  void rpcFor(p)
     .request("thread/turns/list", { threadId, limit: TAIL_TURNS, sortDirection: "desc", itemsView: "full" })
     .then((res) => mergeTurns(threadId, res.data, null, "tail"))
     .catch((err) => console.warn("tail refresh failed", err));

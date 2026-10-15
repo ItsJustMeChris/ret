@@ -1,11 +1,13 @@
 import { bridge } from "../bridge";
-import { clients, rpcFor } from "../rpc/client";
-import { PROVIDER_IDS, type ProviderId, type ProvidersSettings } from "@shared/bridge";
+import { dropClient, rpcFor } from "../rpc/client";
+import { PROVIDER_IDS, engineId, hostOf, providerOf, type EngineId, type ProviderId, type ProvidersSettings } from "@shared/bridge";
 import type { ServerRequest, Thread, ThreadItem, UserInput } from "@shared/protocol";
-import { PROVIDERS, accessFor, pickProvider } from "../agents";
-import { enabledProviders, patchProvider, signedIn, useConn, type ProviderConn } from "./conn";
+import { PROVIDERS, accessFor, agentOf, pickProvider } from "../agents";
+import { dropProvider, emptyProviderConn, enabledProviders, enabledProvidersOn, patchProvider, signedIn, useConn, type ProviderConn } from "./conn";
 import { guarded, toast } from "./toasts";
-import { lineageRoot, normPath, projectIndex, projectKeyFor, spawnedBy, threadTitle, type Workspace } from "./projects";
+import { hostOfKey, lineageRoot, normPath, scopedKey, spawnedBy, threadTitle, type Workspace } from "./projects";
+import { projectKeyNow } from "./projectTree";
+import { engineName, hostEngines, hostName, hostPlatform, useHosts, watchHosts } from "./hosts";
 import { fillComposer } from "./composerDrafts";
 import { agentsUnasked, backfillLineage, discoverThread, lineageKnown, listAgentsOf } from "./lineage";
 import { cancelTitle, isTitleThread, titleEvent, titleFromMessage } from "./titles";
@@ -15,6 +17,7 @@ import {
   enqueueNotification,
   flushNow,
   mergeThread,
+  hostOfThread,
   delegated,
   ownerOf,
   patchLive,
@@ -44,7 +47,7 @@ export function bootstrap() {
   if (booted) return;
   booted = true;
 
-  bridge.agents.onStatus((status) => patchProvider(status.provider, { status }));
+  bridge.agents.onStatus((status) => patchProvider(engineId(status.provider, status.host), { status }));
   for (const p of PROVIDER_IDS) void bridge.agents.getStatus(p).then((status) => patchProvider(p, { status }));
   bridge.agents.onSettings(applyProviderSettings);
   void bridge.agents.getSettings().then(applyProviderSettings);
@@ -53,7 +56,20 @@ export function bootstrap() {
   bridge.appUpdate.onState((appUpdate) => useConn.setState({ appUpdate }));
   void bridge.appUpdate.getState().then((appUpdate) => useConn.setState({ appUpdate }));
 
-  for (const p of PROVIDER_IDS) wireProvider(p);
+  for (const p of PROVIDER_IDS) wireEngine(p);
+  // Paired devices' engines join as the devices come and go.
+  watchHosts((added, removed) => {
+    for (const host of added) {
+      for (const e of hostEngines(host)) {
+        wireEngine(e);
+        void bridge.agents.getStatus(e).then(
+          (status) => patchProvider(e, { status }),
+          () => {},
+        );
+      }
+    }
+    removed.forEach(dropHost);
+  });
 
   setThreadHooks({
     onTurnCompleted: (threadId, turn) => {
@@ -62,7 +78,7 @@ export function bootstrap() {
       const visible = useThreads.getState().visible[threadId];
       if ((!visible || !document.hasFocus()) && !delegated(useThreads.getState().threads[threadId], turn)) {
         const title = threadTitle(useThreads.getState().threads[threadId]);
-        bridge.notify(turn.status === "failed" ? "Turn failed" : `${PROVIDERS[ownerOf(threadId)].name} finished`, title);
+        bridge.notify(turn.status === "failed" ? "Turn failed" : `${engineName(ownerOf(threadId))} finished`, title);
       }
     },
   });
@@ -90,7 +106,7 @@ export function bootstrap() {
 /** Providers turned on or off: a disabled provider's threads leave the sidebar until it's back. */
 function applyProviderSettings(settings: ProvidersSettings) {
   useConn.setState({ settings });
-  const off = PROVIDER_IDS.filter((p) => !settings.enabled[p]);
+  const off: EngineId[] = PROVIDER_IDS.filter((p) => !settings.enabled[p]);
   if (!off.length) return;
   useThreads.setState((s) => {
     const threads = Object.fromEntries(Object.entries(s.threads).filter(([id]) => !off.includes(s.owner[id] ?? "codex")));
@@ -98,9 +114,52 @@ function applyProviderSettings(settings: ProvidersSettings) {
   });
 }
 
-/** Connect one provider's engine to the stores. */
-function wireProvider(p: ProviderId) {
-  const rpc = clients[p];
+/** A paired device was forgotten (or forgot this one): its engines and everything from them go, views included. */
+function dropHost(host: string) {
+  const engines = new Set<EngineId>(hostEngines(host));
+  for (const e of engines) {
+    dropClient(e);
+    dropProvider(e);
+    listed.delete(e);
+  }
+  const { owner } = useThreads.getState();
+  const drafts = useUI.getState().drafts;
+  const views = [
+    ...Object.keys(owner).filter((id) => engines.has(owner[id])),
+    ...Object.keys(drafts).filter((id) => hostOfKey(drafts[id].projectKey) === host),
+  ];
+  views.forEach(closeEverywhere);
+  useThreads.setState((s) => {
+    const gone = (id: string) => engines.has(s.owner[id]);
+    const keep = <T,>(rec: Record<string, T>) => Object.fromEntries(Object.entries(rec).filter(([id]) => !gone(id)));
+    return {
+      threads: keep(s.threads),
+      owner: keep(s.owner),
+      live: keep(s.live),
+      requests: Object.fromEntries(Object.entries(s.requests).filter(([, r]) => !engines.has(r.engine))),
+      workspaces: s.workspaces.filter((w) => w.host !== host),
+    };
+  });
+}
+
+/**
+ * Engines whose threads are listed: this computer's that are on, and paired devices' that are
+ * up (or on their way, or not heard from yet).
+ */
+export function listedEngines(): EngineId[] {
+  const conn = useConn.getState();
+  const remote = Object.keys(useHosts.getState().hosts)
+    .flatMap(hostEngines)
+    .filter((e) => {
+      const st = conn.providers[e]?.status?.state;
+      return st === undefined || st === "running" || st === "starting";
+    });
+  return [...enabledProviders(conn), ...remote];
+}
+
+/** Connect one engine (this computer's or a paired device's) to the stores. */
+function wireEngine(p: EngineId) {
+  const rpc = rpcFor(p);
   rpc.onNotification((method, params) => {
     if (titleEvent(method, params)) return; // a hidden title thread's, not one of ours
     switch (method) {
@@ -139,11 +198,11 @@ function wireProvider(p: ProviderId) {
         void loadWorkspaces(p);
         return;
       case "turn/started":
-        if (PROVIDERS[p].subagentThreads) discoverThread(p, params?.threadId);
+        if (agentOf(p).subagentThreads) discoverThread(p, params?.threadId);
         break;
       case "item/started":
       case "item/completed":
-        if (PROVIDERS[p].subagentThreads && method === "item/started") {
+        if (agentOf(p).subagentThreads && method === "item/started") {
           if (params?.item?.type === "subAgentActivity") discoverThread(p, params.item.agentThreadId);
           if (params?.item?.type === "collabAgentToolCall") for (const id of params.item.receiverThreadIds ?? []) discoverThread(p, id);
         }
@@ -179,7 +238,7 @@ function wireProvider(p: ProviderId) {
     addPendingRequest(p, req);
     if (req.method === "mcpServer/elicitation/request") noteAppRequest(req.params.threadId, req.params.turnId ?? "", req.params);
     if (threadId && !useThreads.getState().visible[threadId]) {
-      bridge.notify(`${PROVIDERS[p].name} needs your input`, threadTitle(useThreads.getState().threads[threadId]));
+      bridge.notify(`${engineName(p)} needs your input`, threadTitle(useThreads.getState().threads[threadId]));
     }
   });
 
@@ -197,7 +256,7 @@ function wireProvider(p: ProviderId) {
         if (lt.activeTurnId) wasRunning.push(id);
         live[id] = lt.activeTurnId ? { ...emptyLive() } : { ...lt, subscribed: false };
       }
-      const requests = Object.fromEntries(Object.entries(s.requests).filter(([, r]) => r.provider !== p));
+      const requests = Object.fromEntries(Object.entries(s.requests).filter(([, r]) => r.engine !== p));
       // The engine tells a new connection what still runs in the background.
       const background = Object.fromEntries(Object.entries(s.background).filter(([id]) => (s.owner[id] ?? "codex") !== p));
       return { live, requests, background };
@@ -207,8 +266,12 @@ function wireProvider(p: ProviderId) {
     void loadConfigDefaults(p);
     void loadRateLimits(p);
     void loadThreadList(p).then(() => {
-      const visible = useThreads.getState().visible;
+      const { visible, owner, live } = useThreads.getState();
       for (const id of wasRunning) if (visible[id]) void hydrateThread(id);
+      // A view that couldn't load its thread before this engine was up (a paired device's, still connecting) tries again.
+      for (const id of Object.keys(visible)) {
+        if (owner[id] === p && live[id]?.error && !live[id]?.hydrated && !wasRunning.includes(id)) void hydrateThread(id);
+      }
     });
   });
 }
@@ -217,9 +280,9 @@ function wireProvider(p: ProviderId) {
 // Account & models
 // ---------------------------------------------------------------------------
 
-export async function loadAccount(p: ProviderId) {
+export async function loadAccount(p: EngineId) {
   try {
-    const account = (await clients[p].request("account/read", { refreshToken: false })) as ProviderConn["account"];
+    const account = (await rpcFor(p).request("account/read", { refreshToken: false })) as ProviderConn["account"];
     patchProvider(p, { account, accountLoaded: true });
   } catch (err) {
     console.warn(`${p}: account/read failed`, err);
@@ -227,9 +290,9 @@ export async function loadAccount(p: ProviderId) {
   }
 }
 
-export async function loadRateLimits(p: ProviderId) {
+export async function loadRateLimits(p: EngineId) {
   try {
-    const rateLimits = await clients[p].request("account/rateLimits/read", undefined as never);
+    const rateLimits = await rpcFor(p).request("account/rateLimits/read", undefined as never);
     patchProvider(p, { rateLimits });
   } catch {
     /* not available for api-key auth */
@@ -243,20 +306,20 @@ function usageDays(buckets: { startDate: string; tokens: number | bigint }[] | n
   return days;
 }
 
-/** Providers with an `account/usage/read` in flight. */
-const usageReads = new Set<ProviderId>();
+/** Engines with an `account/usage/read` in flight. */
+const usageReads = new Set<EngineId>();
 
 /**
  * Tokens per day, for the home screen's chart. Reads again once what's held is older than
  * `maxAgeMs`. Engines that take a while (Claude's transcripts) send running totals meanwhile.
  */
-export async function loadTokenUsage(p: ProviderId, maxAgeMs = 0) {
-  const held = useConn.getState().providers[p].tokenUsage;
+export async function loadTokenUsage(p: EngineId, maxAgeMs = 0) {
+  const held = useConn.getState().providers[p]?.tokenUsage;
   if (usageReads.has(p) || (held && Date.now() - held.at < maxAgeMs)) return;
   usageReads.add(p);
   patchProvider(p, (c) => ({ tokenUsage: { at: c.tokenUsage?.at ?? 0, days: c.tokenUsage?.days ?? {}, loading: true } }));
   try {
-    const res = await clients[p].request("account/usage/read", {});
+    const res = await rpcFor(p).request("account/usage/read", {});
     patchProvider(p, { tokenUsage: { at: Date.now(), days: usageDays(res.dailyUsageBuckets), loading: false } });
   } catch {
     // Not available for this engine or sign-in.
@@ -267,9 +330,9 @@ export async function loadTokenUsage(p: ProviderId, maxAgeMs = 0) {
 }
 
 /** Values from the provider's own config that new threads inherit, for showing what "no override" means. */
-export async function loadConfigDefaults(p: ProviderId) {
+export async function loadConfigDefaults(p: EngineId) {
   try {
-    const res = (await clients[p].request("config/read", {})) as { config?: Record<string, unknown> };
+    const res = (await rpcFor(p).request("config/read", {})) as { config?: Record<string, unknown> };
     const c = res.config ?? {};
     patchProvider(p, {
       defaults: {
@@ -283,15 +346,15 @@ export async function loadConfigDefaults(p: ProviderId) {
   }
 }
 
-export async function loadModels(p: ProviderId) {
+export async function loadModels(p: EngineId) {
   try {
-    const res = await clients[p].request("model/list", { limit: 100 });
+    const res = await rpcFor(p).request("model/list", { limit: 100 });
     patchProvider(p, { models: res.data.filter((m) => !m.hidden) });
   } catch (err) {
     console.warn(`${p}: model/list failed`, err);
   }
   try {
-    const res = (await clients[p].request("collaborationMode/list", {})) as { data: ProviderConn["modes"] };
+    const res = (await rpcFor(p).request("collaborationMode/list", {})) as { data: ProviderConn["modes"] };
     patchProvider(p, { modes: res.data });
   } catch {
     /* an engine without collaboration modes */
@@ -309,7 +372,7 @@ async function startLoginImpl(p: ProviderId, kind: "browser" | "device" = "brows
     void watchTerminalLogin(p);
     return;
   }
-  const res = await clients[p].request("account/login/start", kind === "browser" ? { type: "chatgpt" } : { type: "chatgptDeviceCode" });
+  const res = await rpcFor(p).request("account/login/start", kind === "browser" ? { type: "chatgpt" } : { type: "chatgptDeviceCode" });
   if (res.type === "chatgpt") {
     patchProvider(p, { login: { loginId: res.loginId, kind, authUrl: res.authUrl } });
     await bridge.shell.openExternal(res.authUrl);
@@ -341,11 +404,11 @@ async function watchTerminalLogin(p: ProviderId) {
 export async function cancelLogin(p: ProviderId) {
   const login = useConn.getState().providers[p].login;
   patchProvider(p, { login: null });
-  if (login && login.kind !== "terminal") await clients[p].request("account/login/cancel", { loginId: login.loginId }).catch(() => {});
+  if (login && login.kind !== "terminal") await rpcFor(p).request("account/login/cancel", { loginId: login.loginId }).catch(() => {});
 }
 
 async function logoutImpl(p: ProviderId) {
-  await clients[p].request("account/logout", undefined as never);
+  await rpcFor(p).request("account/logout", undefined as never);
   await loadAccount(p);
 }
 
@@ -353,21 +416,30 @@ async function logoutImpl(p: ProviderId) {
 // Thread list & history
 // ---------------------------------------------------------------------------
 
-const listing = new Map<ProviderId, Promise<void>>();
-/** Providers whose thread list has loaded (or failed) at least once: their threads' owners are known. */
-const listed = new Set<ProviderId>();
+const listing = new Map<EngineId, Promise<void>>();
+/** Engines whose thread list has loaded (or failed) at least once: their threads' owners are known. */
+const listed = new Set<EngineId>();
 const ownerWaiters = new Set<() => void>();
+const wakeOwnerWaiters = () => {
+  for (const w of [...ownerWaiters]) w();
+};
 useThreads.subscribe((s, prev) => {
-  if (s.owner !== prev.owner) for (const w of [...ownerWaiters]) w();
+  if (s.owner !== prev.owner) wakeOwnerWaiters();
+});
+// Paired devices turning up, or their engines coming up or failing, settle who owns what too.
+useHosts.subscribe(wakeOwnerWaiters);
+useConn.subscribe((s, prev) => {
+  if (s.providers !== prev.providers) wakeOwnerWaiters();
 });
 
 /**
  * The provider a thread lives in. A thread restored from the last session (a tab, a canvas window)
  * can ask before the thread lists say who owns it; then this waits for them rather than guessing.
  */
-export async function ownerFor(threadId: string): Promise<ProviderId> {
+export async function ownerFor(threadId: string): Promise<EngineId> {
   const known = () => useThreads.getState().owner[threadId];
-  const settled = () => !!known() || enabledProviders().every((p) => listed.has(p));
+  // Paired devices are known a moment after start, and their lists after they connect.
+  const settled = () => !!known() || (useHosts.getState().loaded && listedEngines().every((p) => listed.has(p)));
   if (!settled()) {
     await new Promise<void>((resolve) => {
       const timer = window.setTimeout(done, 30_000);
@@ -384,9 +456,9 @@ export async function ownerFor(threadId: string): Promise<ProviderId> {
   }
   return known() ?? "codex";
 }
-/** Refresh the thread list from every enabled provider (or just `only`), and the workspaces that group it. */
-export function loadThreadList(only?: ProviderId): Promise<void> {
-  const ps = only ? [only] : enabledProviders();
+/** Refresh the thread list from every engine (or just `only`), and the workspaces that group it. */
+export function loadThreadList(only?: EngineId): Promise<void> {
+  const ps = only ? [only] : listedEngines();
   for (const p of ps) void loadWorkspaces(p);
   return Promise.all(ps.map(listProvider)).then(() => {});
 }
@@ -394,33 +466,52 @@ export function loadThreadList(only?: ProviderId): Promise<void> {
 /** Folders already asked about this session, worktree or not. */
 const askedCheckouts = new Set<string>();
 
-/** Find the threads running in linked git worktrees, so they group with their main checkout. */
+/**
+ * Find the threads running in linked git worktrees, so they group with their main checkout. Each
+ * device is asked about its own folders; a paired device's are recorded under its key.
+ */
 async function resolveCheckouts() {
   const known = useUI.getState().checkouts;
-  const cwds = [...new Set(Object.values(useThreads.getState().threads).map((t) => t.cwd))].filter((c) => c && !known[c] && !askedCheckouts.has(c));
-  if (!cwds.length) return;
-  cwds.forEach((c) => askedCheckouts.add(c));
-  const found = await bridge.git.mainCheckouts(cwds).catch(() => ({}));
-  if (Object.keys(found).length) useUI.setState((s) => ({ checkouts: { ...s.checkouts, ...found } }));
+  const { threads, owner } = useThreads.getState();
+  const byHost = new Map<string | null, Set<string>>();
+  for (const t of Object.values(threads)) {
+    const host = hostOf(owner[t.id] ?? "codex");
+    const key = scopedKey(host, t.cwd);
+    if (!t.cwd || known[key] || askedCheckouts.has(key)) continue;
+    askedCheckouts.add(key);
+    let set = byHost.get(host);
+    if (!set) byHost.set(host, (set = new Set()));
+    set.add(t.cwd);
+  }
+  await Promise.all(
+    [...byHost].map(async ([host, cwds]) => {
+      const found = await bridge.git.mainCheckouts([...cwds], host).catch(() => ({}) as Record<string, string>);
+      const scoped = Object.fromEntries(Object.entries(found).map(([dir, main]) => [scopedKey(host, dir), main]));
+      if (Object.keys(scoped).length) useUI.setState((s) => ({ checkouts: { ...s.checkouts, ...scoped } }));
+    }),
+  );
 }
 
 /**
  * The engine's named workspaces (the ChatGPT and Codex apps' projects). Their apps run engines
  * of their own, so a change made there only shows up on the next refresh.
  */
-async function loadWorkspaces(p: ProviderId) {
-  if (!PROVIDERS[p].workspaces) return;
+async function loadWorkspaces(p: EngineId) {
+  if (!PROVIDERS[providerOf(p)].workspaces) return;
+  const host = hostOf(p);
   try {
     const all: Workspace[] = [];
     let cursor: string | null = null;
     for (let page = 0; page < 10; page++) {
-      const res: import("@shared/protocol/generated/v2").ProjectListResponse = await clients[p].request("project/list", { cursor, limit: 100 });
-      all.push(...res.data.map((w) => ({ id: w.id, name: w.name, roots: w.roots.map((r) => r.path) })));
+      const res: import("@shared/protocol/generated/v2").ProjectListResponse = await rpcFor(p).request("project/list", { cursor, limit: 100 });
+      all.push(...res.data.map((w) => ({ id: w.id, name: w.name, roots: w.roots.map((r) => r.path), ...(host ? { host } : {}) })));
       cursor = res.nextCursor;
       if (!cursor) break;
     }
+    // Each device's workspaces replace only that device's.
     const cur = useThreads.getState().workspaces;
-    if (JSON.stringify(cur) !== JSON.stringify(all)) useThreads.setState({ workspaces: all });
+    const mine = cur.filter((w) => (w.host ?? null) === host);
+    if (JSON.stringify(mine) !== JSON.stringify(all)) useThreads.setState({ workspaces: [...cur.filter((w) => (w.host ?? null) !== host), ...all] });
   } catch (err) {
     console.warn(`${p}: project/list failed`, err);
   }
@@ -436,7 +527,7 @@ const AGENT_PARENTS = 30;
  * appear when the thread is opened (mergeTurns). Only agents whose parent is known too: one on its
  * own, cut off from what it was doing, is just noise.
  */
-async function listSubagents(p: ProviderId, parents: Thread[]): Promise<Thread[]> {
+async function listSubagents(p: EngineId, parents: Thread[]): Promise<Thread[]> {
   const agents: Thread[] = [];
   let cursor: string | null = null;
   try {
@@ -478,7 +569,7 @@ async function listSubagents(p: ProviderId, parents: Thread[]): Promise<Thread[]
   return out;
 }
 
-function listProvider(p: ProviderId): Promise<void> {
+function listProvider(p: EngineId): Promise<void> {
   const inflight = listing.get(p);
   if (inflight) return inflight;
   const run = (async () => {
@@ -486,7 +577,7 @@ function listProvider(p: ProviderId): Promise<void> {
     let cursor: string | null = null;
     try {
       for (let page = 0; page < 20; page++) {
-        const res: import("@shared/protocol").ThreadListResponse = await clients[p].request("thread/list", {
+        const res: import("@shared/protocol").ThreadListResponse = await rpcFor(p).request("thread/list", {
           limit: 100,
           cursor,
           sortKey: "updated_at",
@@ -519,7 +610,7 @@ function listProvider(p: ProviderId): Promise<void> {
       // (A subagent's source already names its parent.)
       void backfillLineage(all.filter((t) => !spawnedBy(t)).map((t) => t.id));
       // Then the agents, which take a few more lists: the sidebar shows what it has meanwhile.
-      if (PROVIDERS[p].subagentThreads) {
+      if (agentOf(p).subagentThreads) {
         void listSubagents(p, all).then((agents) => {
           if (agents.length) upsertThreads(p, agents);
         });
@@ -599,7 +690,7 @@ export function mergeTurns(
   const threadActive = st.threads[threadId]?.status.type === "active" || external;
   // Agents it started that the sidebar hasn't met (Codex lists its newer agents only by parent).
   const owner = st.owner[threadId] ?? "codex";
-  if (PROVIDERS[owner].subagentThreads) {
+  if (agentOf(owner).subagentThreads) {
     const unknown = new Set<string>();
     for (const t of turnsDesc) for (const it of t.items ?? []) if (it.type === "subAgentActivity" && !st.threads[it.agentThreadId]) unknown.add(it.agentThreadId);
     for (const id of unknown) discoverThread(owner, id);
@@ -675,7 +766,7 @@ export function ensureSubscribed(threadId: string): Promise<void> {
 }
 
 /** Engines that said they have no goals this connection (the feature off in their config): not asked again until they reconnect. */
-const goalsOff = new Set<ProviderId>();
+const goalsOff = new Set<EngineId>();
 
 /**
  * Fetch a thread's goal. Live events keep it current while the thread runs here; one running in
@@ -683,7 +774,7 @@ const goalsOff = new Set<ProviderId>();
  */
 export async function loadGoal(threadId: string) {
   const p = await ownerFor(threadId);
-  if (!PROVIDERS[p].goals || goalsOff.has(p)) return;
+  if (!agentOf(p).goals || goalsOff.has(p)) return;
   const mark = goalMark(threadId);
   try {
     const res = await rpcFor(p).request("thread/goal/get", { threadId });
@@ -765,9 +856,9 @@ export interface TurnOverrides {
  * The collaboration mode to send with a turn. A mode carries its own model and effort (and wins
  * over the turn's), so it gets the ones you picked, or the mode's suggestions, or the thread's.
  */
-function collaborationFor(threadId: string, provider: ProviderId, prefs: TurnOverrides) {
+function collaborationFor(threadId: string, engine: EngineId, prefs: TurnOverrides) {
   if (!prefs.mode) return undefined;
-  const conn = useConn.getState().providers[provider];
+  const conn = useConn.getState().providers[engine] ?? emptyProviderConn();
   const preset = conn.modes.find((m) => m.mode === prefs.mode);
   const live = useThreads.getState().live[threadId]?.settings;
   const model =
@@ -809,9 +900,9 @@ export async function sendMessage(
   }
 
   let threadId = target;
-  const provider = isDraft(target) ? draftProvider(target) : await ownerFor(target);
-  const agent = PROVIDERS[provider];
-  const access = prefs.access ? accessFor(provider, prefs.access) : undefined;
+  const provider = isDraft(target) ? draftEngine(target) : await ownerFor(target);
+  const agent = PROVIDERS[providerOf(provider)];
+  const access = prefs.access ? accessFor(providerOf(provider), prefs.access) : undefined;
   if (isDraft(target)) {
     const draft = ui.drafts[target];
     if (!draft) throw new Error("Draft no longer exists");
@@ -834,7 +925,8 @@ export async function sendMessage(
         },
       },
     }));
-    if (draft.projectKey !== normPath(draft.cwd)) {
+    const host = hostOfKey(draft.projectKey);
+    if (draft.projectKey !== scopedKey(host, normPath(draft.cwd, hostPlatform(host)))) {
       useUI.setState((s) => ({ threadProject: { ...s.threadProject, [threadId]: draft.projectKey } }));
     }
     replaceDraft(target, threadId);
@@ -901,10 +993,17 @@ function settingsFrom(res: {
   };
 }
 
-/** The provider a draft will start its thread with. */
+/** The agent a draft will start its thread with (of those on the device its project is on). */
 export function draftProvider(draftId: string): ProviderId {
   const ui = useUI.getState();
-  return pickProvider(enabledProviders(), ui.drafts[draftId]?.provider, ui.lastAgent);
+  const draft = ui.drafts[draftId];
+  return pickProvider(enabledProvidersOn(draft ? hostOfKey(draft.projectKey) : null), draft?.provider, ui.lastAgent);
+}
+
+/** The engine a draft will start its thread in: its agent, on its project's device. */
+export function draftEngine(draftId: string): EngineId {
+  const draft = useUI.getState().drafts[draftId];
+  return engineId(draftProvider(draftId), draft ? hostOfKey(draft.projectKey) : null);
 }
 
 /**
@@ -982,7 +1081,7 @@ export async function interrupt(threadId: string) {
 export function respondToRequest(key: string, result: unknown) {
   const req = useThreads.getState().requests[key];
   if (!req) return;
-  clients[req.provider].respond(req.id, result);
+  rpcFor(req.engine).respond(req.id, result);
   removePendingRequest(key);
 }
 
@@ -1021,13 +1120,11 @@ export interface ForkOptions {
 }
 
 async function forkThreadImpl(threadId: string, opts: ForkOptions = {}): Promise<string> {
-  const { threads, workspaces } = useThreads.getState();
-  const source = threads[threadId];
+  const source = useThreads.getState().threads[threadId];
   if (!source) throw new Error("Unknown thread");
-  const ui = useUI.getState();
-  const projectKey = projectKeyFor(source, threads, projectIndex(ui.projects, workspaces, ui.checkouts), ui.threadProject);
+  const projectKey = projectKeyNow(source);
 
-  const worktree = opts.worktree ? await bridge.git.createWorktree(source.cwd, threadTitle(source)) : undefined;
+  const worktree = opts.worktree ? await bridge.git.createWorktree(source.cwd, threadTitle(source), hostOfThread(threadId)) : undefined;
   const cwd = worktree?.path;
 
   const provider = ownerOf(threadId);
@@ -1037,7 +1134,7 @@ async function forkThreadImpl(threadId: string, opts: ForkOptions = {}): Promise
     cwd: cwd ?? null,
     excludeTurns: true,
     // A fork carries the thread's goal, but waits for you to say something before working on it.
-    ...(PROVIDERS[provider].goals ? { deferGoalContinuation: true } : {}),
+    ...(agentOf(provider).goals ? { deferGoalContinuation: true } : {}),
   });
   const fork = res.thread;
   lineageKnown(fork.id);
@@ -1072,17 +1169,19 @@ export function newThreadNear(fromThreadId: string | null) {
     if (d) newThread(d.projectKey, d.cwd, { provider: d.provider });
     return;
   }
-  const { threads, workspaces } = useThreads.getState();
-  const t = fromThreadId ? threads[fromThreadId] : undefined;
+  const t = fromThreadId ? useThreads.getState().threads[fromThreadId] : undefined;
   if (!t) {
     useUI.setState({ paletteOpen: true });
     return;
   }
-  const key = projectKeyFor(t, threads, projectIndex(ui.projects, workspaces, ui.checkouts), ui.threadProject);
-  newThread(key, ui.projects[key]?.path ?? t.cwd, { provider: ownerOf(t.id) });
+  const key = projectKeyNow(t);
+  newThread(key, ui.projects[key]?.path ?? t.cwd, { provider: providerOf(ownerOf(t.id)) });
 }
 
-/** A new, not-yet-started thread. Its provider defaults to Settings' choice; the composer can change it. */
+/**
+ * A new, not-yet-started thread, on the device `projectKey` is on. Its provider defaults to
+ * Settings' choice; the composer can change it.
+ */
 export function newThread(projectKey: string, cwd: string, opts: OpenOptions & { provider?: ProviderId } = {}) {
   const id = `draft:${newId()}`;
   const provider = opts.provider;
@@ -1118,10 +1217,12 @@ export interface OpenOptions {
  * Focus mode, a window beside the thread's on the canvas. Already open: brought forward and
  * taken to `line`.
  */
-export function openFile(path: string, opts: { line?: number; col?: number; from?: string | null } = {}) {
+export function openFile(path: string, opts: { line?: number; col?: number; from?: string | null; host?: string | null } = {}) {
+  // On the device it came from: the thread's, unless said otherwise.
+  const host = opts.host !== undefined ? opts.host : opts.from && !isFile(opts.from) && !isDraft(opts.from) ? hostOfThread(opts.from) : null;
   // One view per file, however the path was written (C:/a/b vs C:\a\b).
-  const norm = bridge.platform === "win32" ? path.replace(/\//g, "\\") : path;
-  const id = fileId(norm);
+  const norm = hostPlatform(host) === "win32" ? path.replace(/\//g, "\\") : path;
+  const id = fileId(norm, host);
   useFiles.setState((s) => ({ targets: { ...s.targets, [id]: { line: opts.line, col: opts.col, n: (s.targets[id]?.n ?? 0) + 1 } } }));
   const ui = useUI.getState();
   const from = opts.from && !isFile(opts.from) ? opts.from : undefined;
@@ -1388,12 +1489,22 @@ function gcDrafts() {
 // Projects
 // ---------------------------------------------------------------------------
 
-export async function addProject(path?: string) {
-  const picked = path ?? (await bridge.dialog.pickFolder());
-  if (!picked) return null;
-  const key = normPath(picked);
+/** Add a project folder: on this computer (picked), or on a paired device (typed: no file dialog reaches it). */
+export async function addProject(path?: string, host: string | null = null) {
+  const picked =
+    path ??
+    (host
+      ? await (await import("../components/ui/Dialog")).promptText({
+          title: `Add a project on ${hostName(host)}`,
+          label: "Folder path",
+          placeholder: `A full path on ${hostName(host)}`,
+          confirmLabel: "Add",
+        })
+      : await bridge.dialog.pickFolder());
+  if (!picked?.trim()) return null;
+  const key = scopedKey(host, normPath(picked.trim(), hostPlatform(host)));
   useUI.setState((s) => ({
-    projects: { ...s.projects, [key]: { ...(s.projects[key] ?? {}), path: picked, addedAt: Date.now(), hidden: false, explicit: true } },
+    projects: { ...s.projects, [key]: { ...(s.projects[key] ?? {}), path: picked.trim(), addedAt: Date.now(), hidden: false, explicit: true } },
   }));
   return key;
 }

@@ -1,4 +1,4 @@
-import type { ProviderId } from "@shared/bridge";
+import { providerOf, type EngineId, type ProviderId } from "@shared/bridge";
 import type { SandboxMode, SandboxPolicy } from "@shared/protocol";
 import type { AskForApproval } from "@shared/protocol/generated/v2";
 
@@ -136,6 +136,9 @@ const claude: AgentProvider = {
 export const PROVIDERS: Record<ProviderId, AgentProvider> = { codex, claude };
 
 export const providerInfo = (id: ProviderId | null | undefined): AgentProvider => PROVIDERS[id ?? "codex"] ?? codex;
+
+/** The agent an engine runs, wherever it runs. */
+export const agentOf = (engine: EngineId): AgentProvider => PROVIDERS[providerOf(engine)];
 
 /** A remembered access choice that this provider doesn't offer falls back to its default. */
 export function accessFor(provider: ProviderId, access: string | undefined): string {

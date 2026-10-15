@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ProviderId } from "@shared/bridge";
+import { hostOfKey, pathOfKey, scopedKey } from "./projects";
 
 export interface ComposerPrefs {
   model: string | null;
@@ -74,6 +75,7 @@ export interface FocusSplit {
 
 export interface Draft {
   cwd: string;
+  /** Its project, which also says which device the thread runs on (see hostOfKey). */
   projectKey: string;
   /** Agent the thread will start with (unset: the default from Settings). */
   provider?: ProviderId;
@@ -102,6 +104,8 @@ export interface UIState {
   expanded: Record<string, boolean>;
   /** Projects showing their full thread list instead of the most recent few. */
   showAll: Record<string, boolean>;
+  /** Paired devices' sidebar sections that are folded away, by host key. */
+  hostsCollapsed?: Record<string, boolean>;
   drafts: Record<string, Draft>;
   tabs: string[];
   activeTab: string | null;
@@ -180,8 +184,11 @@ export const useUI = create<UIState>()(
 export const isDraft = (id: string) => id.startsWith("draft:");
 /** A file open as its own view (a tab, split side or canvas window) rather than a thread. */
 export const isFile = (id: string) => id.startsWith("file:");
-export const fileId = (path: string) => `file:${path}`;
-export const filePath = (id: string) => id.slice(5);
+/** A file's view id: `file:<path>`, or `file:<host>|<path>` for one on a paired device. */
+export const fileId = (path: string, host?: string | null) => `file:${scopedKey(host, path)}`;
+export const filePath = (id: string) => pathOfKey(id.slice(5));
+/** The paired device a file view's file is on; null for this computer. */
+export const fileHost = (id: string) => hostOfKey(id.slice(5));
 /** One of Ret's own views (Inbox, Code) living as a window on the canvas desktop. */
 export type AppKind = "inbox" | "code";
 export const isApp = (id: string) => id.startsWith("app:");

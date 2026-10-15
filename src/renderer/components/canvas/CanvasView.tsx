@@ -4,7 +4,8 @@ import { activeBoard, appId, newId, updateBoard, useUI, type AppKind, type Board
 import { DRAG_APP } from "../Titlebar";
 import { closeWindow, focusWindow, newThread, openThread } from "../../state/actions";
 import { useThreads } from "../../state/threads";
-import { buildProjects, projectIndex, projectKeyFor, type ProjectNode } from "../../state/projects";
+import type { ProjectNode } from "../../state/projects";
+import { projectKeyNow, projectTreeNow } from "../../state/projectTree";
 import { Links } from "./Links";
 import { CanvasWindow } from "./CanvasWindow";
 import { Minimap } from "./Minimap";
@@ -715,10 +716,9 @@ type SetMenu = (m: { x: number; y: number; items: MenuItem[] } | null) => void;
 function contextProject(projects: ProjectNode[]): ProjectNode | undefined {
   const ui = useUI.getState();
   const focused = activeBoard(ui).windows.find((w) => w.id === ui.focusedWindow);
-  const { threads, workspaces } = useThreads.getState();
-  const t = focused ? threads[focused.threadId] : undefined;
+  const t = focused ? useThreads.getState().threads[focused.threadId] : undefined;
   const draft = focused ? ui.drafts[focused.threadId] : undefined;
-  const key = draft?.projectKey ?? (t ? projectKeyFor(t, threads, projectIndex(ui.projects, workspaces, ui.checkouts), ui.threadProject) : undefined);
+  const key = draft?.projectKey ?? (t ? projectKeyNow(t) : undefined);
   return projects.find((p) => p.key === key) ?? projects[0];
 }
 
@@ -733,8 +733,7 @@ function placeApp(kind: AppKind, at: { x: number; y: number }) {
 
 function canvasMenu(at: { x: number; y: number }, x: number, y: number, setMenu: SetMenu): MenuItem[] {
   const ui = useUI.getState();
-  const { threads, workspaces } = useThreads.getState();
-  const projects = buildProjects(threads, ui.projects, ui.threadProject, workspaces, ui.checkouts);
+  const projects = projectTreeNow();
   const here = contextProject(projects);
   const board = activeBoard(ui);
   const create = (p: ProjectNode) => newThread(p.key, p.path, { mode: "canvas", at });

@@ -737,6 +737,73 @@ body.resizing .transcript {
 .project-head:hover .hover-only {
   opacity: 1;
 }
+/* A device's section of the sidebar, once there are paired devices. */
+.host-section + .host-section {
+  margin-top: 12px;
+}
+.host-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 6px 0 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-3);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.host-head:hover {
+  color: var(--text-2);
+}
+.host-head:hover .hover-only {
+  opacity: 1;
+}
+.host-section.open > .host-head .chev {
+  transform: rotate(90deg);
+}
+.host-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.host-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 550;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.host-state::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.host-state.connected {
+  color: var(--green);
+}
+.host-state.connecting {
+  color: var(--amber);
+}
+.host-state.offline {
+  color: var(--text-3);
+}
+.host-section.offline > .host-body {
+  opacity: 0.6;
+}
+.host-empty {
+  padding: 4px 8px 6px 26px;
+  font-size: 12px;
+  color: var(--text-3);
+}
 .project-body {
   position: relative;
   padding-left: 10px;
@@ -1146,6 +1213,12 @@ body.resizing .transcript {
 .path-chip {
   flex: 0 1 auto;
   min-width: 0;
+}
+/* The paired device a thread runs on. */
+.host-chip {
+  flex: none;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .pane-header-actions {
   margin-left: auto;
@@ -3750,6 +3823,46 @@ html.autoscrolling[data-autoscroll="down"] * {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 420px;
+}
+
+/* Remote access (Settings) and the device a remote window shows (title bar). */
+.setting-subhead {
+  margin-top: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.remote-device .row-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+.remote-device-icon {
+  vertical-align: -1px;
+  color: var(--text-3);
+}
+.pair-code {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+.pair-code-digits {
+  display: flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-strong);
+  user-select: all;
+  flex: none;
+}
+.pair-code-digits > span {
+  width: 10px;
 }
 .hidden-email {
   display: inline-flex;

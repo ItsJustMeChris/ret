@@ -4,6 +4,7 @@ import { renderMarkdown, renderMarkdownFragment, splitBlocks, type MarkdownBlock
 import { imageUrl, openFileRef, resolvePath } from "../lib/files";
 import { viewFile } from "../lib/viewFile";
 import { openImage } from "./ImageViewer";
+import { hostOfView } from "../state/projectTree";
 
 /**
  * Local images: point them at the file (relative paths resolve against the thread's folder);
@@ -13,6 +14,7 @@ function resolveImages(el: HTMLElement) {
   const imgs = el.querySelectorAll<HTMLImageElement>("img[data-local]:not([src])");
   if (!imgs.length) return;
   const cwd = el.closest("[data-cwd]")?.getAttribute("data-cwd");
+  const host = hostOfView(el.closest("[data-thread]")?.getAttribute("data-thread"));
   for (const img of imgs) {
     const path = img.dataset.local!;
     const asLink = () => {
@@ -22,7 +24,7 @@ function resolveImages(el: HTMLElement) {
       a.textContent = img.alt || path;
       img.replaceWith(a);
     };
-    const url = imageUrl(path, cwd);
+    const url = imageUrl(path, cwd, host);
     if (!url) {
       asLink();
       continue;
@@ -89,7 +91,8 @@ export const Markdown = memo(function Markdown({ text, className, streaming }: {
     const img = target.closest<HTMLImageElement>("img.md-img");
     if (img?.src) {
       const cwd = img.closest("[data-cwd]")?.getAttribute("data-cwd");
-      openImage({ src: img.src, path: img.dataset.local ? resolvePath(img.dataset.local, cwd) : null, alt: img.alt });
+      const host = hostOfView(img.closest("[data-thread]")?.getAttribute("data-thread"));
+      openImage({ src: img.src, path: img.dataset.local ? resolvePath(img.dataset.local, cwd) : null, alt: img.alt, host });
       return;
     }
     const file = target.closest<HTMLElement>("a.file-link");
@@ -97,10 +100,12 @@ export const Markdown = memo(function Markdown({ text, className, streaming }: {
       e.preventDefault();
       const ref = { path: file.dataset.path, line: Number(file.dataset.line) || undefined, col: Number(file.dataset.col) || undefined };
       const cwd = file.closest("[data-cwd]")?.getAttribute("data-cwd");
+      const thread = file.closest("[data-thread]")?.getAttribute("data-thread");
+      const host = hostOfView(thread);
       // Click views it in Ret; Ctrl+click opens it in VS Code (or its app); Alt+click reveals it.
-      if (e.altKey) void bridge.shell.reveal(resolvePath(ref.path, cwd));
-      else if (e.ctrlKey || e.metaKey) void openFileRef(ref, cwd);
-      else void viewFile(ref, cwd, file.closest("[data-thread]")?.getAttribute("data-thread"));
+      if (e.altKey) void bridge.shell.reveal(resolvePath(ref.path, cwd), host);
+      else if (e.ctrlKey || e.metaKey) void openFileRef(ref, cwd, host);
+      else void viewFile(ref, cwd, thread);
       return;
     }
     const a = target.closest("a");

@@ -4,7 +4,7 @@ import { ChevronLeft, CornerDownLeft, MessageCircleQuestion, X } from "lucide-re
 import { ownerOf, type ThreadsState } from "../../state/threads";
 import { useThread } from "../../state/useThread";
 import { shallowEqual } from "../../lib/shallow";
-import { PROVIDERS } from "../../agents";
+import { agentOf } from "../../agents";
 import { respondToRequest } from "../../state/actions";
 import { Markdown } from "../Markdown";
 
@@ -181,7 +181,7 @@ export function useQuestionFlow(
     rows,
     otherRow,
     /** Who's asking ("Codex", "Claude Code"). */
-    agent: PROVIDERS[ownerOf(threadId)].name,
+    agent: agentOf(ownerOf(threadId)).name,
     hl: state.hl,
     other: state.other,
     previous: state.answers[step] as string | undefined,

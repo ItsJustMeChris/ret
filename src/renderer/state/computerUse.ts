@@ -404,40 +404,43 @@ export function displayParams(v: unknown): { name: string; label: string; value:
 
 // ---------------------------------------------------------------------------
 
+/** Apps by the device they're on (a paired one's host, or this computer) and id. */
 const useAppInfos = create<Record<string, AppInfo>>(() => ({}));
 const asked = new Set<string>();
+const infoKey = (appId: string, host: string | null) => (host ? `${host}\n${appId}` : appId);
 
-function lookUp(appId: string) {
-  if (asked.has(appId)) return;
-  asked.add(appId);
+function lookUp(appId: string, host: string | null) {
+  const key = infoKey(appId, host);
+  if (asked.has(key)) return;
+  asked.add(key);
   bridge.apps
-    .info(appId)
-    .then((i) => useAppInfos.setState({ [appId]: i }))
-    .catch(() => asked.delete(appId)); // try again next time it's shown
+    .info(appId, host)
+    .then((i) => useAppInfos.setState({ [key]: i }))
+    .catch(() => asked.delete(key)); // try again next time it's shown
 }
 
-/** The installed app's name and icon, looked up once per app. */
-export function useAppInfo(appId: string | null): AppInfo | null {
-  const info = useGatedStore(useAppInfos, (s) => (appId ? s[appId] : undefined));
+/** The app's name and icon as installed where the agent runs (`host`: a paired device; null: here), looked up once per app. */
+export function useAppInfo(appId: string | null, host: string | null = null): AppInfo | null {
+  const info = useGatedStore(useAppInfos, (s) => (appId ? s[infoKey(appId, host)] : undefined));
   useEffect(() => {
-    if (appId) lookUp(appId);
-  }, [appId]);
+    if (appId) lookUp(appId, host);
+  }, [appId, host]);
   return info ?? null;
 }
 
 /** Looks up several apps, re-rendering as each arrives: for labels that name apps without showing them. */
-export function useAppInfosFor(appIds: string[]) {
-  const key = appIds.join("\n");
-  useGatedStore(useAppInfos, (s) => appIds.map((id) => s[id]), shallowEqual);
+export function useAppInfosFor(appIds: string[], host: string | null = null) {
+  const key = `${host}\n${appIds.join("\n")}`;
+  useGatedStore(useAppInfos, (s) => appIds.map((id) => s[infoKey(id, host)]), shallowEqual);
   useEffect(() => {
-    for (const id of appIds) lookUp(id);
+    for (const id of appIds) lookUp(id, host);
   }, [key]);
 }
 
 /** What to call the app: its installed name, else what the agent saw, else the tail of its id. */
-export function appLabel(use: ComputerUse, info?: AppInfo | null): string {
+export function appLabel(use: ComputerUse, info?: AppInfo | null, host: string | null = null): string {
   if (use.kind === "browser") return "Browser";
-  const known = info ?? (use.appId ? useAppInfos.getState()[use.appId] : null);
+  const known = info ?? (use.appId ? useAppInfos.getState()[infoKey(use.appId, host)] : null);
   if (known?.name) return known.name;
   if (use.appName) return use.appName;
   if (use.appId) {

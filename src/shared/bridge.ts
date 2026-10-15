@@ -1,6 +1,8 @@
 // Contract between the Electron main process and the renderer.
 // The renderer only ever sees `window.ret`, which implements RetBridge.
 
+import type { RemoteHost, RemoteState } from "./remote";
+
 /**
  * Agent backends Ret can drive. Each one is an *engine* in the main process that speaks the
  * app-server JSON-RPC protocol (src/shared/protocol) to the renderer: Codex natively, the others
@@ -9,12 +11,36 @@
 export type ProviderId = "codex" | "claude";
 export const PROVIDER_IDS: readonly ProviderId[] = ["codex", "claude"];
 
+/**
+ * One agent on one machine: this computer's engines are known by their provider alone
+ * ("codex"), a paired device's as "<provider>@<host>", the host being that device's key
+ * (`hostKeyOf`). Every connection, thread owner and request is keyed by one.
+ */
+export type EngineId = ProviderId | `${ProviderId}@${string}`;
+
+export function engineId(provider: ProviderId, host: string | null | undefined): EngineId {
+  return host ? `${provider}@${host}` : provider;
+}
+
+export function providerOf(engine: EngineId): ProviderId {
+  const i = engine.indexOf("@");
+  return (i < 0 ? engine : engine.slice(0, i)) as ProviderId;
+}
+
+/** The paired device an engine runs on; null for this computer. */
+export function hostOf(engine: EngineId): string | null {
+  const i = engine.indexOf("@");
+  return i < 0 ? null : engine.slice(i + 1);
+}
+
 export type CodexSource = "managed" | "system" | "custom";
 /** Where an engine's binary comes from. Only Codex has a managed (Ret-installed) copy. */
 export type EngineSource = CodexSource;
 
 export interface EngineStatus {
   provider: ProviderId;
+  /** A paired device's engine: that device's host key (see EngineId). */
+  host?: string | null;
   /** "disabled" = turned off in Settings. */
   state: "starting" | "running" | "stopped" | "error" | "missing" | "disabled";
   /** Increments every time the engine gets a fresh connection. The renderer
@@ -130,13 +156,14 @@ export interface GitInfo {
 export interface RetBridge {
   platform: string;
   appVersion: string;
-  /** One JSON-RPC pipe per provider's engine. */
+  /** One JSON-RPC pipe per engine: this computer's, and those of the devices it's paired with. */
   agents: {
-    send(provider: ProviderId, line: string): void;
-    onMessages(cb: (provider: ProviderId, lines: string[]) => void): () => void;
+    send(engine: EngineId, line: string): void;
+    onMessages(cb: (engine: EngineId, lines: string[]) => void): () => void;
     onStatus(cb: (status: EngineStatus) => void): () => void;
-    getStatus(provider: ProviderId): Promise<EngineStatus>;
-    restart(provider: ProviderId): Promise<void>;
+    getStatus(engine: EngineId): Promise<EngineStatus>;
+    restart(engine: EngineId): Promise<void>;
+    /** This computer's provider settings (a paired device's are its own business). */
     getSettings(): Promise<ProvidersSettings>;
     onSettings(cb: (settings: ProvidersSettings) => void): () => void;
     setSettings(patch: ProvidersSettingsPatch): Promise<ProvidersSettings>;
@@ -165,33 +192,34 @@ export interface RetBridge {
     pickFolder(): Promise<string | null>;
     pickFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>;
   };
+  // Calls about paths take the device they're on: a paired device's host key, or nothing for this computer.
   shell: {
     openExternal(url: string): Promise<void>;
     /** Opens a file/folder with its default app. Resolves to an error message ("" on success). */
-    openPath(path: string): Promise<string>;
+    openPath(path: string, host?: string | null): Promise<string>;
     /** Shows the item selected in File Explorer / Finder. */
-    reveal(path: string): Promise<void>;
+    reveal(path: string, host?: string | null): Promise<void>;
   };
   editor: {
-    /** Whether a code editor that can jump to a line (VS Code) is installed. */
-    available(): Promise<boolean>;
-    open(path: string, line?: number, col?: number): Promise<void>;
+    /** Whether a code editor that can jump to a line (VS Code) is installed, for that device's files. */
+    available(host?: string | null): Promise<boolean>;
+    open(path: string, line?: number, col?: number, host?: string | null): Promise<void>;
   };
   git: {
-    info(path: string): Promise<GitInfo>;
-    createWorktree(cwd: string, label: string): Promise<WorktreeResult>;
+    info(path: string, host?: string | null): Promise<GitInfo>;
+    createWorktree(cwd: string, label: string, host?: string | null): Promise<WorktreeResult>;
     /** Folder → the same place in its main checkout, for those that are linked worktrees. */
-    mainCheckouts(cwds: string[]): Promise<Record<string, string>>;
+    mainCheckouts(cwds: string[], host?: string | null): Promise<Record<string, string>>;
   };
   files: {
-    saveImage(data: ArrayBuffer, ext: string): Promise<string>;
-    stat(path: string): Promise<{ exists: boolean; isDir: boolean; size?: number }>;
+    saveImage(data: ArrayBuffer, ext: string, host?: string | null): Promise<string>;
+    stat(path: string, host?: string | null): Promise<{ exists: boolean; isDir: boolean; size?: number }>;
     /** Where a dropped/pasted File lives on disk; null when it has no path (e.g. dragged from a web page). */
     pathFor(file: File): string | null;
   };
   apps: {
-    /** Looks up an app by the id computer use reports (a macOS bundle id, or a Windows executable path). */
-    info(appId: string): Promise<AppInfo>;
+    /** Looks up an app by the id computer use reports (a macOS bundle id, or a Windows executable path), on the device the agent runs on (`host`; null: this computer). */
+    info(appId: string, host?: string | null): Promise<AppInfo>;
   };
   /** Writes to the system clipboard (works regardless of page focus). */
   copy(text: string): Promise<void>;
@@ -201,6 +229,24 @@ export interface RetBridge {
   onSpelling(cb: (s: { word: string; suggestions: string[] }) => void): () => void;
   notify(title: string, body: string): void;
   setTheme(theme: "dark" | "light"): void;
+  /** Pairing with other devices on the network; paired devices' engines join `agents`. */
+  remoteAccess: {
+    getState(): Promise<RemoteState>;
+    onState(cb: (state: RemoteState) => void): () => void;
+    /** Accept connections from paired devices (and advertise this one). */
+    setHosting(on: boolean): Promise<RemoteState>;
+    setName(name: string): Promise<RemoteState>;
+    /** Show a pairing code, good for one device and two minutes. */
+    startPairing(): Promise<RemoteState>;
+    stopPairing(): Promise<RemoteState>;
+    /** Stop letting a paired device in (and disconnect it). */
+    revoke(deviceId: string): Promise<RemoteState>;
+    /** Pair with the device at an address, using the code it shows. */
+    pair(target: { address: string; port: number }, code: string): Promise<RemoteHost>;
+    forget(hostId: string): Promise<RemoteState>;
+    /** Look for devices on the network now. */
+    discover(): void;
+  };
 }
 
 export type EditCommand = "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll" | "replaceMisspelling" | "addToDictionary";
@@ -242,5 +288,15 @@ export const IPC = {
   edit: "edit:command",
   spelling: "edit:spelling",
   copy: "clipboard:write",
+  remoteGet: "remote:get",
+  remoteState: "remote:state",
+  remoteSetHosting: "remote:setHosting",
+  remoteSetName: "remote:setName",
+  remotePairStart: "remote:pairStart",
+  remotePairStop: "remote:pairStop",
+  remoteRevoke: "remote:revoke",
+  remotePair: "remote:pair",
+  remoteForget: "remote:forget",
+  remoteDiscover: "remote:discover",
   appInfo: "apps:info",
 } as const;

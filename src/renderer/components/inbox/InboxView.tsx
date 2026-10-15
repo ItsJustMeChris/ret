@@ -3,12 +3,14 @@ import { useShallow } from "../../lib/shallow";
 import { Check, CheckCheck, Inbox as InboxIcon } from "lucide-react";
 import { Kept, useRecent, useVisibility } from "../ui/Kept";
 import { markSeen, useThreads, type PendingRequest } from "../../state/threads";
-import { PROVIDERS } from "../../agents";
+import { agentOf } from "../../agents";
 import { useUI } from "../../state/ui";
-import { buildProjects, recencyOf, spawnedBy, threadTitle, type ThreadNode } from "../../state/projects";
+import { recencyOf, spawnedBy, threadTitle, type ThreadNode } from "../../state/projects";
+import { useProjectTree } from "../../state/projectTree";
 import { plainText, timeAgo, unwrapCommand } from "../../lib/format";
 import { StatusDot, threadStateOf, type ThreadState } from "../StatusDot";
 import { ThreadPane } from "../thread/ThreadPane";
+import { hostName } from "../../state/hosts";
 import { isPermissionAsk } from "../../state/computerUse";
 
 type Section = "attention" | "unread" | "error" | "running";
@@ -34,7 +36,7 @@ function askFor(req: PendingRequest | undefined): string | null {
     case "item/permissions/requestApproval":
       return "Grant extra permissions?";
     case "item/tool/requestUserInput":
-      return p.questions?.[0]?.question ?? `${PROVIDERS[req.provider].name} has a question`;
+      return p.questions?.[0]?.question ?? `${agentOf(req.engine).name} has a question`;
     case "mcpServer/elicitation/request":
       return isPermissionAsk(p) ? (typeof p.message === "string" ? p.message : "Allow a tool?") : `${p.serverName ?? "A tool"} needs input: ${p.message ?? ""}`;
     case "item/tool/requestApproval":
@@ -64,11 +66,8 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
   const activeRef = useRef(active);
   activeRef.current = active;
   const selected = useUI((s) => s.inbox.selected);
-  const projects = useUI((s) => s.projects);
-  const threadProject = useUI((s) => s.threadProject);
-  const checkouts = useUI((s) => s.checkouts);
   const threads = useThreads((s) => s.threads);
-  const workspaces = useThreads((s) => s.workspaces);
+  const tree = useProjectTree();
 
   // Each thread's state, recomputed when anything relevant moves.
   const states = useThreads(
@@ -102,17 +101,17 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
 
   const projectName = useMemo(() => {
     const map = new Map<string, string>();
-    for (const p of buildProjects(threads, projects, threadProject, workspaces, checkouts)) {
+    for (const p of tree) {
       const walk = (nodes: ThreadNode[]) => {
         for (const n of nodes) {
-          map.set(n.thread.id, p.name);
+          map.set(n.thread.id, p.host ? `${p.name} on ${hostName(p.host)}` : p.name);
           walk(n.children);
         }
       };
       walk(p.roots);
     }
     return map;
-  }, [threads, projects, threadProject, workspaces, checkouts]);
+  }, [tree]);
 
   const sections = useMemo(() => {
     const by: Record<Section, string[]> = { attention: [], unread: [], error: [], running: [] };

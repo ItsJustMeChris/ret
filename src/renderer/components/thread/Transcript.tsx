@@ -6,7 +6,7 @@ import { ownerOf, useThreads } from "../../state/threads";
 import { useThread } from "../../state/useThread";
 import { takesDirectInput } from "../../state/projects";
 import { shallowEqual } from "../../lib/shallow";
-import { PROVIDERS } from "../../agents";
+import { agentOf } from "../../agents";
 import { forkThread, loadOlder, resendUnanswered } from "../../state/actions";
 import type { BackgroundTask, ThreadItem } from "@shared/protocol";
 import { backgroundLabel, useBackgroundOnly } from "../StatusDot";
@@ -16,9 +16,11 @@ import { diffStats, duration } from "../../lib/format";
 import { Approvals } from "./Approvals";
 import { TurnRail } from "./TurnRail";
 import { Shimmer } from "../ui/Shimmer";
+import { hostOfView } from "../../state/projectTree";
 import { appKey, computerUseOf, useAppInfosFor, useScreen, type Shot } from "../../state/computerUse";
 
-type Ctx = { threadId: string; cwd: string | null };
+/** `host`: the paired device the thread runs on (its files are there); null for this computer. */
+type Ctx = { threadId: string; cwd: string | null; host: string | null };
 
 function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: boolean }) {
   const items = useThread(ctx.threadId, (s) => ids.map((id) => s.live[ctx.threadId]?.items[id]).filter(Boolean) as ThreadItem[], shallowEqual);
@@ -33,7 +35,7 @@ function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: bool
     return [...byApp.values()];
   }, shallowEqual);
   // The folded summary names the apps it used, so it needs their names before any row asks.
-  useAppInfosFor(useMemo(() => [...new Set(items.flatMap((it, i) => (known[i] ?? computerUseOf(it))?.appId ?? []))], [items, known]));
+  useAppInfosFor(useMemo(() => [...new Set(items.flatMap((it, i) => (known[i] ?? computerUseOf(it))?.appId ?? []))], [items, known]), ctx.host);
   const [open, setOpen] = useState(false);
   if (live) {
     // While the agent works, show the most recent steps live.
@@ -59,7 +61,7 @@ function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: bool
     <div className={`activity ${open ? "open" : ""}`}>
       <button className="activity-head" onClick={() => setOpen(!open)}>
         <Chevron className="tool-chev" size={13} />
-        <span>{activitySummary(items, known)}</span>
+        <span>{activitySummary(items, known, ctx.host)}</span>
         {failed && <span className="badge err">failed step</span>}
       </button>
       {!open && viewed.length + shots.length > 0 && (
@@ -68,7 +70,7 @@ function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: bool
             <ThreadImage key={shot.url} src={shot.thumb ?? shot.url} full={shot.url} size="sm" />
           ))}
           {viewed.slice(0, 6).map((path, i) => (
-            <ThreadImage key={i} path={path} cwd={ctx.cwd} size="sm" />
+            <ThreadImage key={i} path={path} cwd={ctx.cwd} host={ctx.host} size="sm" />
           ))}
           {viewed.length > 6 && <span className="activity-thumbs-more">+{viewed.length - 6}</span>}
         </div>
@@ -131,7 +133,7 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
           ))}
         </div>
       )}
-      {live && !pending && <Working since={turn.startedAt} elsewhere={elsewhere ? PROVIDERS[ownerOf(ctx.threadId)].name : null} />}
+      {live && !pending && <Working since={turn.startedAt} elsewhere={elsewhere ? agentOf(ownerOf(ctx.threadId)).name : null} />}
       {!live && !pending && turn.status !== "interrupted" && <UnansweredNotice threadId={ctx.threadId} lastItemId={turn.itemIds[turn.itemIds.length - 1]} count={turn.itemIds.length} />}
       {turn.error && (
         <div className="turn-error">
@@ -145,11 +147,11 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
           {turn.stale &&
             (background ? (
               // Not cut off: the agent left work running and will be back.
-              <span className="badge" title={`${PROVIDERS[ownerOf(ctx.threadId)].name} is waiting on work it left running, and picks the thread up again when it's done.`}>
+              <span className="badge" title={`${agentOf(ownerOf(ctx.threadId)).name} is waiting on work it left running, and picks the thread up again when it's done.`}>
                 {background === 1 ? "1 background task" : `${background} background tasks`}
               </span>
             ) : (
-              <span className="badge warn" title={`This turn didn't finish in Ret's session. It may still be running in another ${PROVIDERS[ownerOf(ctx.threadId)].name} app, or it was cut off.`}>
+              <span className="badge warn" title={`This turn didn't finish in Ret's session. It may still be running in another ${agentOf(ownerOf(ctx.threadId)).name} app, or it was cut off.`}>
                 unfinished
               </span>
             ))}
@@ -212,7 +214,7 @@ const TASK_ICON: Record<BackgroundTask["kind"], typeof Bot> = { shell: SquareTer
 function BackgroundWork({ threadId }: { threadId: string }) {
   const count = useBackgroundOnly(threadId);
   const tasks = useThread(threadId, (s) => s.background[threadId]);
-  const agent = useThread(threadId, (s) => PROVIDERS[s.owner[threadId] ?? "codex"].name);
+  const agent = useThread(threadId, (s) => agentOf(s.owner[threadId] ?? "codex").name);
   const [, tick] = useState(0);
   useEffect(() => {
     if (!count) return;
@@ -272,7 +274,8 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
     shallowEqual,
   );
   const scroller = useRef<HTMLDivElement>(null);
-  const ctx = useMemo(() => ({ threadId, cwd }), [threadId, cwd]);
+  const host = useThread(threadId, () => hostOfView(threadId));
+  const ctx = useMemo(() => ({ threadId, cwd, host }), [threadId, cwd, host]);
   const loading = !lt || lt.loading;
 
   // The oldest turn drawn so far (null: just the newest few). Older ones are added in idle time, as

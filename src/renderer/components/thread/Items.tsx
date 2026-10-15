@@ -33,7 +33,8 @@ import { Shimmer } from "../ui/Shimmer";
 import { appKey, appLabel, computerUseOf, outputText, useComputerUse, useScreen, type ComputerUse } from "../../state/computerUse";
 import { AppIcon, AppName } from "./ComputerUse";
 
-type Ctx = { threadId: string; cwd: string | null };
+/** `host`: the paired device the thread runs on (its files are there); null for this computer. */
+type Ctx = { threadId: string; cwd: string | null; host: string | null };
 
 const Status = ({ status }: { status: string }) => {
   if (status === "inProgress") return <LoaderCircle className="spin st-run" size={13} />;
@@ -74,7 +75,7 @@ function Disclosure({
 
 // ---------------------------------------------------------------------------
 
-function UserMessage({ item, cwd }: { item: Extract<ThreadItem, { type: "userMessage" }>; cwd: string | null }) {
+function UserMessage({ item, cwd, host }: { item: Extract<ThreadItem, { type: "userMessage" }>; cwd: string | null; host: string | null }) {
   const text = item.content
     .filter((c): c is Extract<typeof c, { type: "text" }> => c.type === "text")
     .map((c) => c.text)
@@ -88,7 +89,7 @@ function UserMessage({ item, cwd }: { item: Extract<ThreadItem, { type: "userMes
         {images.length > 0 && (
           <div className={`user-images ${images.length === 1 ? "single" : ""}`}>
             {images.map((c, i) =>
-              c.type === "localImage" ? <ThreadImage key={i} path={c.path} cwd={cwd} /> : "url" in c ? <ThreadImage key={i} src={c.url} /> : null,
+              c.type === "localImage" ? <ThreadImage key={i} path={c.path} cwd={cwd} host={host} /> : "url" in c ? <ThreadImage key={i} src={c.url} /> : null,
             )}
           </div>
         )}
@@ -300,7 +301,7 @@ function McpTool({ item }: { item: Extract<ThreadItem, { type: "mcpToolCall" }> 
 }
 
 /** A step of the agent using an app: the app, what the step was for, and the window it saw. */
-function ComputerUseTool({ item }: { item: Extract<ThreadItem, { type: "mcpToolCall" }> }) {
+function ComputerUseTool({ item, host }: { item: Extract<ThreadItem, { type: "mcpToolCall" }>; host: string | null }) {
   const use = useComputerUse(item)!;
   const shot = useScreen((s) => s.shots[item.id]);
   const code = (item.arguments as any)?.code;
@@ -308,11 +309,11 @@ function ComputerUseTool({ item }: { item: Extract<ThreadItem, { type: "mcpToolC
   const failed = item.status === "failed" || (item.result as any)?.isError === true;
   return (
     <Disclosure
-      icon={<AppIcon use={use} />}
+      icon={<AppIcon use={use} host={host} />}
       label={
         <>
           <span className="cu-app">
-            <AppName use={use} />
+            <AppName use={use} host={host} />
           </span>
           {use.title && <span className="cu-step">{use.title}</span>}
         </>
@@ -492,8 +493,11 @@ export function isActivity(item: ThreadItem | undefined): boolean {
   }
 }
 
-/** `known`: what the live session learned about each item's computer-use step (see useScreen), in step with `items`. */
-export function activitySummary(items: ThreadItem[], known?: readonly (ComputerUse | undefined)[]): string {
+/**
+ * `known`: what the live session learned about each item's computer-use step (see useScreen), in
+ * step with `items`; `host`: the paired device the thread runs on, whose apps those are.
+ */
+export function activitySummary(items: ThreadItem[], known?: readonly (ComputerUse | undefined)[], host: string | null = null): string {
   let reads = 0;
   let searches = 0;
   let cmds = 0;
@@ -522,7 +526,7 @@ export function activitySummary(items: ThreadItem[], known?: readonly (ComputerU
   // Steps that never said which app count with the ones that did.
   if (apps.size > 1) apps.delete("computer");
   const parts: string[] = [];
-  if (apps.size) parts.push(`used ${listOf([...new Set([...apps.values()].map((u) => appLabel(u)))])}`);
+  if (apps.size) parts.push(`used ${listOf([...new Set([...apps.values()].map((u) => appLabel(u, null, host)))])}`);
   if (reads) parts.push(`read ${reads} ${reads === 1 ? "file" : "files"}`);
   if (searches) parts.push(`${searches} ${searches === 1 ? "search" : "searches"}`);
   if (cmds) parts.push(`ran ${cmds} ${cmds === 1 ? "command" : "commands"}`);
@@ -541,7 +545,7 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
   if (!item) return null;
   switch (item.type) {
     case "userMessage":
-      return <UserMessage item={item} cwd={ctx.cwd} />;
+      return <UserMessage item={item} cwd={ctx.cwd} host={ctx.host} />;
     case "agentMessage":
       return <AgentMessage item={item} streaming={live} threadId={ctx.threadId} />;
     case "reasoning":
@@ -551,7 +555,7 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
     case "fileChange":
       return <FileChange item={item} ctx={ctx} />;
     case "mcpToolCall":
-      return computerUseOf(item) ? <ComputerUseTool item={item} /> : <McpTool item={item} />;
+      return computerUseOf(item) ? <ComputerUseTool item={item} host={ctx.host} /> : <McpTool item={item} />;
     case "dynamicToolCall":
       return <DynamicTool item={item} />;
     case "webSearch":
@@ -570,7 +574,7 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
       return (
         <div className="image-view">
           <Disclosure icon={<ImageIcon size={13} />} label={<>Viewed <span className="path" data-path={item.path}>{shortPath(item.path, ctx.cwd)}</span></>} />
-          <ThreadImage path={item.path} cwd={ctx.cwd} />
+          <ThreadImage path={item.path} cwd={ctx.cwd} host={ctx.host} />
         </div>
       );
     case "imageGeneration":

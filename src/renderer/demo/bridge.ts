@@ -1,5 +1,6 @@
 import type { AppUpdateState, EngineStatus, ProviderId, ProvidersSettings, RetBridge, UpdaterState } from "@shared/bridge";
-import { PROVIDER_IDS } from "@shared/bridge";
+import { PROVIDER_IDS, providerOf } from "@shared/bridge";
+import { noRemoteAccess } from "@shared/remote";
 import { DemoEngine, World } from "./engine";
 import { populate } from "./fixtures";
 import { BRANCH, HOME, P, WORKTREES } from "./workspace";
@@ -93,14 +94,16 @@ export function createDemoBridge(): RetBridge & { world: World } {
     platform: "web",
     appVersion: typeof __RET_VERSION__ === "string" ? __RET_VERSION__ : "demo",
     agents: {
-      send: (provider, line) => {
+      send: (engine, line) => {
+        const provider = providerOf(engine);
         if (!settings.enabled[provider]) return;
         setTimeout(() => world.engines[provider].receive(line), 0);
       },
       onMessages: (cb) => sub(messageSubs, cb),
       onStatus: (cb) => sub(statusSubs, cb),
-      getStatus: async (provider) => world.engines[provider].status,
-      restart: async (provider) => {
+      getStatus: async (engine) => world.engines[providerOf(engine)].status,
+      restart: async (engine) => {
+        const provider = providerOf(engine);
         world.engines[provider].disconnect();
         setStatus(provider, { state: "starting" });
         await later(500);
@@ -223,5 +226,6 @@ export function createDemoBridge(): RetBridge & { world: World } {
     onSpelling: () => () => {},
     notify: () => {},
     setTheme: () => {},
+    remoteAccess: noRemoteAccess(notInDemo("Remote access")),
   };
 }

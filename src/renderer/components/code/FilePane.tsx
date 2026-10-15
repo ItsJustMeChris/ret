@@ -6,7 +6,7 @@ import { bridge, isDesktop } from "../../bridge";
 import { copyText, openFileRef, revealLabel } from "../../lib/files";
 import { shortPath } from "../../lib/format";
 import { toast } from "../../state/toasts";
-import { filePath } from "../../state/ui";
+import { fileHost, filePath } from "../../state/ui";
 import { fileBuffers, setFileDirty, useFiles, watchPath } from "../../state/files";
 import { useConn } from "../../state/conn";
 
@@ -16,15 +16,15 @@ type MonacoModule = typeof import("../../lib/monaco");
 let monacoModule: Promise<MonacoModule> | null = null;
 const loadMonaco = () => (monacoModule ??= import("../../lib/monaco"));
 
-/** Through the app-server, so it works in the desktop app and the web build alike. */
-async function readText(path: string): Promise<{ text: string } | { binary: true } | { large: number }> {
+/** Through the app-server, so it works in the desktop app and the web build alike (and for a paired device's files, `device`). */
+async function readText(path: string, device: string | null): Promise<{ text: string } | { binary: true } | { large: number }> {
   if (isDesktop) {
-    const st = await bridge.files.stat(path);
+    const st = await bridge.files.stat(path, device);
     if (!st.exists) throw new Error("File not found");
     if (st.isDir) throw new Error("That's a folder");
     if (st.size && st.size > MAX_BYTES) return { large: st.size };
   }
-  const res = (await fsClient().request("fs/readFile", { path })) as { dataBase64: string };
+  const res = (await fsClient(device).request("fs/readFile", { path })) as { dataBase64: string };
   const raw = atob(res.dataBase64);
   if (raw.length > MAX_BYTES) return { large: raw.length };
   const bytes = new Uint8Array(raw.length);
@@ -33,11 +33,11 @@ async function readText(path: string): Promise<{ text: string } | { binary: true
   return { text: new TextDecoder("utf-8").decode(bytes) };
 }
 
-async function writeText(path: string, text: string) {
+async function writeText(path: string, text: string, device: string | null) {
   const bytes = new TextEncoder().encode(text);
   let bin = "";
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  await fsClient().request("fs/writeFile", { path, dataBase64: btoa(bin) });
+  await fsClient(device).request("fs/writeFile", { path, dataBase64: btoa(bin) });
 }
 
 const fmtSize = (n: number) => (n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`);
@@ -83,6 +83,8 @@ interface Props {
  */
 export const FilePane = memo(function FilePane({ id, chrome, focused, onHeaderPointerDown, onHeaderDoubleClick, windowControls }: Props) {
   const path = filePath(id);
+  /** The paired device the file is on; null for this computer. */
+  const device = fileHost(id);
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const sizer = useRef<ResizeObserver | null>(null);
@@ -103,7 +105,7 @@ export const FilePane = memo(function FilePane({ id, chrome, focused, onHeaderPo
   const [editorAvailable, setEditorAvailable] = useState(false);
 
   useEffect(() => {
-    if (isDesktop) void bridge.editor.available().then(setEditorAvailable);
+    if (isDesktop) void bridge.editor.available(device).then(setEditorAvailable);
   }, []);
 
   /** Mark the requested line (and take the view there). */
@@ -126,7 +128,7 @@ export const FilePane = memo(function FilePane({ id, chrome, focused, onHeaderPo
     if (!model) return;
     const text = model.getValue();
     try {
-      await writeText(path, text);
+      await writeText(path, text, device);
       saved.current = text;
       setFileDirty(id, false);
       toast("Saved");
@@ -144,7 +146,7 @@ export const FilePane = memo(function FilePane({ id, chrome, focused, onHeaderPo
     setLoad({ kind: "loading" });
     (async () => {
       try {
-        const [m, file] = await Promise.all([loadMonaco(), buffer?.text !== undefined && reloads === 0 ? Promise.resolve({ text: buffer.text }) : readText(path)]);
+        const [m, file] = await Promise.all([loadMonaco(), buffer?.text !== undefined && reloads === 0 ? Promise.resolve({ text: buffer.text }) : readText(path, device)]);
         if (cancelled || !host.current) return;
         mod.current = m;
         if ("binary" in file) return setLoad({ kind: "binary" });
@@ -261,7 +263,7 @@ export const FilePane = memo(function FilePane({ id, chrome, focused, onHeaderPo
       clearTimeout(timer);
       timer = window.setTimeout(async () => {
         try {
-          const file = await readText(path);
+          const file = await readText(path, device);
           const model = editor.current?.getModel();
           if (cancelled || !("text" in file) || !model) return;
           if (file.text === model.getValue() || file.text === saved.current) return; // our own save, or nothing new
@@ -271,7 +273,7 @@ export const FilePane = memo(function FilePane({ id, chrome, focused, onHeaderPo
           /* deleted or unreadable: leave the view as it is */
         }
       }, 150);
-    }).then((unwatch) => {
+    }, device).then((unwatch) => {
       if (cancelled) unwatch();
       else stop = unwatch;
     });
@@ -355,7 +357,8 @@ export const FilePane = memo(function FilePane({ id, chrome, focused, onHeaderPo
           <button className="icon-btn" title="Reload from disk" onClick={() => reload()}>
             <RotateCw size={14} />
           </button>
-          {isDesktop && (
+          {/* Other apps here can't open a paired device's files. */}
+          {isDesktop && !device && (
             <button
               className="icon-btn"
               title={editorAvailable ? "Open in VS Code" : "Open with default app"}
@@ -364,7 +367,7 @@ export const FilePane = memo(function FilePane({ id, chrome, focused, onHeaderPo
               <ExternalLink size={14} />
             </button>
           )}
-          {isDesktop && (
+          {isDesktop && !device && (
             <button className="icon-btn" title={revealLabel} onClick={() => void bridge.shell.reveal(path)}>
               <FolderOpen size={14} />
             </button>
@@ -419,7 +422,7 @@ export const FilePane = memo(function FilePane({ id, chrome, focused, onHeaderPo
               {load.kind === "binary" ? "This looks like a binary file" : load.kind === "large" ? `Too large to show here (${fmtSize(load.size)})` : "Couldn't open this file"}
             </strong>
             {load.kind === "error" && <span>{load.message}</span>}
-            {isDesktop && (
+            {isDesktop && !device && (
               <button className="btn sm" onClick={() => void openFileRef({ path }, null)}>
                 <ExternalLink size={13} /> Open it with another app
               </button>

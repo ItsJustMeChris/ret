@@ -1,6 +1,8 @@
 import { bridge, isDesktop } from "../bridge";
-import { useThreads } from "./threads";
-import { useUI } from "./ui";
+import { hostOfThread, useThreads } from "./threads";
+import { isDraft, useUI } from "./ui";
+import { hostOfKey } from "./projects";
+import { hostName } from "./hosts";
 import { toast } from "./toasts";
 import { attachToComposer, fillComposer, focusComposer } from "./composerDrafts";
 import type { Attachment } from "./actions";
@@ -25,11 +27,14 @@ function asTyped(path: string, cwd: string | null | undefined): string {
 export async function addFilesToThread(threadId: string, files: File[]): Promise<void> {
   if (!files.length) return;
   const cwd = useThreads.getState().threads[threadId]?.cwd ?? useUI.getState().drafts[threadId]?.cwd ?? null;
+  // A paired device's thread: the files are here, its agent is there. Images go across; paths wouldn't mean anything.
+  const draft = isDraft(threadId) ? useUI.getState().drafts[threadId] : undefined;
+  const host = draft ? hostOfKey(draft.projectKey) : isDraft(threadId) ? null : hostOfThread(threadId);
   const attachments: Attachment[] = [];
   const paths: string[] = [];
   const skipped: string[] = [];
   for (const file of files) {
-    const path = bridge.files.pathFor(file);
+    const path = host ? null : bridge.files.pathFor(file);
     const image = path ? ATTACHABLE.test(path) : ATTACHABLE_MIME.test(file.type);
     if (image && isDesktop) {
       const previewUrl = URL.createObjectURL(file);
@@ -37,7 +42,7 @@ export async function addFilesToThread(threadId: string, files: File[]): Promise
         attachments.push({ path, name: file.name, previewUrl });
       } else {
         const ext = file.type.split("/")[1] || "png";
-        attachments.push({ path: await bridge.files.saveImage(await file.arrayBuffer(), ext), name: file.name || `image.${ext}`, previewUrl });
+        attachments.push({ path: await bridge.files.saveImage(await file.arrayBuffer(), ext, host), name: file.name || `image.${ext}`, previewUrl });
       }
     } else if (path) {
       paths.push(asTyped(path, cwd));
@@ -49,6 +54,13 @@ export async function addFilesToThread(threadId: string, files: File[]): Promise
   if (paths.length) fillComposer(threadId, paths.map((p) => `\`${p}\``).join(" ") + " ", { focus: true });
   else if (attachments.length) focusComposer(threadId);
   if (skipped.length) {
-    toast(isDesktop ? `Couldn't attach ${skipped.join(", ")}: drop it from your file manager` : "Attaching files needs the desktop app", "error");
+    toast(
+      host
+        ? `Couldn't attach ${skipped.join(", ")}: only images go across to ${hostName(host)}, other files have to be on it already`
+        : isDesktop
+          ? `Couldn't attach ${skipped.join(", ")}: drop it from your file manager`
+          : "Attaching files needs the desktop app",
+      "error",
+    );
   }
 }

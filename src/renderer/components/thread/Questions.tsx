@@ -2,7 +2,7 @@ import { MessageCircleQuestion, Play } from "lucide-react";
 import { ownerOf } from "../../state/threads";
 import { useThread } from "../../state/useThread";
 import { takesDirectInput } from "../../state/projects";
-import { PROVIDERS } from "../../agents";
+import { agentOf } from "../../agents";
 import { focusComposer, sendFromComposer } from "../../state/composerDrafts";
 import { openQuestionItems, reopenQuestion, useQuestionDismissed } from "./QuestionDock";
 
@@ -45,7 +45,7 @@ export function ReplyQuestions({ threadId, itemId, text, questions }: { threadId
   return (
     <div className="questions past">
       <div className="questions-head">
-        <MessageCircleQuestion size={13} /> {PROVIDERS[ownerOf(threadId)].name} asked
+        <MessageCircleQuestion size={13} /> {agentOf(ownerOf(threadId)).name} asked
       </div>
       {questions.map((q, i) => (
         <div key={i} className="question">

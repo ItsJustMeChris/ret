@@ -1,9 +1,9 @@
-import type { ProviderId } from "@shared/bridge";
+import { providerOf, type EngineId } from "@shared/bridge";
 import type { ThreadItem } from "@shared/protocol";
 import type { JsonValue } from "@shared/protocol/generated/serde_json/JsonValue";
-import { clients } from "../rpc/client";
+import { rpcFor } from "../rpc/client";
 import { PROVIDERS } from "../agents";
-import { useConn } from "./conn";
+import { useConn, emptyProviderConn } from "./conn";
 import { flushNow, useThreads } from "./threads";
 import { spawnedBy } from "./projects";
 
@@ -101,8 +101,8 @@ export function cancelTitle(threadId: string) {
 }
 
 /** A message went out in a thread: if the thread has no name yet, title it from that message. */
-export function titleFromMessage(provider: ProviderId, threadId: string, item: Extract<ThreadItem, { type: "userMessage" }>) {
-  if (!PROVIDERS[provider].autoTitle || pending.has(threadId) || hidden.has(threadId)) return;
+export function titleFromMessage(provider: EngineId, threadId: string, item: Extract<ThreadItem, { type: "userMessage" }>) {
+  if (!PROVIDERS[providerOf(provider)].autoTitle || pending.has(threadId) || hidden.has(threadId)) return;
   flushNow(); // a brand-new thread's thread/started may still be queued
   const thread = useThreads.getState().threads[threadId];
   // A subagent goes by the nickname Codex gave it.
@@ -119,11 +119,12 @@ export function titleFromMessage(provider: ProviderId, threadId: string, item: E
     .finally(() => pending.delete(threadId));
 }
 
-async function generate(provider: ProviderId, threadId: string, prompt: string, job: { cancelled: boolean }) {
-  const rpc = clients[provider];
+/** The title thread runs in the thread's own engine (on its device, for a paired device's). */
+async function generate(provider: EngineId, threadId: string, prompt: string, job: { cancelled: boolean }) {
+  const rpc = rpcFor(provider);
   const st = useThreads.getState();
   const thread = st.threads[threadId];
-  const conn = useConn.getState().providers[provider];
+  const conn = useConn.getState().providers[provider] ?? emptyProviderConn();
   // The TUI's small title model where the account has it; otherwise the thread's own model.
   const small = thread.modelProvider === "openai" && conn.account?.account?.type === "chatgpt" && conn.models.some((m) => m.model === MODEL);
   const model = small ? MODEL : (st.live[threadId]?.settings?.model ?? thread.model ?? null);

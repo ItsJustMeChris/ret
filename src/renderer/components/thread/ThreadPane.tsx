@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { useShallow } from "../../lib/shallow";
 import {
   Archive,
@@ -7,6 +7,7 @@ import {
   FolderGit2,
   Folder,
   FolderOpen,
+  Monitor,
   FolderPlus,
   GitBranch,
   GitFork,
@@ -15,14 +16,17 @@ import {
   PanelRight,
   Paperclip,
 } from "lucide-react";
-import { NO_AGENTS, useThreads, markAttended, markVisible } from "../../state/threads";
+import { NO_AGENTS, hostOfThread, useThreads, markAttended, markVisible } from "../../state/threads";
 import { useThread } from "../../state/useThread";
 import { addFilesToThread } from "../../state/attach";
 import { viewFile } from "../../lib/viewFile";
 import { openFileRef, resolvePath } from "../../lib/files";
 import { useUI, isDraft } from "../../state/ui";
 import { addProject, archiveThread, compactThread, forkThread, hydrateThread, openThread, renameThread, retargetDraft } from "../../state/actions";
-import { baseName, buildProjects, spawnedBy, takesDirectInput, threadTitle } from "../../state/projects";
+import { baseName, spawnedBy, takesDirectInput, threadTitle } from "../../state/projects";
+import { useProjectTree } from "../../state/projectTree";
+import { hostOfView } from "../../state/projectTree";
+import { engineName, hostName, useHosts } from "../../state/hosts";
 import { useSizeClass, type SizeClass } from "../../lib/useSize";
 import { Transcript } from "./Transcript";
 import { Composer } from "./Composer";
@@ -33,7 +37,6 @@ import { ScreenGlance, useLiveScreen } from "./ComputerUse";
 import { bridge, isDesktop } from "../../bridge";
 import { Menu, type MenuItem } from "../Menu";
 import { StatusDot } from "../StatusDot";
-import { PROVIDERS } from "../../agents";
 import { diffStats, compactNumber, plainText } from "../../lib/format";
 import { Markdown } from "../Markdown";
 import { Select, type SelectOption } from "../ui/Select";
@@ -124,8 +127,9 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
     e.preventDefault();
     e.stopPropagation();
     const fileRef = { path: el.dataset.path, line: Number(el.dataset.line) || undefined, col: Number(el.dataset.col) || undefined };
-    if (e.altKey) void bridge.shell.reveal(resolvePath(fileRef.path, cwd));
-    else if (e.ctrlKey || e.metaKey) void openFileRef(fileRef, cwd);
+    const host = hostOfView(threadId);
+    if (e.altKey) void bridge.shell.reveal(resolvePath(fileRef.path, cwd), host);
+    else if (e.ctrlKey || e.metaKey) void openFileRef(fileRef, cwd, host);
     else void viewFile(fileRef, cwd, threadId);
   };
 
@@ -189,7 +193,8 @@ export function threadMoreItems(threadId: string, rename: () => void): MenuItem[
       hint: "wide panes",
       onClick: () => useUI.setState((s) => ({ showDetails: !s.showDetails })),
     },
-    ...(isDesktop && cwd ? [{ label: "Open folder", icon: <FolderOpen size={14} />, onClick: () => void bridge.shell.openPath(cwd) }] : []),
+    // A paired device's folder can't be opened here.
+    ...(isDesktop && cwd && !hostOfView(threadId) ? [{ label: "Open folder", icon: <FolderOpen size={14} />, onClick: () => void bridge.shell.openPath(cwd) }] : []),
     { label: "Archive", icon: <Archive size={14} />, onClick: () => void archiveThread(threadId), danger: true },
   ];
 }
@@ -211,6 +216,9 @@ function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, wi
   const title = draft ? "New thread" : threadTitle(thread);
   const cwd = thread?.cwd ?? draft?.cwd ?? "";
   const branch = worktree?.branch ?? thread?.gitInfo?.branch;
+  // A paired device's thread says where it runs, wherever it's shown.
+  const host = useThread(threadId, () => hostOfView(threadId));
+  const hostLabel = useHosts((s) => (host ? (s.hosts[host]?.name ?? "another device") : null));
 
   const startRename = () => {
     if (!thread) return;
@@ -278,6 +286,12 @@ function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, wi
           {title}
         </div>
       )}
+      {hostLabel && size !== "glance" && (
+        <span className="chip host-chip" title={`Runs on ${hostLabel}`}>
+          <Monitor size={11} />
+          {size !== "compact" && hostLabel}
+        </span>
+      )}
       {!draft && size !== "glance" && size !== "compact" && cwd && (
         <span className="chip path-chip" title={cwd} data-path={cwd}>
           {worktree ? <FolderGit2 size={11} /> : <FolderOpen size={11} />}
@@ -340,7 +354,7 @@ function Glance({ threadId }: { threadId: string }) {
       {req ? (
         <RequestCard req={req} compact />
       ) : screen?.shot ? (
-        <ScreenGlance screen={screen.screen} shot={screen.shot} />
+        <ScreenGlance screen={screen.screen} shot={screen.shot} host={hostOfThread(threadId)} />
       ) : (
         <div className="glance-text">{plainText(last ?? preview ?? "", 600)}</div>
       )}
@@ -453,7 +467,7 @@ function ThreadInfo({ threadId }: { threadId: string }) {
       <h4>Thread</h4>
       <div className="kv-row">
         <span>Agent</span>
-        <span>{PROVIDERS[owner].name}</span>
+        <span>{engineName(owner)}</span>
       </div>
       <div className="kv-row">
         <span>Model</span>
@@ -551,13 +565,16 @@ function DraftBody({ threadId, size }: { threadId: string; size: SizeClass }) {
 const PICK_FOLDER = "\u0000pick";
 
 function ProjectPicker({ threadId, projectKey, cwd }: { threadId: string; projectKey: string; cwd: string }) {
-  const threads = useThreads((s) => s.threads);
-  const workspaces = useThreads((s) => s.workspaces);
-  const projects = useUI((s) => s.projects);
-  const threadProject = useUI((s) => s.threadProject);
-  const checkouts = useUI((s) => s.checkouts);
-  const tree = useMemo(() => buildProjects(threads, projects, threadProject, workspaces, checkouts), [threads, projects, threadProject, workspaces, checkouts]);
-  const options: SelectOption[] = tree.map((p) => ({ value: p.key, label: p.name, description: p.path, icon: <Folder size={13} /> }));
+  const tree = useProjectTree();
+  // With paired devices, each device's projects come under its name (a draft moved to one runs there).
+  const multi = tree.some((p) => p.host);
+  const options: SelectOption[] = tree.map((p) => ({
+    value: p.key,
+    label: p.name,
+    description: p.path,
+    icon: <Folder size={13} />,
+    ...(multi ? { group: hostName(p.host) } : {}),
+  }));
   if (!options.some((o) => o.value === projectKey)) {
     options.unshift({ value: projectKey, label: baseName(cwd), description: cwd, icon: <Folder size={13} /> });
   }

@@ -19,6 +19,7 @@ import { bridge } from "../bridge";
 import { copyText, looksLikePath, parseFileRef, resolvePath, revealLabel, type FileRef } from "../lib/files";
 import { forkThread } from "../state/actions";
 import { viewFile } from "../lib/viewFile";
+import { hostOfView } from "../state/projectTree";
 import { quoteText } from "../state/composerDrafts";
 import { isThread } from "../state/ui";
 import { Menu, type MenuItem } from "./Menu";
@@ -47,6 +48,9 @@ export function ContextMenuHost() {
       const pathEl = target.closest<HTMLElement>("[data-path]");
       const code = !link && !pathEl ? target.closest("code") : null;
       const cwd = target.closest("[data-cwd]")?.getAttribute("data-cwd") ?? null;
+      // On a paired device's thread the file is there: only what works across (view, copy) is offered.
+      const thread = target.closest("[data-thread]")?.getAttribute("data-thread");
+      const host = hostOfView(thread);
 
       let file: FileRef | null = null;
       if (pathEl?.dataset.path) {
@@ -74,18 +78,18 @@ export function ContextMenuHost() {
 
         if (file) {
           const abs = resolvePath(file.path, cwd);
-          const [st, editor] = await Promise.all([bridge.files.stat(abs), bridge.editor.available()]);
+          const [st, editor] = await Promise.all([bridge.files.stat(abs, host), bridge.editor.available(host)]);
           if (items.length) items.push({ separator: true });
           if (!st.exists) {
             items.push({ label: "File not found", icon: <FileQuestion size={14} />, disabled: true });
           } else if (st.isDir) {
-            items.push({ label: "Open folder", icon: <FolderOpen size={14} />, onClick: () => void bridge.shell.openPath(abs) });
+            if (!host) items.push({ label: "Open folder", icon: <FolderOpen size={14} />, onClick: () => void bridge.shell.openPath(abs) });
           } else {
             items.push({
               label: file.line ? `View in Ret at line ${file.line}` : "View in Ret",
               icon: <Eye size={14} />,
               hint: "Click",
-              onClick: () => void viewFile(file!, cwd, target.closest("[data-thread]")?.getAttribute("data-thread")),
+              onClick: () => void viewFile(file!, cwd, thread),
             });
             if (editor) {
               items.push({
@@ -94,9 +98,9 @@ export function ContextMenuHost() {
                 onClick: () => void bridge.editor.open(abs, file!.line, file!.col),
               });
             }
-            items.push({ label: "Open with default app", icon: <ExternalLink size={14} />, onClick: () => void openWithDefault(abs) });
+            if (!host) items.push({ label: "Open with default app", icon: <ExternalLink size={14} />, onClick: () => void openWithDefault(abs) });
           }
-          if (st.exists) items.push({ label: revealLabel, icon: <FolderOpen size={14} />, hint: "Alt+click", onClick: () => void bridge.shell.reveal(abs) });
+          if (st.exists && !host) items.push({ label: revealLabel, icon: <FolderOpen size={14} />, hint: "Alt+click", onClick: () => void bridge.shell.reveal(abs) });
           items.push({ label: "Copy path", icon: <Copy size={14} />, onClick: () => copyText(abs, "Path copied") });
           if (!file.line && file.path !== abs) items.push({ label: "Copy relative path", icon: <Copy size={14} />, onClick: () => copyText(file!.path, "Path copied") });
         }

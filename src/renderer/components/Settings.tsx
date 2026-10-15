@@ -7,6 +7,7 @@ import { bridge, isDesktop } from "../bridge";
 import { PROVIDER_IDS, type CodexSource, type ProviderId } from "@shared/bridge";
 import { PROVIDERS } from "../agents";
 import { UsageMeter } from "./SidebarFooter";
+import { RemoteAccessSection } from "./RemoteAccess";
 import { Switch } from "./ui/Toggle";
 
 export function SettingsModal() {
@@ -38,6 +39,7 @@ function SettingsInner() {
           <AgentsSection />
           {codexOn && <CodexSection />}
           {claudeOn && <ClaudeSection />}
+          {isDesktop && <RemoteAccessSection />}
 
           <section>
             <h4>Appearance</h4>

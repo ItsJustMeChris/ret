@@ -5,7 +5,8 @@ import { fsClient } from "../../rpc/client";
 import { useThreads } from "../../state/threads";
 import { useUI, filePath, isDraft, isFile } from "../../state/ui";
 import { useFiles } from "../../state/files";
-import { buildProjects, projectIndex, projectKeyFor, recencyOf, threadTitle } from "../../state/projects";
+import { hostOfKey, recencyOf, threadTitle } from "../../state/projects";
+import { projectKeyNow, useProjectTree } from "../../state/projectTree";
 import { closeCodeTab, newThread, openFile } from "../../state/actions";
 import { timeAgo } from "../../lib/format";
 import { ThreadPane } from "../thread/ThreadPane";
@@ -29,12 +30,8 @@ const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCas
  */
 export function CodeView() {
   const code = useUI((s) => s.code);
-  const projects = useUI((s) => s.projects);
-  const threadProject = useUI((s) => s.threadProject);
-  const checkouts = useUI((s) => s.checkouts);
   const drafts = useUI((s) => s.drafts);
   const threads = useThreads((s) => s.threads);
-  const workspaces = useThreads((s) => s.workspaces);
 
   // Coming in with nothing to talk to: pick up where Focus mode was, else the latest thread.
   useEffect(() => {
@@ -46,7 +43,7 @@ export function CodeView() {
     if (chat && chat !== ui.code.chat) useUI.setState((s) => ({ code: { ...s.code, chat } }));
   }, [threads]);
 
-  const list = useMemo(() => buildProjects(threads, projects, threadProject, workspaces, checkouts), [threads, projects, threadProject, workspaces, checkouts]);
+  const list = useProjectTree();
 
   // The project shown: picked explicitly, else the chat thread's.
   const project = useMemo(() => {
@@ -55,13 +52,15 @@ export function CodeView() {
     if (!chat) return null;
     if (isDraft(chat)) {
       const d = drafts[chat];
-      return d ? (list.find((p) => p.key === d.projectKey) ?? { key: d.projectKey, path: d.cwd, name: d.cwd, roots: [], threadCount: 0, recency: 0, conf: null }) : null;
+      return d
+        ? (list.find((p) => p.key === d.projectKey) ?? { key: d.projectKey, host: hostOfKey(d.projectKey), path: d.cwd, name: d.cwd, roots: [], threadCount: 0, recency: 0, conf: null })
+        : null;
     }
     const t = threads[chat];
     if (!t) return null;
-    const key = projectKeyFor(t, threads, projectIndex(projects, workspaces, checkouts), threadProject);
+    const key = projectKeyNow(t);
     return list.find((p) => p.key === key) ?? null;
-  }, [code.project, code.chat, list, drafts, threads, projects, threadProject, workspaces, checkouts]);
+  }, [code.project, code.chat, list, drafts, threads]);
   const root = project?.path ?? null;
 
   // What the chat thread has changed, for the tree's markers.
@@ -106,7 +105,11 @@ export function CodeView() {
             menuMinWidth={280}
           />
         </div>
-        {root ? <Tree root={root} changed={changed} chat={code.chat} /> : <div className="code-empty">Pick a project to see its files.</div>}
+        {root ? (
+          <Tree key={project?.key} root={root} host={project?.host ?? null} changed={changed} chat={code.chat} />
+        ) : (
+          <div className="code-empty">Pick a project to see its files.</div>
+        )}
       </aside>
       <Gutter onDrag={(dx) => setWidth("explorerWidth", Math.max(180, Math.min(520, useUI.getState().code.explorerWidth + dx)))} />
       <section className="code-editor">
@@ -216,8 +219,8 @@ function CodeTabs() {
   );
 }
 
-/** The project's folder tree, read lazily through the app-server. */
-function Tree({ root, changed, chat }: { root: string; changed: Map<string, Change>; chat: string | null }) {
+/** The project's folder tree, read lazily through the app-server (on the device it's on: `host`). */
+function Tree({ root, host, changed, chat }: { root: string; host: string | null; changed: Map<string, Change>; chat: string | null }) {
   const expanded = useUI((s) => s.code.expanded);
   const active = useUI((s) => s.code.active);
   const [dirs, setDirs] = useState<Record<string, Entry[] | "loading" | { error: string }>>({});
@@ -227,7 +230,7 @@ function Tree({ root, changed, chat }: { root: string; changed: Map<string, Chan
   const read = async (dir: string) => {
     setDirs((d) => ({ ...d, [dir]: d[dir] && d[dir] !== "loading" ? d[dir] : "loading" }));
     try {
-      const res = (await fsClient().request("fs/readDirectory", { path: dir })) as { entries: { fileName: string; isDirectory: boolean }[] };
+      const res = (await fsClient(host).request("fs/readDirectory", { path: dir })) as { entries: { fileName: string; isDirectory: boolean }[] };
       const entries = res.entries
         .map((e) => ({ name: e.fileName, dir: e.isDirectory }))
         .sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }) : a.dir ? -1 : 1));
@@ -310,7 +313,7 @@ function Tree({ root, changed, chat }: { root: string; changed: Map<string, Chan
             key={path}
             className={`tree-row file ${quiet ? "quiet" : ""} ${key === activePath ? "active" : ""} ${change ? `changed-${change}` : ""}`}
             style={{ paddingLeft: 6 + depth * 14 + 16 }}
-            onClick={() => openFile(path, { from: chat })}
+            onClick={() => openFile(path, { from: chat, host })}
             data-path={path}
           >
             <FileIcon size={13} className="tree-icon" />

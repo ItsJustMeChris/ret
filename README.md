@@ -21,7 +21,7 @@ npm run dist:mac   # macOS dmg + zip → release/ (on a Mac)
 ## Layout
 
 ```
-src/main/       Electron main process, and the Codex and Claude Code engines
+src/main/       Electron main process, the Codex and Claude Code engines, and remote access (remote/)
 src/renderer/   the UI (demo/ is the website's in-browser version)
 src/shared/     what both sides share, including the agent protocol
 site/           getret.app
