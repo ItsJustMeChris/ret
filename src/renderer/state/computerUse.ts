@@ -6,6 +6,8 @@ import { bridge } from "../bridge";
 import { shallowEqual } from "../lib/shallow";
 import { useThreads } from "./threads";
 import { useGatedStore } from "./useThread";
+import ShotWorker from "./shotWorker?worker";
+import type { ShotDone, ShotJob } from "./shotWorker";
 
 /**
  * Computer use: Codex driving a desktop app (or a browser) through its `cua_repl` tool. Each step
@@ -178,7 +180,7 @@ interface Capture {
 
 /** Finished steps by id: history comes back again and again (every poll of a thread running elsewhere), and a finished step doesn't change. */
 const captured = new Map<string, Capture>();
-const CAPTURED_KEPT = 500;
+const CAPTURED_KEPT = 2000;
 
 function capture(raw: ThreadItem): Capture | null {
   if (raw.type !== "mcpToolCall" || (raw.server !== CUA && raw.server !== NODE)) return null;
@@ -226,37 +228,41 @@ function unwrapResult(item: McpCall): McpCall {
   return result === item.result ? item : { ...item, result };
 }
 
-/** A screenshot as an object URL (decoded here once, not on every render), with a smaller copy to follow. */
-function shotFrom(threadId: string, itemId: string, image: { data: string; mime: string }): Shot | null {
-  try {
-    const bin = atob(image.data);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    const blob = new Blob([bytes], { type: image.mime });
-    void thumbnail(itemId, blob);
-    return { url: URL.createObjectURL(blob), thumb: null, threadId };
-  } catch {
-    return null;
+// Screenshots are decoded in a worker (see shotWorker), one at a time and in the order sent; each
+// joins the screens when it's done.
+let decoder: Worker | null = null;
+/** Screenshots being decoded: the thread each is for, and the turn when it arrived live. */
+const decoding = new Map<string, { threadId: string; turnId: string | null }>();
+
+function decode(threadId: string, turnId: string | null, itemId: string, image: { data: string; mime: string }) {
+  if (decoding.has(itemId) || useScreens.getState().shots[itemId]) return;
+  decoding.set(itemId, { threadId, turnId });
+  if (!decoder) {
+    decoder = new ShotWorker();
+    decoder.onmessage = (e: MessageEvent<ShotDone>) => decoded(e.data);
+    // A worker that died takes its jobs with it: the next screenshot starts a new one.
+    decoder.onerror = () => {
+      decoder?.terminate();
+      decoder = null;
+      decoding.clear();
+    };
   }
+  decoder.postMessage({ id: itemId, data: image.data, mime: image.mime, width: THUMB_W } satisfies ShotJob);
 }
 
-async function thumbnail(itemId: string, blob: Blob) {
-  let thumb: string | null = null;
-  try {
-    const bmp = await createImageBitmap(blob);
-    if (bmp.width > THUMB_W) {
-      const canvas = new OffscreenCanvas(THUMB_W, Math.round((bmp.height * THUMB_W) / bmp.width));
-      canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-      thumb = URL.createObjectURL(await canvas.convertToBlob({ type: "image/webp", quality: 0.85 }));
-    }
-    bmp.close();
-  } catch {
-    return;
-  }
-  if (!thumb) return;
-  const shot = useScreens.getState().shots[itemId];
-  if (!shot || shot.thumb) return void URL.revokeObjectURL(thumb);
-  useScreens.setState((s) => ({ shots: { ...s.shots, [itemId]: { ...shot, thumb } } }));
+function decoded({ id, full, thumb }: ShotDone) {
+  const job = decoding.get(id);
+  decoding.delete(id);
+  // Its thread let go of its transcript meanwhile: nothing to show it in.
+  if (!job || !full || !useThreads.getState().live[job.threadId] || useScreens.getState().shots[id]) return;
+  const shot: Shot = { url: URL.createObjectURL(full), thumb: thumb && URL.createObjectURL(thumb), threadId: job.threadId };
+  useScreens.setState((s) => {
+    // The newest look at the app the thread's dock is on (later steps may have sent none).
+    const l = s.latest[job.threadId];
+    const shows = !!l && l.turnId === job.turnId && !!s.uses[id] && appKey(l.use) === appKey(s.uses[id]);
+    const latest = shows ? { ...s.latest, [job.threadId]: { ...l, shotId: id } } : s.latest;
+    return { latest, shots: trimShots(latest, { ...s.shots, [id]: shot }) };
+  });
 }
 
 /**
@@ -267,18 +273,17 @@ export function captureLive<T extends ThreadItem>(threadId: string, turnId: stri
   const c = capture(raw);
   if (!c) return raw;
   const id = c.item.id;
-  const shot = c.image && !useScreens.getState().shots[id] ? shotFrom(threadId, id, c.image) : null;
   useScreens.setState((s) => {
     const prev = s.latest[threadId];
     const sameTurn = prev?.turnId === turnId;
     // A step that hasn't said which app yet carries on with the one it asked to use, or the one before it.
     const use = fill(fill(c.use, s.uses[id]), sameTurn ? prev.use : null);
-    const shots = shot ? { ...s.shots, [id]: shot } : s.shots;
-    // Steps that look without sending the picture back keep showing the last one of the same app.
-    const shotId = shots[id] ? id : sameTurn && appKey(prev.use) === appKey(use) ? prev.shotId : null;
-    const latest = { ...s.latest, [threadId]: { use, turnId, itemId: id, shotId } };
-    return { latest, uses: trim({ ...s.uses, [id]: use }, USES_KEPT), shots: trimShots(latest, shots) };
+    // Until its own screenshot is decoded (and for steps that look without sending one back), the
+    // dock keeps showing the last one of the same app.
+    const shotId = s.shots[id] ? id : sameTurn && appKey(prev.use) === appKey(use) ? prev.shotId : null;
+    return { latest: { ...s.latest, [threadId]: { use, turnId, itemId: id, shotId } }, uses: trim({ ...s.uses, [id]: use }, USES_KEPT) };
   });
+  if (c.image) decode(threadId, turnId, id, c.image);
   return c.item as T;
 }
 
@@ -300,13 +305,6 @@ export function captureTurns<T extends { items: ThreadItem[] }>(threadId: string
     return changed ? { ...t, items } : t;
   });
   if (!found.length) return turns;
-  const have = useScreens.getState();
-  const fresh: Record<string, Shot> = {};
-  for (const c of found) {
-    if (!c.image || have.shots[c.item.id]) continue;
-    const shot = shotFrom(threadId, c.item.id, c.image);
-    if (shot) fresh[c.item.id] = shot;
-  }
   useScreens.setState((s) => {
     let uses = s.uses;
     for (const c of found) {
@@ -315,9 +313,9 @@ export function captureTurns<T extends { items: ThreadItem[] }>(threadId: string
       if (uses === s.uses) uses = { ...uses };
       uses[c.item.id] = use;
     }
-    const shots = Object.keys(fresh).length ? trimShots(s.latest, { ...s.shots, ...fresh }) : s.shots;
-    return uses === s.uses && shots === s.shots ? s : { uses: trim(uses, USES_KEPT), shots };
+    return uses === s.uses ? s : { uses: trim(uses, USES_KEPT) };
   });
+  for (const c of found) if (c.image) decode(threadId, null, c.item.id, c.image);
   return out;
 }
 
