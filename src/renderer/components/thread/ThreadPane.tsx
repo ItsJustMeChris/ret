@@ -35,6 +35,7 @@ import { PROVIDERS } from "../../agents";
 import { diffStats, compactNumber, plainText } from "../../lib/format";
 import { Markdown } from "../Markdown";
 import { Select, type SelectOption } from "../ui/Select";
+import { useShown, useVisibility } from "../ui/Kept";
 
 interface Props {
   threadId: string;
@@ -62,8 +63,9 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
     return () => markVisible(threadId, -1);
   }, [threadId]);
 
-  // A focus-mode pane is what you're reading; canvas windows count once clicked (CanvasWindow).
-  const attends = props.chrome === "focus" && !isDraft(threadId);
+  // A focus-mode pane is what you're reading (while it shows); canvas windows count once clicked (CanvasWindow).
+  const shown = useShown(props.chrome === "focus");
+  const attends = props.chrome === "focus" && !isDraft(threadId) && shown;
   useEffect(() => {
     if (!attends) return;
     markAttended(threadId, 1);
@@ -211,8 +213,9 @@ function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, wi
   };
 
   // A canvas window's right-click menu asks its header to start the inline rename.
+  const visibility = useVisibility();
   useEffect(() => {
-    const onRename = (e: Event) => (e as CustomEvent<string>).detail === threadId && startRename();
+    const onRename = (e: Event) => visibility.shown && (e as CustomEvent<string>).detail === threadId && startRename();
     window.addEventListener("ret:rename-thread", onRename);
     return () => window.removeEventListener("ret:rename-thread", onRename);
   });

@@ -510,6 +510,24 @@ body.resizing .transcript {
   flex-direction: column;
   position: relative;
 }
+/* A view kept built while another shows (Kept). */
+.kept-slot {
+  display: contents;
+}
+.kept {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* Just left: still in the page (laid out as it was), under the view that shows, its rendering skipped. */
+.kept[data-away] {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  content-visibility: hidden;
+}
 
 .titlebar {
   height: var(--titlebar-h);
@@ -2958,8 +2976,18 @@ html.autoscrolling[data-autoscroll="down"] * {
   initial-value: 1px;
 }
 .canvas-items > *,
+.board-windows,
+.board-windows > *,
 .cwin > .tcard {
   --inv-zoom: inherit;
+}
+/* A board's windows (one of those kept built, see Kept): at the world's origin, as the windows are. */
+.kept.board-windows {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  flex: none;
 }
 .cwin {
   --px: calc(1px * max(1, var(--inv-zoom)));
@@ -5972,11 +6000,13 @@ body.resizing .sidebar-dock {
   opacity: 1;
 }
 .inbox-read {
+  position: relative;
   min-width: 0;
   min-height: 0;
   display: flex;
 }
-.inbox-read > .thread-pane {
+.inbox-read > .thread-pane,
+.inbox-read > .kept-slot > .kept > .thread-pane {
   flex: 1;
 }
 .inbox-empty {

@@ -84,6 +84,11 @@ function outside(r: Rect, vp: Viewport, margin: number) {
   return r.x > x0 + w / z + m || r.x + r.w < x0 - m || r.y > y0 + h / z + m || r.y + r.h < y0 - m;
 }
 
+/** Whether a window is near enough the view `vp` to be drawn (or mounted). */
+export function nearView(r: Rect, vp: Viewport) {
+  return !outside(r, vp, NEAR);
+}
+
 /** The level of detail for a window that's about to mount. */
 export function lodAtMount(r: Rect, boardId: string, boardViewport: Viewport): Lod {
   // The live view is this board's once the canvas has loaded it; before that, the board's saved one.

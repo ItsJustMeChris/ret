@@ -58,8 +58,10 @@ export function shortPath(p: string, cwd?: string | null): string {
 
 /** Rough markdown → plain text for previews (cards, glance views). */
 export function plainText(md: string, max = 420): string {
-  const text = md
+  // Only the start can show (a long reply on a card would be run through every pattern whole).
+  const text = (md.length > max * 8 ? md.slice(0, max * 8) : md)
     .replace(/```[\s\S]*?```/g, " ")
+    .replace(/```[\s\S]*$/, " ")
     .replace(/`([^`]*)`/g, "$1")
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/^#{1,6}\s+/gm, "")

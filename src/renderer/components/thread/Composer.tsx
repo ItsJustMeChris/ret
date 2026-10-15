@@ -13,6 +13,7 @@ import { QueueTray } from "./QueueTray";
 import { composerDrafts as drafts, composerFocus, takeAttachments } from "../../state/composerDrafts";
 import { addFilesToThread } from "../../state/attach";
 import { QuestionDock, useQuestionFlow, type QuestionFlow } from "./QuestionDock";
+import { useVisibility } from "../ui/Kept";
 
 /** Access choices escalate: default, careful, in-between, everything. */
 const ACCESS_ICON: Record<string, React.ReactNode> = {
@@ -151,15 +152,33 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     drafts.set(threadId, text);
   }, [threadId, text]);
 
+  // Kept built while another view shows (see Kept), it leaves what's handed to the thread's composer
+  // to the one on screen, or picks it up when it's back, as one mounting would.
+  const visibility = useVisibility();
+  useEffect(() => {
+    let was = visibility.shown;
+    return visibility.subscribe(() => {
+      const shown = visibility.shown;
+      if (shown === was) return;
+      was = shown;
+      if (!shown) return;
+      const draft = drafts.get(threadId) ?? "";
+      setText((cur) => (cur === draft ? cur : draft));
+      const more = takeAttachments(threadId);
+      if (more.length) setAttachments((cur) => [...cur, ...more.filter((m) => !cur.some((c) => c.path === m.path))]);
+      if (composerFocus.delete(threadId)) focusAtEnd(ta.current);
+    });
+  }, [visibility, threadId]);
+
   // Attachments and focus requests from elsewhere (files dropped on the pane).
   useEffect(() => {
     const onAttach = (e: Event) => {
-      if ((e as CustomEvent<{ threadId: string }>).detail.threadId !== threadId) return;
+      if ((e as CustomEvent<{ threadId: string }>).detail.threadId !== threadId || !visibility.shown) return;
       const more = takeAttachments(threadId);
       setAttachments((cur) => [...cur, ...more.filter((m) => !cur.some((c) => c.path === m.path))]);
     };
     const onFocus = (e: Event) => {
-      if ((e as CustomEvent<{ threadId: string }>).detail.threadId !== threadId) return;
+      if ((e as CustomEvent<{ threadId: string }>).detail.threadId !== threadId || !visibility.shown) return;
       composerFocus.delete(threadId);
       requestAnimationFrame(() => focusAtEnd(ta.current));
     };
@@ -175,7 +194,7 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
   useEffect(() => {
     const onFill = (e: Event) => {
       const d = (e as CustomEvent<{ threadId: string; text: string }>).detail;
-      if (d.threadId !== threadId) return;
+      if (d.threadId !== threadId || !visibility.shown) return;
       composerFocus.delete(threadId);
       setText((cur) => (cur.trim() ? `${cur}\n${d.text}` : d.text));
       requestAnimationFrame(() => focusAtEnd(ta.current));
@@ -242,7 +261,7 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
   useEffect(() => {
     const onSend = (e: Event) => {
       const d = (e as CustomEvent<{ threadId: string; text: string; mode?: "plan" | "default"; handled: boolean }>).detail;
-      if (d.threadId !== threadId) return;
+      if (d.threadId !== threadId || d.handled || !visibility.shown) return;
       d.handled = true;
       if (d.mode) setPrefs({ mode: d.mode });
       const prefs = { ...effectiveOverrides(), ...(d.mode ? { mode: d.mode } : {}) };

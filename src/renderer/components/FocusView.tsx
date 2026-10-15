@@ -11,8 +11,11 @@ import type { Thread } from "@shared/protocol";
 import { StatusDot } from "./StatusDot";
 import { ThreadPane } from "./thread/ThreadPane";
 import { EmptyState } from "./EmptyState";
+import { Kept, useRecent } from "./ui/Kept";
 
 const DRAG_THREAD = "application/x-ret-thread";
+/** Tabs kept built after you switch away (see Kept), so switching back to one is instant. */
+const KEEP_TABS = 4;
 const DRAG_TAB = "application/x-ret-tab";
 
 function titleOf(id: string, t: Thread | undefined) {
@@ -102,6 +105,7 @@ export function FocusView() {
   const strip = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const [drop, setDrop] = useState<"side" | "tab" | null>(null);
+  const kept = useRecent(split ? null : active, KEEP_TABS, (id) => tabs.includes(id));
 
   const dropZone = (e: React.DragEvent): "side" | "tab" | null => {
     if (!e.dataTransfer.types.includes(DRAG_THREAD)) return null;
@@ -153,15 +157,12 @@ export function FocusView() {
           openThread(id, { mode: "focus", side: zone === "side" });
         }}
       >
-        {active ? (
-          split ? (
-            <SplitView left={active} split={split} focusedSide={focusedSide} />
-          ) : (
-            <Pane id={active} focused />
-          )
-        ) : (
-          <EmptyState />
-        )}
+        {!active ? <EmptyState /> : split ? <SplitView left={active} split={split} focusedSide={focusedSide} /> : null}
+        {kept.map((id) => (
+          <Kept key={id} shown={!split && id === active}>
+            <Pane id={id} focused />
+          </Kept>
+        ))}
         {drop && (
           <div className={`drop-hint ${drop}`}>
             <span>{drop === "side" ? "Open beside" : "Open as tab"}</span>

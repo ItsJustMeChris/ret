@@ -28,7 +28,8 @@ const STDERR_LINES = 200;
 export class AppServer {
   private child: ChildProcessWithoutNullStreams | null = null;
   private ws: WebSocket | null = null;
-  private buffer = "";
+  /** The start of a line still coming in, in the pieces it came in. */
+  private partial: string[] = [];
   private outbox: string[] = [];
   private flushScheduled = false;
   private stopping = false;
@@ -99,7 +100,7 @@ export class AppServer {
       windowsHide: true,
     });
     this.child = child;
-    this.buffer = "";
+    this.partial = [];
 
     this.setStatus({
       state: "starting",
@@ -148,13 +149,19 @@ export class AppServer {
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
       if (this.child !== child) return; // late output from a replaced process
-      this.buffer += chunk;
+      // Only the new chunk is searched for line ends: a long thread's history comes as one line of
+      // many megabytes, in 64 KB chunks, and searching all of it again for each chunk took seconds,
+      // in which nothing else got through to the window.
+      let start = 0;
       let nl: number;
-      while ((nl = this.buffer.indexOf("\n")) !== -1) {
-        const line = this.buffer.slice(0, nl).trimEnd();
-        this.buffer = this.buffer.slice(nl + 1);
+      while ((nl = chunk.indexOf("\n", start)) !== -1) {
+        const end = chunk.slice(start, nl);
+        const line = (this.partial.length ? this.partial.join("") + end : end).trimEnd();
+        this.partial = [];
         if (line) this.outbox.push(line);
+        start = nl + 1;
       }
+      if (start < chunk.length) this.partial.push(start ? chunk.slice(start) : chunk);
       this.scheduleFlush();
     });
   }

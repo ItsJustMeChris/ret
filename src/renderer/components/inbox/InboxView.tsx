@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "../../lib/shallow";
 import { Check, CheckCheck, Inbox as InboxIcon } from "lucide-react";
+import { Kept, useRecent, useVisibility } from "../ui/Kept";
 import { markSeen, useThreads, type PendingRequest } from "../../state/threads";
 import { PROVIDERS } from "../../agents";
 import { useUI } from "../../state/ui";
@@ -58,6 +59,7 @@ export function useInboxCount(): number {
  * Pick one to read it (and answer or reply) on the right; j/k or ↑/↓ move, e clears a finished one.
  */
 export function InboxView({ active = true }: { active?: boolean } = {}) {
+  const visibility = useVisibility();
   const activeRef = useRef(active);
   activeRef.current = active;
   const selected = useUI((s) => s.inbox.selected);
@@ -140,7 +142,7 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
   // j/k and the arrows move through the list; e clears a finished one. Not while typing.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!activeRef.current) return;
+      if (!activeRef.current || !visibility.shown) return;
       const t = e.target as HTMLElement | null;
       if (t?.closest?.("input, textarea, [contenteditable], .monaco-editor, .menu, .overlay") || e.ctrlKey || e.metaKey || e.altKey) return;
       const list = orderRef.current;
@@ -162,6 +164,8 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const reading = selected && threads[selected] ? selected : null;
+  const read = useRecent(reading, 3, (id) => !!threads[id]);
   const empty = order.length === 0;
   return (
     <div className="inbox-view">
@@ -205,14 +209,18 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
         )}
       </aside>
       <section className="inbox-read">
-        {selected && threads[selected] ? (
-          <ThreadPane key={selected} threadId={selected} chrome="focus" focused />
-        ) : (
+        {!reading && (
           <div className="inbox-empty">
             <InboxIcon size={26} />
             <span>Pick something on the left.</span>
           </div>
         )}
+        {/* The last few you've read stay built (see Kept): going back up the list is instant. */}
+        {read.map((id) => (
+          <Kept key={id} shown={id === reading}>
+            <ThreadPane threadId={id} chrome="focus" focused />
+          </Kept>
+        ))}
       </section>
     </div>
   );
