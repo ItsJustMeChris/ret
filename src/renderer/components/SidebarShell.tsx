@@ -107,7 +107,15 @@ export function SidebarShell() {
     let dwellTimer = 0;
     let frame = 0;
 
-    const body = () => document.querySelector(".app-body")?.getBoundingClientRect();
+    // Measured when it changes size, not on every move: reading it then would force a layout of
+    // whatever just changed (a streaming reply) in the middle of handling the pointer.
+    const bodyEl = document.querySelector(".app-body");
+    let bodyRect = bodyEl?.getBoundingClientRect();
+    const remeasure = () => (bodyRect = bodyEl?.getBoundingClientRect());
+    const bodyObserver = new ResizeObserver(remeasure);
+    if (bodyEl) bodyObserver.observe(bodyEl);
+    window.addEventListener("resize", remeasure);
+    const body = () => bodyRect;
 
     const paintHandle = (score: number) => {
       cancelAnimationFrame(frame);
@@ -217,6 +225,8 @@ export function SidebarShell() {
       window.removeEventListener("dragend", onDragEnd);
       window.removeEventListener("drop", onDragEnd);
       document.documentElement.removeEventListener("pointerleave", onLeaveWindow);
+      bodyObserver.disconnect();
+      window.removeEventListener("resize", remeasure);
       clearTimeout(dwellTimer);
       cancelAnimationFrame(frame);
     };

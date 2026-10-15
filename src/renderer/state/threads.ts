@@ -476,12 +476,16 @@ function apply(d: Draft, provider: ProviderId, method: string, p: any, hooks: Ho
 
 
 // ---------------------------------------------------------------------------
-// Frame-batched dispatch: notifications are queued and applied together once
-// per animation frame (with a timer fallback for hidden windows), so a burst
-// of token deltas across many threads costs one store update and one render.
+// Frame-batched dispatch: notifications are queued and applied together on an
+// animation frame (with a timer fallback for hidden windows), so a burst of
+// token deltas across many threads costs one store update and one render. At
+// most ~30 a second: text streams just as smoothly, and a fast display doesn't
+// spend every one of its frames rendering it.
 // ---------------------------------------------------------------------------
+const FLUSH_EVERY = 32;
 let queue: { provider: ProviderId; method: string; params: any }[] = [];
 let scheduled = false;
+let lastFlush = 0;
 let hooks: Hooks = {};
 
 export function setThreadHooks(h: Hooks) {
@@ -490,6 +494,7 @@ export function setThreadHooks(h: Hooks) {
 
 function flush() {
   scheduled = false;
+  lastFlush = performance.now();
   if (!queue.length) return;
   const batch = queue;
   queue = [];
@@ -515,7 +520,12 @@ export function enqueueNotification(provider: ProviderId, method: string, params
     done = true;
     flush();
   };
-  requestAnimationFrame(run);
+  const onFrame = () => {
+    if (done) return;
+    if (performance.now() - lastFlush < FLUSH_EVERY) requestAnimationFrame(onFrame);
+    else run();
+  };
+  requestAnimationFrame(onFrame);
   setTimeout(run, 48);
 }
 

@@ -5,6 +5,7 @@ import { FilePane, FileTile } from "../code/FilePane";
 import { AppPane, AppTile } from "./AppPane";
 import { copyText } from "../../lib/files";
 import { markAttended, markSeen, useThreads } from "../../state/threads";
+import { FreezeContext, FreezeGate, holdViews, useThread } from "../../state/useThread";
 import { closeWindow, focusWindow, forkThread, renameThread } from "../../state/actions";
 import { threadTitle } from "../../state/projects";
 import { ThreadPane, threadMoreItems } from "../thread/ThreadPane";
@@ -14,6 +15,7 @@ import { isDesktop } from "../../bridge";
 import { StatusDot, useThreadState } from "../StatusDot";
 import { toggleMaximize, viewport, viewportSize } from "./viewport";
 import { setLiveRect } from "./live";
+import { lodAtMount, registerWindow, type Lod } from "./lod";
 import { plainText } from "../../lib/format";
 
 const MIN_W = 220;
@@ -101,26 +103,58 @@ function isWindowBackground(e: React.PointerEvent): boolean {
   return true;
 }
 
-export const CanvasWindow = memo(function CanvasWindow({ win, card, focused }: { win: CanvasWin; card: boolean; focused: boolean }) {
+export const CanvasWindow = memo(function CanvasWindow({ win, focused }: { win: CanvasWin; focused: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const state = useThreadState(win.threadId);
   const selected = useUI((s) => s.selectedWindows.includes(win.id));
 
-  // Zoomed out, a window shows a summary card. Its full view stays mounted underneath (unrendered:
-  // see .cwin.card in app.css) once it's been shown, and is built in the background otherwise, so
-  // zooming back in never has to build every window's transcript in one frame.
-  const [warm, setWarm] = useState(!card);
+  // How much of the window is drawn (see lod.ts): set on the DOM as the view moves, never by a render.
+  // Zoomed out it shows a summary card over its full view, which stays mounted underneath (unrendered)
+  // once it's been shown and is built in the background otherwise, so zooming back in never has to
+  // build every window's transcript in one frame. The same goes for a window that opens away from the
+  // view (a big board loading): it's built when the app is idle, or as soon as the view comes near it.
+  const [start] = useState(() => lodAtMount(win, activeBoard().id, activeBoard().viewport));
+  const lod = useRef<Lod>(start);
+  const [warm, setWarm] = useState(!start.card && !start.culled);
+  const warmNow = useRef(warm);
+  warmNow.current = warm;
+  // A view nobody can see (culled, or the full view under the card, or the card over the full view)
+  // is frozen: it stops following the store, catches up now and then when the app is idle, and all
+  // at once when it's back.
+  const gate = useMemo(() => new FreezeGate(), []);
+  // The card only shows zoomed out, and catches up then: no idle catch-ups behind the full view.
+  const cardGate = useMemo(() => new FreezeGate(false), []);
+  useLayoutEffect(() => gate.connect(), [gate]);
+  useLayoutEffect(() => cardGate.connect(), [cardGate]);
+  useLayoutEffect(() => {
+    const apply = ({ culled, card }: Lod) => {
+      const was = lod.current;
+      lod.current = { culled, card };
+      // Attributes, not classes: React owns className and would drop them on the next render.
+      const el = ref.current;
+      if (el) {
+        if (culled) el.setAttribute("data-culled", "");
+        else el.removeAttribute("data-culled");
+        if (card) el.setAttribute("data-lod", "card");
+        else el.removeAttribute("data-lod");
+      }
+      gate.set(culled || card);
+      cardGate.set(culled || !card);
+      // The hidden view mustn't keep taking keystrokes.
+      const active = document.activeElement;
+      if (card && !was.card && active instanceof HTMLElement && el?.querySelector(":scope > .thread-pane")?.contains(active)) active.blur();
+      if (!culled && !card && !warmNow.current) startTransition(() => setWarm(true));
+    };
+    apply(lod.current);
+    return registerWindow(win.id, ref.current!, apply, lod.current);
+  }, [win.id, gate, cardGate]);
   useEffect(() => {
     if (warm) return;
-    if (!card) return void setWarm(true);
+    if (!lod.current.card && !lod.current.culled) return void startTransition(() => setWarm(true));
     const idle = requestIdleCallback(() => startTransition(() => setWarm(true)), { timeout: 5000 });
     return () => cancelIdleCallback(idle);
-  }, [card, warm]);
-  // The hidden view mustn't keep taking keystrokes.
-  useEffect(() => {
-    const active = document.activeElement;
-    if (card && active instanceof HTMLElement && ref.current?.querySelector(":scope > .thread-pane")?.contains(active)) active.blur();
-  }, [card]);
+  }, [warm]);
+  const isCard = () => lod.current.card;
 
   // On a canvas everything is on screen; only the window you've clicked counts as seen.
   useEffect(() => {
@@ -180,6 +214,7 @@ export const CanvasWindow = memo(function CanvasWindow({ win, card, focused }: {
     el.classList.add("gesturing");
     mates.forEach((m) => m.el?.classList.add("gesturing"));
     document.body.classList.add(mode === "move" ? "dragging" : "resizing");
+    holdViews("window", true);
 
     const move = (ev: PointerEvent) => {
       const dx = (ev.clientX - start.x) / zoom;
@@ -231,6 +266,7 @@ export const CanvasWindow = memo(function CanvasWindow({ win, card, focused }: {
       el.classList.remove("gesturing");
       mates.forEach((m) => m.el?.classList.remove("gesturing"));
       document.body.classList.remove("dragging", "resizing");
+      holdViews("window", false);
       if (rect !== orig) {
         if (mates.length) {
           const ddx = rect.x - orig.x, ddy = rect.y - orig.y;
@@ -256,11 +292,11 @@ export const CanvasWindow = memo(function CanvasWindow({ win, card, focused }: {
   // window actions. Text, links and files inside keep their own (copy, open, fork with selection).
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const onContextMenu = (e: React.MouseEvent) => {
-    if (!card && (e.target as HTMLElement).closest(NOT_BACKGROUND)) return;
+    if (!isCard() && (e.target as HTMLElement).closest(NOT_BACKGROUND)) return;
     e.preventDefault();
     const id = win.threadId;
     const rename = () => {
-      if (!card) {
+      if (!isCard()) {
         window.dispatchEvent(new CustomEvent("ret:rename-thread", { detail: id }));
         return;
       }
@@ -298,6 +334,8 @@ export const CanvasWindow = memo(function CanvasWindow({ win, card, focused }: {
   gesture.current = startGesture;
   const onHeaderPointerDown = useCallback((e: React.PointerEvent) => gesture.current(e, "move"), []);
   const onHeaderDoubleClick = useCallback(() => toggleMaximize(win.id), [win.id]);
+  const onCardPointerDown = useCallback((e: React.PointerEvent) => gesture.current(e, "move"), []);
+  const onCardDoubleClick = useCallback(() => zoomToWindow(win.id), [win.id]);
   const maximized = !!win.prev;
   const controls = useMemo(
     () => (
@@ -312,12 +350,12 @@ export const CanvasWindow = memo(function CanvasWindow({ win, card, focused }: {
     ),
     [win.id, maximized],
   );
-  const paneProps = { focused: focused && !card, onHeaderPointerDown, onHeaderDoubleClick, windowControls: controls };
+  const paneProps = { focused, onHeaderPointerDown, onHeaderDoubleClick, windowControls: controls };
 
   return (
     <div
       ref={ref}
-      className={`cwin ${focused ? "focused" : ""} ${card ? "card" : ""} ${selected ? "selected" : ""} ${menu ? "menu-open" : ""} state-${state}`}
+      className={`cwin ${focused ? "focused" : ""} ${selected ? "selected" : ""} ${menu ? "menu-open" : ""} state-${state}`}
       style={{ transform: `translate(${win.x}px, ${win.y}px)`, width: win.w, height: win.h, zIndex: win.z }}
       onPointerDownCapture={(e) => {
         // Only a left press picks a window: the middle button and Space+drag pan, and a right
@@ -330,31 +368,40 @@ export const CanvasWindow = memo(function CanvasWindow({ win, card, focused }: {
       }}
       onPointerDown={(e) => {
         // Grab the window by any background: not text (select/copy) and not controls.
-        if (e.button !== 0 || card || !isWindowBackground(e)) return;
+        if (e.button !== 0 || isCard() || !isWindowBackground(e)) return;
         startGesture(e, "move");
       }}
       onContextMenu={onContextMenu}
       data-win={win.id}
+      // Set once here; lod.ts changes them from then on (React leaves an unchanged prop alone).
+      data-culled={start.culled ? "" : undefined}
+      data-lod={start.card ? "card" : undefined}
     >
       {menu && <Menu {...menu} onClose={() => setMenu(null)} />}
-      {card &&
-        (isApp(win.threadId) ? (
-          <AppTile id={win.threadId} onPointerDown={(e) => startGesture(e, "move")} onDoubleClick={() => zoomToWindow(win.id)} />
+      {/* The card is always there (shown zoomed out, by CSS), so zooming across never renders. */}
+      <FreezeContext.Provider value={cardGate}>
+        {isApp(win.threadId) ? (
+          <AppTile id={win.threadId} onPointerDown={onCardPointerDown} onDoubleClick={onCardDoubleClick} />
         ) : isFile(win.threadId) ? (
-          <FileTile id={win.threadId} onPointerDown={(e) => startGesture(e, "move")} onDoubleClick={() => zoomToWindow(win.id)} />
+          <FileTile id={win.threadId} onPointerDown={onCardPointerDown} onDoubleClick={onCardDoubleClick} />
         ) : (
-          <ThreadCard threadId={win.threadId} onPointerDown={(e) => startGesture(e, "move")} winId={win.id} />
-        ))}
-      {(warm || !card) &&
-        (isApp(win.threadId) ? (
-          <AppPane id={win.threadId} {...paneProps} />
-        ) : isFile(win.threadId) ? (
-          <FilePane id={win.threadId} chrome="window" {...paneProps} />
-        ) : (
-          <ThreadPane threadId={win.threadId} chrome="window" {...paneProps} />
-        ))}
-      {!card &&
-        HANDLES.map((h) => <div key={h} className={`rz rz-${h}`} onPointerDown={(e) => startGesture(e, h)} />)}
+          <ThreadCard threadId={win.threadId} onPointerDown={onCardPointerDown} winId={win.id} />
+        )}
+      </FreezeContext.Provider>
+      {(warm || (!lod.current.card && !lod.current.culled)) && (
+        <FreezeContext.Provider value={gate}>
+          {isApp(win.threadId) ? (
+            <AppPane id={win.threadId} {...paneProps} />
+          ) : isFile(win.threadId) ? (
+            <FilePane id={win.threadId} chrome="window" {...paneProps} />
+          ) : (
+            <ThreadPane threadId={win.threadId} chrome="window" {...paneProps} />
+          )}
+        </FreezeContext.Provider>
+      )}
+      {HANDLES.map((h) => (
+        <div key={h} className={`rz rz-${h}`} onPointerDown={(e) => startGesture(e, h)} />
+      ))}
     </div>
   );
 });
@@ -370,9 +417,9 @@ function zoomToWindow(winId: string) {
 
 /** Zoomed-out representation: big, glanceable, cheap to render. */
 function ThreadCard({ threadId, winId, onPointerDown }: { threadId: string; winId: string; onPointerDown: (e: React.PointerEvent) => void }) {
-  const thread = useThreads((s) => s.threads[threadId]);
+  const thread = useThread(threadId, (s) => s.threads[threadId]);
   const state = useThreadState(threadId);
-  const lastText = useThreads((s) => {
+  const lastText = useThread(threadId, (s) => {
     const lt = s.live[threadId];
     if (!lt) return null;
     for (let i = lt.turnOrder.length - 1; i >= 0; i--) {

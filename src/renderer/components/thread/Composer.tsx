@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Gauge, ListChecks, LoaderCircle, LogIn, Paperclip, Rocket, Settings2, Shield, ShieldAlert, ShieldCheck, Square, X, Zap } from "lucide-react";
 import type { ProviderId } from "@shared/bridge";
-import { useThreads } from "../../state/threads";
+import { useThread } from "../../state/useThread";
 import { useUI, isDraft, type ComposerPrefs } from "../../state/ui";
 import { useConn, useEnabledProviders } from "../../state/conn";
 import { interrupt, isWritingFinalAnswer, sendMessage, setDraftProvider, startLogin, type Attachment, type TurnOverrides } from "../../state/actions";
@@ -90,17 +90,17 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
   const [attachments, setAttachments] = useState<Attachment[]>(() => takeAttachments(threadId));
   const [sending, setSending] = useState(false);
   const ta = useRef<HTMLTextAreaElement>(null);
-  const running = useThreads((s) => !!s.live[threadId]?.activeTurnId);
+  const running = useThread(threadId, (s) => !!s.live[threadId]?.activeTurnId);
   // Final summary streaming: Enter now means "send right after it finishes" (a steer would be dropped).
-  const finishing = useThreads((s) => {
+  const finishing = useThread(threadId, (s) => {
     const lt = s.live[threadId];
     return !!lt?.activeTurnId && isWritingFinalAnswer(lt);
   });
   // Another Codex process owns the current turn; writing to the same thread from here could corrupt it.
-  const elsewhere = useThreads((s) => !!s.external[threadId]);
+  const elsewhere = useThread(threadId, (s) => !!s.external[threadId]);
   // The agent this thread runs on: its owner, or for a new thread the one picked in this composer.
   const draft = isDraft(threadId);
-  const owner = useThreads((s) => s.owner[threadId]);
+  const owner = useThread(threadId, (s) => s.owner[threadId]);
   const chosen = useUI((s) => s.drafts[threadId]?.provider);
   const lastAgent = useUI((s) => s.lastAgent);
   const enabled = useEnabledProviders();
@@ -111,21 +111,21 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
     return c.status?.state === "running" && c.accountLoaded && !c.account?.account && !!c.account?.requiresOpenaiAuth;
   });
   // What the thread actually runs with, once its engine has said (see hydrateThread).
-  const threadAccess = useThreads((s) => {
+  const threadAccess = useThread(threadId, (s) => {
     const st = s.live[threadId]?.settings;
     return st ? (st.access ?? PROVIDERS[s.owner[threadId] ?? "codex"].accessOf?.(st.approvalPolicy, st.sandbox) ?? null) : null;
   });
-  const threadModel = useThreads((s) => s.live[threadId]?.settings?.model ?? s.threads[threadId]?.model ?? null);
-  const threadEffort = useThreads((s) => s.live[threadId]?.settings?.effort ?? s.threads[threadId]?.reasoningEffort ?? null);
+  const threadModel = useThread(threadId, (s) => s.live[threadId]?.settings?.model ?? s.threads[threadId]?.model ?? null);
+  const threadEffort = useThread(threadId, (s) => s.live[threadId]?.settings?.effort ?? s.threads[threadId]?.reasoningEffort ?? null);
   // Known once the thread is loaded in the app-server; undefined means "not known yet".
-  const threadTier = useThreads((s) => {
+  const threadTier = useThread(threadId, (s) => {
     const st = s.live[threadId]?.settings;
     return st ? (st.serviceTier ?? "default") : undefined;
   });
   const conns = useConn((s) => s.providers);
   const models = conns[provider].models;
   const hasModes = useConn((s) => s.providers[provider].modes.some((m) => m.mode === "plan"));
-  const threadMode = useThreads((s) => s.live[threadId]?.settings?.mode ?? null);
+  const threadMode = useThread(threadId, (s) => s.live[threadId]?.settings?.mode ?? null);
   const configTier = useConn((s) => s.providers[provider].defaults.serviceTier);
   // New threads start from the last-used settings for their agent; existing threads from their own.
   const [over, setOver] = useState<TurnOverrides>(() => overrides.get(threadId) ?? (draft ? lastUsed(provider) : {}));

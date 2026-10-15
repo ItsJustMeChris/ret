@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { useShallow } from "../../lib/shallow";
 import { Check, CheckCheck, Inbox as InboxIcon } from "lucide-react";
 import { markSeen, useThreads, type PendingRequest } from "../../state/threads";
 import { PROVIDERS } from "../../agents";

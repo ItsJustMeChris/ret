@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { useShallow } from "../../lib/shallow";
 import { useThreads } from "../../state/threads";
 import { useUI, type Board } from "../../state/ui";
 import { threadStateOf } from "../StatusDot";
