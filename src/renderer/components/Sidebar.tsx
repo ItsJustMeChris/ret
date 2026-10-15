@@ -1,5 +1,6 @@
 import { memo, useCallback, useMemo, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { useShallow } from "../lib/shallow";
+import { holdCursor } from "../lib/cursorShield";
 import {
   Archive,
   Bot,
@@ -113,8 +114,10 @@ function ResizeHandle() {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       document.body.classList.remove("resizing");
+      release();
     };
     document.body.classList.add("resizing");
+    const release = holdCursor("col-resize");
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };

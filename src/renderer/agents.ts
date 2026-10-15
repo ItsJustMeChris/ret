@@ -39,6 +39,8 @@ export interface AgentProvider {
   externalQuietS: number | null;
   /** Keeps named workspaces of folders (`project/list`: the ChatGPT and Codex apps' projects) for the sidebar to group by. */
   workspaces: boolean;
+  /** Threads can carry a goal they keep working toward across turns (`thread/goal/*`). */
+  goals: boolean;
   /** Ret titles its threads (Codex leaves that to each client; Claude Code titles its own sessions). */
   autoTitle: boolean;
   /**
@@ -92,6 +94,7 @@ const codex: AgentProvider = {
   external: true,
   externalQuietS: 10 * 60,
   workspaces: true,
+  goals: true,
   autoTitle: true,
   subagentThreads: true,
   configName: "config.toml",
@@ -123,6 +126,7 @@ const claude: AgentProvider = {
   // A session can sit busy for hours without writing (waiting on its subagents or teammates).
   externalQuietS: null,
   workspaces: false,
+  goals: false,
   autoTitle: false,
   subagentThreads: false,
   configName: "Claude Code settings",

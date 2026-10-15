@@ -7,7 +7,7 @@ import { RUNNABLE } from "../../shared/files";
 import { useThreads } from "../state/threads";
 import { useConn } from "../state/conn";
 import { threadTitle } from "../state/projects";
-import { plainText, timeAgo } from "../lib/format";
+import { plainText, sinceWhen } from "../lib/format";
 import { backgroundLabel, STATE_LABEL, useBackgroundOnly, useRunsElsewhere, useThreadState } from "./StatusDot";
 import type { EngineStatus, ProviderId, UpdaterState } from "../../shared/bridge";
 import { PROVIDERS } from "../agents";
@@ -336,7 +336,7 @@ function ThreadCard({ id, forks }: { id: string; forks: number }) {
   const status = elsewhere ? `Running in another ${PROVIDERS[owner].name} app` : background && state === "running" ? backgroundLabel(background) : state === "idle" ? null : STATE_LABEL[state];
   const origin = originLabel(t.originator, t.source);
   const branch = t.gitInfo?.branch;
-  const meta = [status, `Updated ${timeAgo(t.updatedAt) === "now" ? "just now" : `${timeAgo(t.updatedAt)} ago`}`, origin].filter(Boolean);
+  const meta = [status, `Updated ${sinceWhen(t.updatedAt)}`, origin].filter(Boolean);
 
   return (
     <div className="hc-thread">
@@ -450,10 +450,10 @@ function EngineCard({ provider }: { provider: ProviderId }) {
   if (codex.binaryPath) rows.push([local ? "Location" : "Connection", <span className="mono hc-path">{displayPath(codex.binaryPath)}</span>]);
   if (up?.staged) rows.push(["Next", <span><span className="mono">{up.staged}</span> installs when Ret is idle</span>]);
   else if (st.label === "Update available") rows.push(["Latest", <span className="mono">{up!.latest}</span>]);
-  if (up?.lastCheckedAt) rows.push(["Checked", timeAgo(up.lastCheckedAt / 1000) === "now" ? "just now" : `${timeAgo(up.lastCheckedAt / 1000)} ago`]);
+  if (up?.lastCheckedAt) rows.push(["Checked", sinceWhen(up.lastCheckedAt / 1000)]);
   const own = up ? null : codex.update;
   if (own?.latest && st.label === "Update available") rows.push(["Latest", <span className="mono">{own.latest}</span>]);
-  if (own?.checkedAt) rows.push(["Checked", timeAgo(own.checkedAt / 1000) === "now" ? "just now" : `${timeAgo(own.checkedAt / 1000)} ago`]);
+  if (own?.checkedAt) rows.push(["Checked", sinceWhen(own.checkedAt / 1000)]);
   const error = codex.error ?? (up?.phase === "error" ? up.error : own?.phase === "error" ? own.error : null);
 
   return (

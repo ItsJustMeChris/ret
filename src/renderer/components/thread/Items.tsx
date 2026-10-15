@@ -3,7 +3,6 @@ import {
   Bot,
   Brain,
   Check,
-  ChevronRight,
   FileText,
   FolderOpen,
   Globe,
@@ -20,7 +19,9 @@ import {
   Layers,
   ArrowUpRight,
 } from "lucide-react";
+import { Chevron } from "../ui/Chevron";
 import type { FileUpdateChange, ThreadItem } from "@shared/protocol";
+import { useThread } from "../../state/useThread";
 import { useThreads } from "../../state/threads";
 import { agentName } from "../../state/projects";
 import { openThread } from "../../state/actions";
@@ -64,7 +65,7 @@ function Disclosure({
         <span className="tool-icon">{icon}</span>
         <span className="tool-label">{label}</span>
         {meta && <span className="tool-meta">{meta}</span>}
-        {expandable && <ChevronRight className="tool-chev" size={13} />}
+        {expandable && <Chevron className="tool-chev" size={13} />}
       </button>
       {open && expandable && <div className="tool-body">{children}</div>}
     </div>
@@ -126,7 +127,7 @@ function Reasoning({ item, live }: { item: Extract<ThreadItem, { type: "reasonin
       label={live ? <Shimmer text={heading ?? "Thinking"} /> : (heading ?? "Thought")}
       tone="muted"
     >
-      <Markdown text={text} className="md-muted" />
+      <Markdown text={text} className="md-muted" streaming={live} />
     </Disclosure>
   );
 }
@@ -224,7 +225,7 @@ function FileRow({ change, cwd }: { change: FileUpdateChange; cwd: string | null
   return (
     <div className={`file-row ${open ? "open" : ""}`}>
       <button className="file-head" onClick={() => setOpen(!open)}>
-        <ChevronRight className="tool-chev" size={12} />
+        <Chevron className="tool-chev" size={12} />
         <span className={`kind kind-${kind}`}>{kind === "add" ? "A" : kind === "delete" ? "D" : "M"}</span>
         <span className="path" data-path={change.path}>{shortPath(change.path, cwd)}</span>
         <span className="stat">
@@ -329,7 +330,7 @@ function WebSearch({ item }: { item: Extract<ThreadItem, { type: "webSearch" }> 
  * down until it ends (early, if new input arrives), and then says how long it took.
  */
 function Sleep({ item, threadId, live }: { item: Extract<ThreadItem, { type: "sleep" }>; threadId: string; live: boolean }) {
-  const seen = useThreads((s) => s.live[threadId]?.sleeps[item.id]);
+  const seen = useThread(threadId, (s) => s.live[threadId]?.sleeps[item.id]);
   const waiting = live && seen?.endedAt == null;
   const [, tick] = useState(0);
   useEffect(() => {
@@ -488,7 +489,7 @@ export function activitySummary(items: ThreadItem[]): string {
 }
 
 export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: string; ctx: Ctx; live: boolean }) {
-  const item = useThreads((s) => s.live[ctx.threadId]?.items[itemId]);
+  const item = useThread(ctx.threadId, (s) => s.live[ctx.threadId]?.items[itemId]);
   if (!item) return null;
   switch (item.type) {
     case "userMessage":
@@ -513,7 +514,7 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
           <div className="plan-title">
             <ListChecks size={13} /> Plan
           </div>
-          <Markdown text={item.text} />
+          <Markdown text={item.text} streaming={live} />
           <PlanActions threadId={ctx.threadId} itemId={item.id} />
         </div>
       );

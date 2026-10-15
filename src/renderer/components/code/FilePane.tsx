@@ -85,6 +85,7 @@ export const FilePane = memo(function FilePane({ id, chrome, focused, onHeaderPo
   const path = filePath(id);
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
+  const sizer = useRef<ResizeObserver | null>(null);
   const mod = useRef<MonacoModule | null>(null);
   const hit = useRef<Monaco.editor.IEditorDecorationsCollection | null>(null);
   const saved = useRef("");
@@ -154,7 +155,11 @@ export const FilePane = memo(function FilePane({ id, chrome, focused, onHeaderPo
           editor.current = monaco.editor.create(host.current, {
             readOnly: !editing,
             readOnlyMessage: { value: "Read-only. Choose **Edit** to change this file." },
-            automaticLayout: true,
+            // Sized by its box (below), not by automaticLayout.
+            automaticLayout: false,
+            // No will-change layers of its own: on the canvas, everything painted over one (the windows
+            // above it) gets a GPU layer too, and a big board ends up with dozens re-layered every frame.
+            disableLayerHinting: true,
             theme: theme(),
             fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono").trim() || "Consolas, monospace",
             fontSize: 13,
@@ -171,6 +176,15 @@ export const FilePane = memo(function FilePane({ id, chrome, focused, onHeaderPo
             padding: { top: 10, bottom: 10 },
           });
           editor.current.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void saveRef.current());
+          // Not while it's out of the document (a canvas window off screen): measured there it's 0×0,
+          // and laying out to that drops every line drawn, all to be drawn again when it's back.
+          const ed = editor.current;
+          const box = host.current;
+          sizer.current = new ResizeObserver(([e]) => {
+            const { width, height } = e.contentRect;
+            if (box.isConnected && width && height) ed.layout({ width, height });
+          });
+          sizer.current.observe(box);
         }
         const ed = editor.current;
         const old = ed.getModel();
@@ -286,6 +300,7 @@ export const FilePane = memo(function FilePane({ id, chrome, focused, onHeaderPo
         fileBuffers.set(id, { view: ed.saveViewState() ?? undefined, text: unsaved ? text : undefined, saved: unsaved ? saved.current : undefined, editing: unsaved });
       }
       model?.dispose();
+      sizer.current?.disconnect();
       ed?.dispose();
       editor.current = null;
     },

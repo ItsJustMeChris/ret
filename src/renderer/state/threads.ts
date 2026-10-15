@@ -9,8 +9,9 @@ import type {
   ThreadTokenUsage,
   Turn,
   TurnPlanStep,
+  TurnWithPlan,
 } from "@shared/protocol";
-import type { TurnError, TurnStatus } from "@shared/protocol/generated/v2";
+import type { ThreadGoal, TurnError, TurnStatus } from "@shared/protocol/generated/v2";
 import { spawnedBy, type Workspace } from "./projects";
 
 export interface TurnState {
@@ -49,6 +50,7 @@ export interface LiveThread {
   subscribed: boolean;
   turnOrder: string[];
   turns: Record<string, TurnState>;
+  /** Updated in place as items arrive (see putItem): look at its entries, never at the map's identity. */
   items: Record<string, ThreadItem>;
   olderCursor: string | null;
   loadingOlder: boolean;
@@ -95,6 +97,8 @@ export interface ThreadsState {
   background: Record<string, BackgroundTask[]>;
   /** Follow-ups typed while a turn runs; each is sent as its own turn when the current one ends. */
   queued: Record<string, QueuedMessage[]>;
+  /** The objective a thread keeps working toward across turns (Codex's `/goal`), while it has one. */
+  goals: Record<string, ThreadGoal>;
   /** Named workspaces the engines keep (see agents.ts), which the sidebar groups threads by. */
   workspaces: Workspace[];
 }
@@ -141,6 +145,7 @@ export const useThreads = create<ThreadsState>(() => ({
   external: {},
   background: {},
   queued: {},
+  goals: {},
   workspaces: [],
 }));
 
@@ -176,7 +181,17 @@ function mergeItemIds(turn: Turn, prev?: TurnState): string[] {
   return added.length ? [...prev.itemIds, ...added] : prev.itemIds;
 }
 
-export function turnStateFrom(turn: Turn, prev?: TurnState): TurnState {
+/**
+ * A turn's checklist as history reports it (only Ret's Claude engine does), or the one already
+ * held. Unchanged steps keep the object they had, so views showing the plan don't re-render.
+ */
+function planFrom(steps: TurnPlanStep[] | null | undefined, prev: TurnState["plan"] | undefined): TurnState["plan"] {
+  if (!steps) return prev ?? null;
+  const same = prev && prev.steps.length === steps.length && prev.steps.every((s, i) => s.step === steps[i].step && s.status === steps[i].status);
+  return same ? prev : { explanation: prev?.explanation ?? null, steps };
+}
+
+export function turnStateFrom(turn: TurnWithPlan, prev?: TurnState): TurnState {
   return {
     id: turn.id,
     status: turn.status,
@@ -186,7 +201,7 @@ export function turnStateFrom(turn: Turn, prev?: TurnState): TurnState {
     completedAt: turn.completedAt,
     durationMs: turn.durationMs,
     diff: prev?.diff ?? null,
-    plan: prev?.plan ?? null,
+    plan: planFrom(turn.plan, prev?.plan),
   };
 }
 
@@ -231,8 +246,13 @@ function turnOf(lt: LiveThread, turnId: string): TurnState {
   return (lt.turns[turnId] = own(t));
 }
 
+/**
+ * A thread's items map is the one structure here updated in place, not copied: copying it for every
+ * flush of a streaming reply costs over a millisecond each time for a thread with a few thousand
+ * items. Its entries are still replaced, never changed, and the thread's LiveThread is new whenever
+ * one is, so nothing can (or may) tell from the map's identity whether something changed.
+ */
 function putItem(lt: LiveThread, turnId: string, item: ThreadItem) {
-  lt.items = own(lt.items);
   lt.items[item.id] = item;
   const turn = turnOf(lt, turnId);
   if (!turn.itemIds.includes(item.id)) {
@@ -267,7 +287,6 @@ function mutItem<T extends ThreadItem["type"]>(
     putItem(lt, turnId, init());
     item = lt.items[itemId] as Extract<ThreadItem, { type: T }>;
   }
-  lt.items = own(lt.items);
   const copy = own(item);
   lt.items[itemId] = copy;
   return copy;
@@ -326,6 +345,18 @@ function apply(d: Draft, provider: ProviderId, method: string, p: any, hooks: Ho
       d.background = own(d.background);
       if (p.tasks?.length) d.background[p.threadId] = p.tasks;
       else delete d.background[p.threadId];
+      break;
+    }
+    case "thread/goal/updated":
+      goalNews.set(p.threadId, (goalNews.get(p.threadId) ?? 0) + 1);
+      d.goals = own(d.goals);
+      d.goals[p.threadId] = p.goal;
+      break;
+    case "thread/goal/cleared": {
+      goalNews.set(p.threadId, (goalNews.get(p.threadId) ?? 0) + 1);
+      if (!d.goals[p.threadId]) break;
+      d.goals = own(d.goals);
+      delete d.goals[p.threadId];
       break;
     }
     case "thread/project/updated":
@@ -484,12 +515,16 @@ function apply(d: Draft, provider: ProviderId, method: string, p: any, hooks: Ho
 
 
 // ---------------------------------------------------------------------------
-// Frame-batched dispatch: notifications are queued and applied together once
-// per animation frame (with a timer fallback for hidden windows), so a burst
-// of token deltas across many threads costs one store update and one render.
+// Frame-batched dispatch: notifications are queued and applied together on an
+// animation frame (with a timer fallback for hidden windows), so a burst of
+// token deltas across many threads costs one store update and one render. At
+// most ~30 a second: text streams just as smoothly, and a fast display doesn't
+// spend every one of its frames rendering it.
 // ---------------------------------------------------------------------------
+const FLUSH_EVERY = 32;
 let queue: { provider: ProviderId; method: string; params: any }[] = [];
 let scheduled = false;
+let lastFlush = 0;
 let hooks: Hooks = {};
 
 export function setThreadHooks(h: Hooks) {
@@ -498,6 +533,7 @@ export function setThreadHooks(h: Hooks) {
 
 function flush() {
   scheduled = false;
+  lastFlush = performance.now();
   if (!queue.length) return;
   const batch = queue;
   queue = [];
@@ -523,7 +559,12 @@ export function enqueueNotification(provider: ProviderId, method: string, params
     done = true;
     flush();
   };
-  requestAnimationFrame(run);
+  const onFrame = () => {
+    if (done) return;
+    if (performance.now() - lastFlush < FLUSH_EVERY) requestAnimationFrame(onFrame);
+    else run();
+  };
+  requestAnimationFrame(onFrame);
   setTimeout(run, 48);
 }
 
@@ -558,6 +599,35 @@ export function patchLive(threadId: string, patch: Partial<LiveThread> | ((lt: L
     return { live: { ...s.live, [threadId]: next } };
   });
 }
+
+/** How many goal events each thread has had: a fetch answered after one of them is out of date. */
+const goalNews = new Map<string, number>();
+
+/** Where a thread's goal events are at (taken before asking for the goal; see setGoal). */
+export function goalMark(threadId: string): number {
+  flushNow();
+  return goalNews.get(threadId) ?? 0;
+}
+
+/**
+ * Record a thread's goal as fetched (null: it has none). With `mark` (goalMark when it was asked
+ * for), the answer is dropped if a goal event came in since: that event is newer.
+ */
+export function setGoal(threadId: string, goal: ThreadGoal | null, mark?: number) {
+  const cur = useThreads.getState().goals[threadId];
+  if (!goal && !cur) return;
+  if (goal && cur && sameGoal(goal, cur)) return;
+  if (mark !== undefined && goalMark(threadId) !== mark) return;
+  useThreads.setState((s) => {
+    const goals = { ...s.goals };
+    if (goal) goals[threadId] = goal;
+    else delete goals[threadId];
+    return { goals };
+  });
+}
+
+const sameGoal = (a: ThreadGoal, b: ThreadGoal) =>
+  a.updatedAt === b.updatedAt && a.status === b.status && a.objective === b.objective && a.tokensUsed === b.tokensUsed && a.timeUsedSeconds === b.timeUsedSeconds;
 
 export function upsertThreads(provider: ProviderId, list: Thread[]) {
   useThreads.setState((s) => {

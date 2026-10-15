@@ -2,6 +2,7 @@ import { memo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Bot, Columns2, FileCode2, GitFork, Plus, X } from "lucide-react";
 import { useUI, isDraft, isFile, isThread, filePath, type FocusSplit } from "../state/ui";
 import { useFiles } from "../state/files";
+import { holdCursor } from "../lib/cursorShield";
 import { FilePane } from "./code/FilePane";
 import { useThreads } from "../state/threads";
 import { closePane, closeTab, newThreadNear, openThread, setSplitRatio } from "../state/actions";
@@ -10,8 +11,11 @@ import type { Thread } from "@shared/protocol";
 import { StatusDot } from "./StatusDot";
 import { ThreadPane } from "./thread/ThreadPane";
 import { EmptyState } from "./EmptyState";
+import { Kept, useRecent } from "./ui/Kept";
 
 const DRAG_THREAD = "application/x-ret-thread";
+/** Tabs kept built after you switch away (see Kept), so switching back to one is instant. */
+const KEEP_TABS = 4;
 const DRAG_TAB = "application/x-ret-tab";
 
 function titleOf(id: string, t: Thread | undefined) {
@@ -101,6 +105,7 @@ export function FocusView() {
   const strip = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const [drop, setDrop] = useState<"side" | "tab" | null>(null);
+  const kept = useRecent(split ? null : active, KEEP_TABS, (id) => tabs.includes(id));
 
   const dropZone = (e: React.DragEvent): "side" | "tab" | null => {
     if (!e.dataTransfer.types.includes(DRAG_THREAD)) return null;
@@ -152,15 +157,12 @@ export function FocusView() {
           openThread(id, { mode: "focus", side: zone === "side" });
         }}
       >
-        {active ? (
-          split ? (
-            <SplitView left={active} split={split} focusedSide={focusedSide} />
-          ) : (
-            <Pane id={active} focused />
-          )
-        ) : (
-          <EmptyState />
-        )}
+        {!active ? <EmptyState /> : split ? <SplitView left={active} split={split} focusedSide={focusedSide} /> : null}
+        {kept.map((id) => (
+          <Kept key={id} shown={!split && id === active}>
+            <Pane id={id} focused />
+          </Kept>
+        ))}
         {drop && (
           <div className={`drop-hint ${drop}`}>
             <span>{drop === "side" ? "Open beside" : "Open as tab"}</span>
@@ -202,6 +204,7 @@ function SplitView({ left, split, focusedSide }: { left: string; split: FocusSpl
     const rect = box.current.getBoundingClientRect();
     let ratio = split.ratio;
     document.body.classList.add("resizing");
+    const release = holdCursor("col-resize");
     const move = (ev: PointerEvent) => {
       ratio = Math.min(0.8, Math.max(0.2, (ev.clientX - rect.left) / rect.width));
       setGrid(ratio);
@@ -211,6 +214,7 @@ function SplitView({ left, split, focusedSide }: { left: string; split: FocusSpl
       gutter.removeEventListener("pointerup", up);
       gutter.removeEventListener("lostpointercapture", up);
       document.body.classList.remove("resizing");
+      release();
       setSplitRatio(left, ratio);
     };
     gutter.addEventListener("pointermove", move);

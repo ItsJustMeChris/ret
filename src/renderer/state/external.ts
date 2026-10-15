@@ -4,7 +4,7 @@ import { PROVIDER_IDS, type ProviderId } from "@shared/bridge";
 import { PROVIDERS } from "../agents";
 import { useConn } from "./conn";
 import type { Thread } from "@shared/protocol";
-import { mergeTurns } from "./actions";
+import { loadGoal, mergeTurns } from "./actions";
 import { spawnedBy, threadTitle } from "./projects";
 import { upsertThreads, useThreads, type ExternalRun } from "./threads";
 import { backfillLineage } from "./lineage";
@@ -202,4 +202,5 @@ function refresh(p: ProviderId, threadId: string) {
     .request("thread/turns/list", { threadId, limit: TAIL_TURNS, sortDirection: "desc", itemsView: "full" })
     .then((res) => mergeTurns(threadId, res.data, null, "tail"))
     .catch((err) => console.warn("tail refresh failed", err));
+  void loadGoal(threadId);
 }

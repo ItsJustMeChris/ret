@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { useShallow } from "../../lib/shallow";
 import {
   Archive,
   ChevronDown,
@@ -16,6 +16,7 @@ import {
   Paperclip,
 } from "lucide-react";
 import { useThreads, markAttended, markVisible } from "../../state/threads";
+import { useThread } from "../../state/useThread";
 import { addFilesToThread } from "../../state/attach";
 import { viewFile } from "../../lib/viewFile";
 import { openFileRef, resolvePath } from "../../lib/files";
@@ -35,6 +36,7 @@ import { PROVIDERS } from "../../agents";
 import { diffStats, compactNumber, plainText } from "../../lib/format";
 import { Markdown } from "../Markdown";
 import { Select, type SelectOption } from "../ui/Select";
+import { useShown, useVisibility } from "../ui/Kept";
 
 interface Props {
   threadId: string;
@@ -43,19 +45,21 @@ interface Props {
   onHeaderPointerDown?: (e: React.PointerEvent) => void;
   onHeaderDoubleClick?: () => void;
   windowControls?: React.ReactNode;
+  /** The size class it'll most likely have, when it's built before it's shown (a canvas window off screen). */
+  initialSize?: SizeClass;
 }
 
 export const ThreadPane = memo(function ThreadPane(props: Props) {
   const { threadId } = props;
   const ref = useRef<HTMLDivElement>(null);
-  const size = useSizeClass(ref);
+  const size = useSizeClass(ref, props.initialSize);
   const showDetails = useUI((s) => s.showDetails);
   // A subagent that asks you something still gets the composer, which is where questions are answered.
   const directInput = useThreads(
     (s) => takesDirectInput(s.threads[threadId]) || Object.values(s.requests).some((r) => r.threadId === threadId && r.method === "item/tool/requestUserInput"),
   );
   // Relative file references in this thread resolve against its working directory.
-  const cwd = useThreads((s) => s.threads[threadId]?.cwd) ?? useUI.getState().drafts[threadId]?.cwd;
+  const cwd = useThread(threadId, (s) => s.threads[threadId]?.cwd) ?? useUI.getState().drafts[threadId]?.cwd;
 
   useEffect(() => {
     if (isDraft(threadId)) return;
@@ -64,8 +68,9 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
     return () => markVisible(threadId, -1);
   }, [threadId]);
 
-  // A focus-mode pane is what you're reading; canvas windows count once clicked (CanvasWindow).
-  const attends = props.chrome === "focus" && !isDraft(threadId);
+  // A focus-mode pane is what you're reading (while it shows); canvas windows count once clicked (CanvasWindow).
+  const shown = useShown(props.chrome === "focus");
+  const attends = props.chrome === "focus" && !isDraft(threadId) && shown;
   useEffect(() => {
     if (!attends) return;
     markAttended(threadId, 1);
@@ -186,15 +191,15 @@ export function threadMoreItems(threadId: string, rename: () => void): MenuItem[
 }
 
 function TranscriptFor({ threadId }: { threadId: string }) {
-  const cwd = useThreads((s) => s.threads[threadId]?.cwd ?? null);
+  const cwd = useThread(threadId, (s) => s.threads[threadId]?.cwd ?? null);
   return <Transcript threadId={threadId} cwd={cwd} />;
 }
 
 function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, windowControls, size }: Props & { size: SizeClass }) {
-  const thread = useThreads((s) => s.threads[threadId]);
+  const thread = useThread(threadId, (s) => s.threads[threadId]);
   const draft = useUI((s) => s.drafts[threadId]);
   const worktree = useUI((s) => s.worktrees[threadId]);
-  const usage = useThreads((s) => s.live[threadId]?.tokenUsage);
+  const usage = useThread(threadId, (s) => s.live[threadId]?.tokenUsage);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
@@ -224,8 +229,9 @@ function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, wi
   };
 
   // A canvas window's right-click menu asks its header to start the inline rename.
+  const visibility = useVisibility();
   useEffect(() => {
-    const onRename = (e: Event) => (e as CustomEvent<string>).detail === threadId && startRename();
+    const onRename = (e: Event) => visibility.shown && (e as CustomEvent<string>).detail === threadId && startRename();
     window.addEventListener("ret:rename-thread", onRename);
     return () => window.removeEventListener("ret:rename-thread", onRename);
   });
@@ -310,7 +316,7 @@ function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, wi
 
 /** Tiny windows: just enough to monitor and unblock a thread. */
 function Glance({ threadId }: { threadId: string }) {
-  const last = useThreads((s) => {
+  const last = useThread(threadId, (s) => {
     const lt = s.live[threadId];
     if (!lt) return null;
     for (let i = lt.turnOrder.length - 1; i >= 0; i--) {
@@ -322,8 +328,8 @@ function Glance({ threadId }: { threadId: string }) {
     }
     return null;
   });
-  const preview = useThreads((s) => s.threads[threadId]?.preview);
-  const req = useThreads((s) => Object.values(s.requests).find((r) => r.threadId === threadId));
+  const preview = useThread(threadId, (s) => s.threads[threadId]?.preview);
+  const req = useThread(threadId, (s) => Object.values(s.requests).find((r) => r.threadId === threadId));
   return (
     <div className="glance">
       {req ? (
@@ -336,7 +342,7 @@ function Glance({ threadId }: { threadId: string }) {
 }
 
 function SidePanel({ threadId }: { threadId: string }) {
-  const lastTurn = useThreads((s) => {
+  const lastTurn = useThread(threadId, (s) => {
     const lt = s.live[threadId];
     if (!lt) return null;
     for (let i = lt.turnOrder.length - 1; i >= 0; i--) {
@@ -345,7 +351,7 @@ function SidePanel({ threadId }: { threadId: string }) {
     }
     return null;
   });
-  const usage = useThreads((s) => s.live[threadId]?.tokenUsage);
+  const usage = useThread(threadId, (s) => s.live[threadId]?.tokenUsage);
   const [openDiff, setOpenDiff] = useState(false);
   const files = lastTurn?.diff ? splitDiff(lastTurn.diff) : [];
   return (
@@ -409,7 +415,7 @@ function SidePanel({ threadId }: { threadId: string }) {
 
 /** Thread facts plus lineage: jump to the parent, any fork or any subagent without hunting in the sidebar. */
 function ThreadInfo({ threadId }: { threadId: string }) {
-  const thread = useThreads((s) => s.threads[threadId]);
+  const thread = useThread(threadId, (s) => s.threads[threadId]);
   const spawner = spawnedBy(thread);
   const parent = useThreads((s) => (thread?.forkedFromId ? s.threads[thread.forkedFromId] : undefined));
   const spawnerThread = useThreads((s) => (spawner ? s.threads[spawner] : undefined));
@@ -429,7 +435,7 @@ function ThreadInfo({ threadId }: { threadId: string }) {
     ),
   );
   const worktree = useUI((s) => s.worktrees[threadId]);
-  const owner = useThreads((s) => s.owner[threadId] ?? "codex");
+  const owner = useThread(threadId, (s) => s.owner[threadId] ?? "codex");
   if (!thread) return null;
   return (
     <section>
