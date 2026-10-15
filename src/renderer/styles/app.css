@@ -1729,9 +1729,6 @@ body.resizing .transcript {
 .agent-link:hover {
   background: var(--bg-3);
 }
-.agent-link svg {
-  color: var(--text-3);
-}
 .tool.open .tool-chev,
 .activity.open > .activity-head .tool-chev,
 .file-row.open .tool-chev {
@@ -6285,4 +6282,10 @@ body.resizing .sidebar-dock {
 }
 .subagent-bar-btn.stop:hover {
   color: var(--red);
+}
+@container pane (width < 640px) {
+  .subagent-bar {
+    width: calc(100% - 16px);
+    margin: 4px auto 8px;
+  }
 }

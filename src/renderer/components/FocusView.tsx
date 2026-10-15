@@ -51,6 +51,7 @@ const Tab = memo(function Tab({ id, active, index }: { id: string; active: boole
   const title = titleOf(id, thread);
   const rightTitle = split ? titleOf(split.right, right) : null;
   const related = !!split && (right?.forkedFromId === id || thread?.forkedFromId === split.right);
+  const agents = !!split && (spawnedBy(right) === id || spawnedBy(thread) === split.right);
   return (
     <div
       className={`tab ${active ? "active" : ""} ${split ? "tab-split" : ""}`}
@@ -79,7 +80,7 @@ const Tab = memo(function Tab({ id, active, index }: { id: string; active: boole
       <span className="tab-title">{title}</span>
       {split && (
         <>
-          <span className={`tab-join ${related ? "fork" : ""}`}>{related ? <GitFork size={11} /> : <Columns2 size={11} />}</span>
+          <span className={`tab-join ${related || agents ? "fork" : ""}`}>{agents ? <Bot size={11} /> : related ? <GitFork size={11} /> : <Columns2 size={11} />}</span>
           <Marker id={split.right} />
           <span className="tab-title">{rightTitle}</span>
         </>
@@ -173,16 +174,19 @@ export function FocusView() {
   );
 }
 
-type Relation = "fork" | "parent" | "sibling" | null;
+type Relation = "fork" | "parent" | "sibling" | "agent" | "spawner" | null;
 
 /** How the right pane relates to the left: drives the badge on the divider. */
 function useRelation(left: string, right: string): Relation {
   return useThreads((s) => {
     const l = s.threads[left];
     const r = s.threads[right];
+    // A subagent starts from its parent's history, so it's "forked" from it too: that check comes first.
+    if (spawnedBy(r) === left) return "agent";
+    if (spawnedBy(l) === right) return "spawner";
     if (r?.forkedFromId === left) return "fork";
     if (l?.forkedFromId === right) return "parent";
-    if (l?.forkedFromId && l.forkedFromId === r?.forkedFromId) return "sibling";
+    if (l?.forkedFromId && l.forkedFromId === r?.forkedFromId && !spawnedBy(l) && !spawnedBy(r)) return "sibling";
     return null;
   });
 }
@@ -229,13 +233,17 @@ function SplitView({ left, split, focusedSide }: { left: string; split: FocusSpl
   );
 
   const badgeTitle =
-    relation === "fork"
-      ? `Right is a fork of “${leftTitle}”`
-      : relation === "parent"
-        ? "Left is a fork of the thread on the right"
-        : relation === "sibling"
-          ? "Both are forks of the same thread"
-          : "Drag to resize · double-click to even out";
+    relation === "agent"
+      ? `Right is a subagent of “${leftTitle}”`
+      : relation === "spawner"
+        ? "Left is a subagent of the thread on the right"
+        : relation === "fork"
+          ? `Right is a fork of “${leftTitle}”`
+          : relation === "parent"
+            ? "Left is a fork of the thread on the right"
+            : relation === "sibling"
+              ? "Both are forks of the same thread"
+              : "Drag to resize · double-click to even out";
 
   return (
     <div className="split" ref={box} style={{ gridTemplateColumns: `${split.ratio}fr 12px ${1 - split.ratio}fr` }}>
@@ -253,9 +261,9 @@ function SplitView({ left, split, focusedSide }: { left: string; split: FocusSpl
       >
         {relation && (
           <span className="split-link">
-            {relation === "parent" && <ArrowLeft size={10} />}
-            <GitFork size={12} />
-            {relation === "fork" && <ArrowRight size={10} />}
+            {(relation === "parent" || relation === "spawner") && <ArrowLeft size={10} />}
+            {relation === "agent" || relation === "spawner" ? <Bot size={12} /> : <GitFork size={12} />}
+            {(relation === "fork" || relation === "agent") && <ArrowRight size={10} />}
           </span>
         )}
       </div>

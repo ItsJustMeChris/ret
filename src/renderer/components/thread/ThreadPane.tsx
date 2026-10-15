@@ -15,7 +15,7 @@ import {
   PanelRight,
   Paperclip,
 } from "lucide-react";
-import { useThreads, markAttended, markVisible } from "../../state/threads";
+import { NO_AGENTS, useThreads, markAttended, markVisible } from "../../state/threads";
 import { useThread } from "../../state/useThread";
 import { addFilesToThread } from "../../state/attach";
 import { viewFile } from "../../lib/viewFile";
@@ -27,7 +27,7 @@ import { useSizeClass, type SizeClass } from "../../lib/useSize";
 import { Transcript } from "./Transcript";
 import { Composer } from "./Composer";
 import { DiffView } from "./Items";
-import { SubagentBar } from "./Subagents";
+import { SubagentBar, openFrom } from "./Subagents";
 import { RequestCard } from "./Approvals";
 import { bridge, isDesktop } from "../../bridge";
 import { Menu, type MenuItem } from "../Menu";
@@ -55,7 +55,8 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
   const size = useSizeClass(ref, props.initialSize);
   const showDetails = useUI((s) => s.showDetails);
   // A subagent that asks you something still gets the composer, which is where questions are answered.
-  const directInput = useThreads(
+  const directInput = useThread(
+    threadId,
     (s) => takesDirectInput(s.threads[threadId]) || Object.values(s.requests).some((r) => r.threadId === threadId && r.method === "item/tool/requestUserInput"),
   );
   // Relative file references in this thread resolve against its working directory.
@@ -160,7 +161,7 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
                 compact={size === "compact"}
                 autoFocus={props.focused && props.chrome === "focus"}
                 // The details panel lists the subagents; the dock keeps its room for the rest.
-                agentsElsewhere={size === "wide" && showDetails}
+                agentsListed={size === "wide" && showDetails}
               />
             ) : (
               <SubagentBar threadId={threadId} />
@@ -175,10 +176,12 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
 
 /** The thread's "…" menu; canvas windows show the same on right-click. */
 export function threadMoreItems(threadId: string, rename: () => void): MenuItem[] {
-  const cwd = useThreads.getState().threads[threadId]?.cwd ?? "";
+  const thread = useThreads.getState().threads[threadId];
+  const cwd = thread?.cwd ?? "";
   return [
     { label: "Rename", icon: <Pencil size={14} />, onClick: rename },
-    { label: "Compact context", icon: <Layers size={14} />, onClick: () => void compactThread(threadId) },
+    // Compacting starts a turn: a subagent only takes those from the agent that spawned it.
+    ...(takesDirectInput(thread) ? [{ label: "Compact context", icon: <Layers size={14} />, onClick: () => void compactThread(threadId) }] : []),
     {
       label: useUI.getState().showDetails ? "Hide details panel" : "Show details panel",
       icon: <PanelRight size={14} />,
@@ -413,12 +416,22 @@ function SidePanel({ threadId }: { threadId: string }) {
   );
 }
 
+function AgentLineage({ agentId, from }: { agentId: string; from: string }) {
+  const title = useThread(agentId, (s) => threadTitle(s.threads[agentId]));
+  return (
+    <button className="lineage" onClick={(e) => openFrom(e, agentId, from)}>
+      <StatusDot threadId={agentId} />
+      <span>{title}</span>
+    </button>
+  );
+}
+
 /** Thread facts plus lineage: jump to the parent, any fork or any subagent without hunting in the sidebar. */
 function ThreadInfo({ threadId }: { threadId: string }) {
   const thread = useThread(threadId, (s) => s.threads[threadId]);
   const spawner = spawnedBy(thread);
   const parent = useThreads((s) => (thread?.forkedFromId ? s.threads[thread.forkedFromId] : undefined));
-  const spawnerThread = useThreads((s) => (spawner ? s.threads[spawner] : undefined));
+  const spawnerThread = useThread(spawner ?? "", (s) => (spawner ? s.threads[spawner] : undefined));
   // A subagent is forked from its parent too (it starts from the parent's history); it isn't a fork.
   const forks = useThreads(
     useShallow((s) =>
@@ -427,13 +440,7 @@ function ThreadInfo({ threadId }: { threadId: string }) {
         .sort((a, b) => a.createdAt - b.createdAt),
     ),
   );
-  const agents = useThreads(
-    useShallow((s) =>
-      Object.values(s.threads)
-        .filter((t) => spawnedBy(t) === threadId)
-        .sort((a, b) => a.createdAt - b.createdAt),
-    ),
-  );
+  const agents = useThread(threadId, (s) => s.agents[threadId] ?? NO_AGENTS);
   const worktree = useUI((s) => s.worktrees[threadId]);
   const owner = useThread(threadId, (s) => s.owner[threadId] ?? "codex");
   if (!thread) return null;
@@ -490,11 +497,8 @@ function ThreadInfo({ threadId }: { threadId: string }) {
       {agents.length > 0 && (
         <>
           <h4 className="sub-h">Subagents · {agents.length}</h4>
-          {agents.map((a) => (
-            <button key={a.id} className="lineage" onClick={() => openThread(a.id)}>
-              <StatusDot threadId={a.id} />
-              <span>{threadTitle(a)}</span>
-            </button>
+          {agents.map((id) => (
+            <AgentLineage key={id} agentId={id} from={threadId} />
           ))}
         </>
       )}

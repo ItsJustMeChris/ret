@@ -1,29 +1,35 @@
 import { memo, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
-import { ArrowUpRight, Bot, ChevronRight, CornerLeftUp, Square } from "lucide-react";
-import { useThreads } from "../../state/threads";
+import { Bot, CornerLeftUp, Square } from "lucide-react";
+import { Chevron } from "../ui/Chevron";
+import { NO_AGENTS } from "../../state/threads";
+import { useThread, useThreadGroup } from "../../state/useThread";
 import { agentName, spawnedBy, threadTitle } from "../../state/projects";
 import { interrupt, openThread } from "../../state/actions";
+import { useUI } from "../../state/ui";
 import { STATE_LABEL, StatusDot, threadStateOf, useThreadState } from "../StatusDot";
 
-const open = (e: React.MouseEvent, threadId: string) => openThread(threadId, { side: e.altKey });
+/**
+ * Open a thread mentioned in another (`from`): a subagent from its parent, or the other way round.
+ * In Focus mode Alt puts it beside `from`; on the canvas its window goes next to `from`'s.
+ */
+export function openFrom(e: React.MouseEvent, threadId: string, from: string) {
+  e.stopPropagation();
+  if (useUI.getState().mode === "focus") openThread(threadId, e.altKey ? { side: true, besideThread: from } : {});
+  else openThread(threadId, { besideThread: from });
+}
 
 /**
  * The agents a thread spawned, docked on top of its composer: what each is up to, and a way into
  * its thread. Open while any of them works; folded to a line once they're all done.
  */
 export const AgentTray = memo(function AgentTray({ threadId }: { threadId: string }) {
-  const ids = useThreads(
-    useShallow((s) =>
-      Object.values(s.threads)
-        .filter((t) => spawnedBy(t) === threadId)
-        .sort((a, b) => a.createdAt - b.createdAt)
-        .map((t) => t.id),
-    ),
-  );
-  const running = useThreads((s) => ids.filter((id) => threadStateOf(s, id) === "running").length);
+  const ids = useThread(threadId, (s) => s.agents[threadId] ?? NO_AGENTS);
+  return ids.length ? <Tray threadId={threadId} ids={ids} /> : null;
+});
+
+function Tray({ threadId, ids }: { threadId: string; ids: readonly string[] }) {
+  const running = useThreadGroup(ids, (s) => ids.filter((id) => threadStateOf(s, id) === "running").length);
   const [unfolded, setUnfolded] = useState<boolean | null>(null);
-  if (!ids.length) return null;
   const expanded = unfolded ?? running > 0;
   return (
     <div className={`queue-tray agent-tray ${expanded ? "open" : ""}`}>
@@ -33,23 +39,22 @@ export const AgentTray = memo(function AgentTray({ threadId }: { threadId: strin
           {ids.length} {ids.length === 1 ? "subagent" : "subagents"}
           {running > 0 && <span className="agent-tray-running"> · {running} working</span>}
         </span>
-        <ChevronRight size={12} className="tool-chev" />
+        <Chevron size={12} className="tool-chev" />
       </button>
-      {expanded && ids.map((id) => <AgentRow key={id} threadId={id} />)}
+      {expanded && ids.map((id) => <AgentRow key={id} agentId={id} from={threadId} />)}
     </div>
   );
-});
+}
 
-function AgentRow({ threadId }: { threadId: string }) {
-  const title = useThreads((s) => threadTitle(s.threads[threadId]));
-  const state = useThreadState(threadId);
+function AgentRow({ agentId, from }: { agentId: string; from: string }) {
+  const title = useThread(agentId, (s) => threadTitle(s.threads[agentId]));
+  const state = useThreadState(agentId);
   return (
-    <button className="queue-row agent-row" onClick={(e) => open(e, threadId)} title={`Open ${title}'s thread (Alt: beside this one)`}>
-      <StatusDot threadId={threadId} />
+    <button className="queue-row agent-row" onClick={(e) => openFrom(e, agentId, from)} title={`Open ${title}'s thread`}>
+      <StatusDot threadId={agentId} />
       <span className="queue-text">{title}</span>
       {/* An agent with nothing left to do has finished its task. */}
       <span className={`queue-when state-${state}`}>{state === "idle" ? "Done" : STATE_LABEL[state]}</span>
-      <ArrowUpRight size={12} className="queue-icon" />
     </button>
   );
 }
@@ -59,10 +64,10 @@ function AgentRow({ threadId }: { threadId: string }) {
  * that spawned them, not from you; this says so, leads back to that agent, and can stop a turn.
  */
 export function SubagentBar({ threadId }: { threadId: string }) {
-  const name = useThreads((s) => agentName(s.threads[threadId]) ?? "This agent");
-  const parentId = useThreads((s) => spawnedBy(s.threads[threadId]));
-  const parentTitle = useThreads((s) => (parentId && s.threads[parentId] ? threadTitle(s.threads[parentId]) : null));
-  const running = useThreads((s) => !!s.live[threadId]?.activeTurnId);
+  const name = useThread(threadId, (s) => agentName(s.threads[threadId]) ?? "This agent");
+  const parentId = useThread(threadId, (s) => spawnedBy(s.threads[threadId]));
+  const parentTitle = useThread(parentId ?? "", (s) => (parentId && s.threads[parentId] ? threadTitle(s.threads[parentId]) : null));
+  const running = useThread(threadId, (s) => !!s.live[threadId]?.activeTurnId);
   return (
     <div className={`subagent-bar ${running ? "running" : ""}`}>
       <Bot size={13} className="subagent-bar-icon" />
@@ -70,7 +75,7 @@ export function SubagentBar({ threadId }: { threadId: string }) {
         Subagent · takes its instructions from
       </span>
       {parentId && (
-        <button className="subagent-bar-btn" onClick={(e) => open(e, parentId)} disabled={!parentTitle} title={parentTitle ?? undefined}>
+        <button className="subagent-bar-btn" onClick={(e) => openFrom(e, parentId, threadId)} disabled={!parentTitle} title={parentTitle ?? undefined}>
           <CornerLeftUp size={12} />
           <span>{parentTitle ?? "Parent unavailable"}</span>
         </button>

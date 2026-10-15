@@ -99,6 +99,8 @@ export interface ThreadsState {
   queued: Record<string, QueuedMessage[]>;
   /** The objective a thread keeps working toward across turns (Codex's `/goal`), while it has one. */
   goals: Record<string, ThreadGoal>;
+  /** Each thread's subagents, oldest first: worked out from `threads` (see indexAgents), for views that list them per thread. */
+  agents: Record<string, string[]>;
   /** Named workspaces the engines keep (see agents.ts), which the sidebar groups threads by. */
   workspaces: Workspace[];
 }
@@ -146,8 +148,42 @@ export const useThreads = create<ThreadsState>(() => ({
   background: {},
   queued: {},
   goals: {},
+  agents: {},
   workspaces: [],
 }));
+
+export const NO_AGENTS: readonly string[] = [];
+
+// The agents index follows `threads`, which changes on thread events, not on streamed text.
+useThreads.subscribe((s, prev) => {
+  if (s.threads === prev.threads) return;
+  const agents = indexAgents(s.threads, s.agents);
+  if (agents !== s.agents) useThreads.setState({ agents });
+});
+
+/** Subagents by the thread that spawned them. A parent whose list didn't change keeps its array, so only views of a parent that gained or lost one re-render. */
+function indexAgents(threads: Record<string, Thread>, prev: Record<string, string[]>): Record<string, string[]> {
+  const by = new Map<string, Thread[]>();
+  for (const t of Object.values(threads)) {
+    const parent = spawnedBy(t);
+    if (!parent) continue;
+    const list = by.get(parent);
+    if (list) list.push(t);
+    else by.set(parent, [t]);
+  }
+  let changed = Object.keys(prev).length !== by.size;
+  const next: Record<string, string[]> = {};
+  for (const [parent, list] of by) {
+    const ids = list.sort((a, b) => a.createdAt - b.createdAt).map((t) => t.id);
+    const old = prev[parent];
+    if (old && old.length === ids.length && old.every((id, i) => id === ids[i])) next[parent] = old;
+    else {
+      next[parent] = ids;
+      changed = true;
+    }
+  }
+  return changed ? next : prev;
+}
 
 export const stripTurns = (t: Thread): Thread => (t.turns?.length ? { ...t, turns: [] } : t);
 
@@ -305,10 +341,13 @@ export interface Hooks {
 
 /**
  * A subagent's turn: work done for the turn that spawned it, which reports back. Not something to
- * review on its own. Its thread may not be known yet; its turn names the turn it works for.
+ * review on its own. A thread not known yet is taken for one when its turn works for another turn;
+ * a known thread only by its source, since a parent woken by an agent it started gets such a turn
+ * too, and that turn is its report.
  */
 export function delegated(thread: Thread | undefined, turn: Turn): boolean {
-  return !!spawnedBy(thread) || (!!turn.rootTurnId && turn.rootTurnId !== turn.id);
+  if (thread) return !!spawnedBy(thread);
+  return !!turn.rootTurnId && turn.rootTurnId !== turn.id;
 }
 
 /** The provider a thread belongs to (Codex until known: it was the only one). */

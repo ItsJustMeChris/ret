@@ -17,15 +17,13 @@ import {
   X,
   FilePen,
   Layers,
-  ArrowUpRight,
 } from "lucide-react";
 import { Chevron } from "../ui/Chevron";
 import type { FileUpdateChange, ThreadItem } from "@shared/protocol";
 import { useThread } from "../../state/useThread";
-import { useThreads } from "../../state/threads";
 import { agentName } from "../../state/projects";
-import { openThread } from "../../state/actions";
 import { StatusDot } from "../StatusDot";
+import { openFrom } from "./Subagents";
 import { changeStats, duration, shortPath, unwrapCommand } from "../../lib/format";
 import { highlight } from "../../lib/markdown";
 import { Markdown } from "../Markdown";
@@ -352,28 +350,22 @@ function Sleep({ item, threadId, live }: { item: Extract<ThreadItem, { type: "sl
 
 /** What a subagent goes by here: its nickname once its thread is known, else its path or id. */
 function useAgentName(threadId: string, path?: string | null): string {
-  return useThreads((s) => agentName(s.threads[threadId], path)) ?? `agent ${threadId.slice(-6)}`;
+  return useThread(threadId, (s) => agentName(s.threads[threadId], path)) ?? `agent ${threadId.slice(-6)}`;
 }
 
-function openAgent(e: React.MouseEvent, threadId: string) {
-  e.stopPropagation();
-  openThread(threadId, { side: e.altKey });
-}
-
-/** A subagent named in a row: opens its thread (Alt: beside this one). */
-function AgentLink({ threadId, path }: { threadId: string; path?: string | null }) {
+/** A subagent named in a row of `from`'s transcript: opens its thread. */
+function AgentLink({ threadId, path, from }: { threadId: string; path?: string | null; from: string }) {
   const name = useAgentName(threadId, path);
   return (
-    <button className="agent-link" onClick={(e) => openAgent(e, threadId)} title={`Open ${name}'s thread`}>
+    <button className="agent-link" onClick={(e) => openFrom(e, threadId, from)} title={`Open ${name}'s thread`}>
       <StatusDot threadId={threadId} />
       <span>{name}</span>
-      <ArrowUpRight size={11} />
     </button>
   );
 }
 
 /** A subagent starting, hearing from its parent, being stopped, or finishing. The row opens its thread. */
-function SubAgentActivity({ item }: { item: Extract<ThreadItem, { type: "subAgentActivity" }> }) {
+function SubAgentActivity({ item, from }: { item: Extract<ThreadItem, { type: "subAgentActivity" }>; from: string }) {
   const name = useAgentName(item.agentThreadId, item.agentPath);
   const who = <span className="agent-name">{name}</span>;
   const label = {
@@ -385,7 +377,7 @@ function SubAgentActivity({ item }: { item: Extract<ThreadItem, { type: "subAgen
   const meta = [item.model, item.reasoningEffort].filter(Boolean).join(" · ");
   return (
     <div className="tool">
-      <button className="tool-head" onClick={(e) => openAgent(e, item.agentThreadId)} title={`Open ${name}'s thread`}>
+      <button className="tool-head" onClick={(e) => openFrom(e, item.agentThreadId, from)} title={`Open ${name}'s thread`}>
         <span className="tool-icon">
           <Bot size={13} />
         </span>
@@ -394,13 +386,12 @@ function SubAgentActivity({ item }: { item: Extract<ThreadItem, { type: "subAgen
           {meta}
           <StatusDot threadId={item.agentThreadId} />
         </span>
-        <ArrowUpRight className="tool-chev" size={13} />
       </button>
     </div>
   );
 }
 
-function Collab({ item }: { item: Extract<ThreadItem, { type: "collabAgentToolCall" }> }) {
+function Collab({ item, from }: { item: Extract<ThreadItem, { type: "collabAgentToolCall" }>; from: string }) {
   const verb: Record<string, string> = {
     spawnAgent: "Spawned",
     sendInput: "Messaged",
@@ -424,7 +415,7 @@ function Collab({ item }: { item: Extract<ThreadItem, { type: "collabAgentToolCa
           {ids.length > 0 && (
             <div className="agent-links">
               {ids.map((id) => (
-                <AgentLink key={id} threadId={id} />
+                <AgentLink key={id} threadId={id} from={from} />
               ))}
             </div>
           )}
@@ -550,9 +541,9 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
         </div>
       );
     case "collabAgentToolCall":
-      return <Collab item={item} />;
+      return <Collab item={item} from={ctx.threadId} />;
     case "subAgentActivity":
-      return <SubAgentActivity item={item} />;
+      return <SubAgentActivity item={item} from={ctx.threadId} />;
     case "hookPrompt":
       return <div className="hook">{item.fragments.map((f) => f.text).join("\n")}</div>;
     case "sleep":

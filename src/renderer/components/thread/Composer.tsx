@@ -92,13 +92,13 @@ export function Composer({
   threadId,
   autoFocus,
   compact,
-  agentsElsewhere,
+  agentsListed,
 }: {
   threadId: string;
   autoFocus?: boolean;
   compact?: boolean;
   /** The thread's subagents are on screen already (the details panel), so the dock leaves them out. */
-  agentsElsewhere?: boolean;
+  agentsListed?: boolean;
 }) {
   const [text, setText] = useState(() => drafts.get(threadId) ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>(() => takeAttachments(threadId));
@@ -386,7 +386,7 @@ export function Composer({
     {/* Docked on top, longest-lived first and the next message nearest the box. */}
     <div className="composer-dock">
       <GoalBar threadId={threadId} />
-      {!agentsElsewhere && <AgentTray threadId={threadId} />}
+      {!agentsListed && <AgentTray threadId={threadId} />}
       <QueueTray threadId={threadId} />
     </div>
     <div

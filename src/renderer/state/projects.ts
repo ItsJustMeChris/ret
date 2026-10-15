@@ -120,6 +120,20 @@ export const takesDirectInput = (t: Thread | undefined): boolean => !spawnedBy(t
 /** The thread this one hangs under: the agent that spawned it, or the thread it was forked from. */
 export const lineageParent = (t: Thread): string | null => spawnedBy(t) ?? t.forkedFromId;
 
+/**
+ * The top of a thread's line: up through the threads it came from (`parentOf`: forks and spawns by
+ * default) as far as `threads` knows them.
+ */
+export function lineageRoot(threads: Record<string, Thread>, id: string, parentOf: (t: Thread) => string | null = lineageParent): string {
+  const seen = new Set<string>([id]);
+  let cur = id;
+  for (let up = threads[cur] && parentOf(threads[cur]); up && threads[up] && !seen.has(up); up = parentOf(threads[cur])) {
+    seen.add(up);
+    cur = up;
+  }
+  return cur;
+}
+
 /** A subagent's handle: the nickname Codex gave it, else the last part of its path (/root/pong). */
 export function agentName(t: Thread | undefined, path?: string | null): string | null {
   const p = path ?? (t?.source as { subAgent?: { thread_spawn?: { agent_path?: string | null } } } | undefined)?.subAgent?.thread_spawn?.agent_path;
