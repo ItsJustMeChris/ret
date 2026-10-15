@@ -10,6 +10,7 @@ import { bridge, isDesktop } from "../../bridge";
 import { toast } from "../../state/toasts";
 import { Select, type SelectOption } from "../ui/Select";
 import { QueueTray } from "./QueueTray";
+import { GoalBar } from "./GoalBar";
 import { composerDrafts as drafts, composerFocus, takeAttachments } from "../../state/composerDrafts";
 import { addFilesToThread } from "../../state/attach";
 import { QuestionDock, useQuestionFlow, type QuestionFlow } from "./QuestionDock";
@@ -370,7 +371,11 @@ export function Composer({ threadId, autoFocus, compact }: { threadId: string; a
 
   return (
     <>
-    <QueueTray threadId={threadId} />
+    {/* Docked on top, longest-lived first and the next message nearest the box. */}
+    <div className="composer-dock">
+      <GoalBar threadId={threadId} />
+      <QueueTray threadId={threadId} />
+    </div>
     <div
       className={`composer ${running ? "running" : ""} ${elsewhere ? "elsewhere" : ""} ${compact ? "compact" : ""} ${planning ? "planning" : ""} ${ask ? "asking" : ""}`}
     >

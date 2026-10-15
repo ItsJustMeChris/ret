@@ -11,7 +11,7 @@ import type {
   TurnPlanStep,
   TurnWithPlan,
 } from "@shared/protocol";
-import type { TurnError, TurnStatus } from "@shared/protocol/generated/v2";
+import type { ThreadGoal, TurnError, TurnStatus } from "@shared/protocol/generated/v2";
 import type { Workspace } from "./projects";
 
 export interface TurnState {
@@ -97,6 +97,8 @@ export interface ThreadsState {
   background: Record<string, BackgroundTask[]>;
   /** Follow-ups typed while a turn runs; each is sent as its own turn when the current one ends. */
   queued: Record<string, QueuedMessage[]>;
+  /** The objective a thread keeps working toward across turns (Codex's `/goal`), while it has one. */
+  goals: Record<string, ThreadGoal>;
   /** Named workspaces the engines keep (see agents.ts), which the sidebar groups threads by. */
   workspaces: Workspace[];
 }
@@ -143,6 +145,7 @@ export const useThreads = create<ThreadsState>(() => ({
   external: {},
   background: {},
   queued: {},
+  goals: {},
   workspaces: [],
 }));
 
@@ -334,6 +337,18 @@ function apply(d: Draft, provider: ProviderId, method: string, p: any, hooks: Ho
       d.background = own(d.background);
       if (p.tasks?.length) d.background[p.threadId] = p.tasks;
       else delete d.background[p.threadId];
+      break;
+    }
+    case "thread/goal/updated":
+      goalNews.set(p.threadId, (goalNews.get(p.threadId) ?? 0) + 1);
+      d.goals = own(d.goals);
+      d.goals[p.threadId] = p.goal;
+      break;
+    case "thread/goal/cleared": {
+      goalNews.set(p.threadId, (goalNews.get(p.threadId) ?? 0) + 1);
+      if (!d.goals[p.threadId]) break;
+      d.goals = own(d.goals);
+      delete d.goals[p.threadId];
       break;
     }
     case "thread/project/updated":
@@ -576,6 +591,35 @@ export function patchLive(threadId: string, patch: Partial<LiveThread> | ((lt: L
     return { live: { ...s.live, [threadId]: next } };
   });
 }
+
+/** How many goal events each thread has had: a fetch answered after one of them is out of date. */
+const goalNews = new Map<string, number>();
+
+/** Where a thread's goal events are at (taken before asking for the goal; see setGoal). */
+export function goalMark(threadId: string): number {
+  flushNow();
+  return goalNews.get(threadId) ?? 0;
+}
+
+/**
+ * Record a thread's goal as fetched (null: it has none). With `mark` (goalMark when it was asked
+ * for), the answer is dropped if a goal event came in since: that event is newer.
+ */
+export function setGoal(threadId: string, goal: ThreadGoal | null, mark?: number) {
+  const cur = useThreads.getState().goals[threadId];
+  if (!goal && !cur) return;
+  if (goal && cur && sameGoal(goal, cur)) return;
+  if (mark !== undefined && goalMark(threadId) !== mark) return;
+  useThreads.setState((s) => {
+    const goals = { ...s.goals };
+    if (goal) goals[threadId] = goal;
+    else delete goals[threadId];
+    return { goals };
+  });
+}
+
+const sameGoal = (a: ThreadGoal, b: ThreadGoal) =>
+  a.updatedAt === b.updatedAt && a.status === b.status && a.objective === b.objective && a.tokensUsed === b.tokensUsed && a.timeUsedSeconds === b.timeUsedSeconds;
 
 export function upsertThreads(provider: ProviderId, list: Thread[]) {
   useThreads.setState((s) => {

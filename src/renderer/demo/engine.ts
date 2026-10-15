@@ -427,6 +427,8 @@ export class DemoEngine {
         this.notify("thread/name/updated", { threadId: t.meta.id, threadName: t.meta.name });
         return {};
       }
+      case "thread/goal/get":
+        return { goal: null };
       case "thread/archive": {
         const t = this.get(p.threadId);
         t.run?.cancel();
