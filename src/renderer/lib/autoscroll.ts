@@ -13,6 +13,8 @@ let active: (() => void) | null = null;
 /** The nearest thing at or above `from` that scrolls vertically and has somewhere to go. */
 function scrollerAt(from: Element | null): HTMLElement | null {
   for (let el = from; el && el !== document.body; el = el.parentElement) {
+    // The canvas scrolls (its pans are scroll offsets), but it pans by dragging, not this.
+    if (el.classList.contains("canvas-scroller")) return null;
     if (!(el instanceof HTMLElement) || el.scrollHeight <= el.clientHeight + 1) continue;
     const y = getComputedStyle(el).overflowY;
     if (y === "auto" || y === "scroll" || y === "overlay") return el;

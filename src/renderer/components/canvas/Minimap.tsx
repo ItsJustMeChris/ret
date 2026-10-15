@@ -5,6 +5,9 @@ import { useUI, type Board } from "../../state/ui";
 import { threadStateOf } from "../StatusDot";
 import { boundsOf, viewport, type Viewport } from "./viewport";
 
+// Scroll-driven animation timelines (Chromium 115+); not in TypeScript's DOM library yet.
+declare const ScrollTimeline: { new (options: { source: Element; axis: "x" | "y" }): AnimationTimeline } | undefined;
+
 const W = 168;
 const H = 110;
 /** How long the view has to sit still before the minimap fades out. */
@@ -13,6 +16,7 @@ const IDLE_MS = 2500;
 export function Minimap({ board, viewportEl }: { board: Board; viewportEl: React.RefObject<HTMLDivElement | null> }) {
   const root = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLDivElement>(null);
+  const frameX = useRef<HTMLDivElement>(null);
   // needs input · working · failed · finished and not looked at yet (shimmers until clicked)
   const states = useThreads(useShallow((s) => board.windows.map((w) => threadStateOf(s, w.threadId))));
   const focused = useUI((s) => s.focusedWindow);
@@ -24,22 +28,60 @@ export function Minimap({ board, viewportEl }: { board: Board; viewportEl: React
   }, [board.windows]);
   const scale = Math.min(W / world.w, H / world.h);
 
+  // The frame follows pans on the compositor: a pan is the canvas scroller's scroll offset (see
+  // CanvasView), and two scroll-driven animations map that offset to the frame's place, x on the outer
+  // element and y on the inner one. Moving it from script instead would re-layerize the whole canvas
+  // on every frame of a pan. The animations are only rebuilt when the mapping changes (a zoom, the
+  // view resized, the board's extent). Where there are no scroll timelines, it's moved every frame.
   useLayoutEffect(() => {
     let size = "";
-    return viewport.subscribe((vp) => {
+    let mapped = "";
+    let anims: Animation[] = [];
+    let timelines: { el: HTMLElement; x: AnimationTimeline; y: AnimationTimeline } | null = null;
+    const off = viewport.subscribe((vp) => {
       const f = frame.current;
-      if (!f) return;
-      const vx = -vp.x / vp.zoom;
-      const vy = -vp.y / vp.zoom;
-      f.style.transform = `translate3d(${(vx - world.x) * scale}px, ${(vy - world.y) * scale}px, 0)`;
+      const fx = frameX.current;
+      if (!f || !fx) return;
       // Resizing it is a relayout and repaint; panning only moves it (on the compositor).
       const next = `${(viewport.size.w / vp.zoom) * scale}|${(viewport.size.h / vp.zoom) * scale}`;
-      if (next === size) return;
-      size = next;
-      const [w, h] = next.split("|");
-      f.style.width = `${w}px`;
-      f.style.height = `${h}px`;
+      if (next !== size) {
+        size = next;
+        const [w, h] = next.split("|");
+        f.style.width = `${w}px`;
+        f.style.height = `${h}px`;
+      }
+      const sc = viewport.scroll;
+      if (!sc || typeof ScrollTimeline === "undefined") {
+        f.style.transform = `translate(${(-vp.x / vp.zoom - world.x) * scale}px, ${(-vp.y / vp.zoom - world.y) * scale}px)`;
+        return;
+      }
+      const key = `${vp.zoom}|${sc.origin.x}|${sc.origin.y}|${sc.extent}|${viewport.size.w}|${viewport.size.h}`;
+      if (key === mapped && timelines?.el === sc.el) return;
+      mapped = key;
+      if (timelines?.el !== sc.el) {
+        timelines = { el: sc.el, x: new ScrollTimeline({ source: sc.el, axis: "x" }), y: new ScrollTimeline({ source: sc.el, axis: "y" }) };
+        for (const a of anims) a.cancel();
+        anims = [];
+      }
+      // The frame's place for a scroll offset s along an axis: the view's world edge, (s - origin) / zoom, on the map.
+      const at = (s: number, o: number, w: number) => ((s - o) / vp.zoom - w) * scale;
+      const maxX = sc.extent - viewport.size.w;
+      const maxY = sc.extent - viewport.size.h;
+      const kx = [{ transform: `translateX(${at(0, sc.origin.x, world.x)}px)` }, { transform: `translateX(${at(maxX, sc.origin.x, world.x)}px)` }];
+      const ky = [{ transform: `translateY(${at(0, sc.origin.y, world.y)}px)` }, { transform: `translateY(${at(maxY, sc.origin.y, world.y)}px)` }];
+      if (anims.length) {
+        (anims[0].effect as KeyframeEffect).setKeyframes(kx);
+        (anims[1].effect as KeyframeEffect).setKeyframes(ky);
+      } else {
+        const opts = { fill: "both", easing: "linear" } as const;
+        anims = [fx.animate(kx, { ...opts, timeline: timelines.x }), f.animate(ky, { ...opts, timeline: timelines.y })];
+        f.style.transform = "";
+      }
     });
+    return () => {
+      off();
+      for (const a of anims) a.cancel();
+    };
   }, [world, scale]);
 
   // Shown while the view pans or zooms (or jumps to another board), faded out once it has sat still
@@ -99,7 +141,9 @@ export function Minimap({ board, viewportEl }: { board: Board; viewportEl: React
           }}
         />
       ))}
-      <div ref={frame} className="mm-frame" />
+      <div ref={frameX} className="mm-frame-x">
+        <div ref={frame} className="mm-frame" />
+      </div>
     </div>
   );
 }
