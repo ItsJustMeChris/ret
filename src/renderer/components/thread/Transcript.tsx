@@ -16,11 +16,24 @@ import { diffStats, duration } from "../../lib/format";
 import { Approvals } from "./Approvals";
 import { TurnRail } from "./TurnRail";
 import { Shimmer } from "../ui/Shimmer";
+import { appKey, computerUseOf, useAppInfosFor, useScreen, type Shot } from "../../state/computerUse";
 
 type Ctx = { threadId: string; cwd: string | null };
 
 function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: boolean }) {
   const items = useThread(ctx.threadId, (s) => ids.map((id) => s.live[ctx.threadId]?.items[id]).filter(Boolean) as ThreadItem[], shallowEqual);
+  // What the live session learned about each computer-use step, and each app's last screenshot.
+  const known = useScreen((s) => items.map((it) => (computerUseOf(it) ? s.uses[it.id] : undefined)), shallowEqual);
+  const shots = useScreen((s) => {
+    const byApp = new Map<string, Shot>();
+    items.forEach((it, i) => {
+      const own = s.shots[it.id] && computerUseOf(it);
+      if (own) byApp.set(appKey(known[i] ?? own), s.shots[it.id]);
+    });
+    return [...byApp.values()];
+  }, shallowEqual);
+  // The folded summary names the apps it used, so it needs their names before any row asks.
+  useAppInfosFor(useMemo(() => [...new Set(items.flatMap((it, i) => (known[i] ?? computerUseOf(it))?.appId ?? []))], [items, known]));
   const [open, setOpen] = useState(false);
   if (live) {
     // While the agent works, show the most recent steps live.
@@ -46,11 +59,14 @@ function ActivityGroup({ ids, ctx, live }: { ids: string[]; ctx: Ctx; live: bool
     <div className={`activity ${open ? "open" : ""}`}>
       <button className="activity-head" onClick={() => setOpen(!open)}>
         <Chevron className="tool-chev" size={13} />
-        <span>{activitySummary(items)}</span>
+        <span>{activitySummary(items, known)}</span>
         {failed && <span className="badge err">failed step</span>}
       </button>
-      {!open && viewed.length > 0 && (
+      {!open && viewed.length + shots.length > 0 && (
         <div className="activity-thumbs">
+          {shots.map((shot) => (
+            <ThreadImage key={shot.url} src={shot.thumb ?? shot.url} full={shot.url} size="sm" />
+          ))}
           {viewed.slice(0, 6).map((path, i) => (
             <ThreadImage key={i} path={path} cwd={ctx.cwd} size="sm" />
           ))}

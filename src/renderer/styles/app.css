@@ -5148,7 +5148,8 @@ body.resizing .sidebar-dock {
 
 /*
  * The dock on top of the composer: one box for whatever the thread has to show there (its goal,
- * its subagents, queued follow-ups…), stacked with a rule between, so any mix of them joins up.
+ * its subagents, the app it's using, queued follow-ups…), stacked with a rule between, so any mix
+ * of them joins up.
  * Its sections draw no box of their own; it hides when none of them renders.
  */
 .composer-dock {
@@ -5170,6 +5171,133 @@ body.resizing .sidebar-dock {
 }
 .composer-dock > * + * {
   border-top: 1px solid var(--line);
+}
+
+/* Computer use: the app an agent is driving and its window, docked above the composer. */
+.screen-dock {
+  padding: 4px;
+}
+.screen-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 0 6px 0 5px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  text-align: left;
+}
+.screen-head:not(:disabled):hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+.screen-head:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.screen-app {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 550;
+  color: var(--text);
+}
+.screen-window {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+}
+.screen-window::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--text-3);
+}
+.screen-step {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+  color: var(--text-3);
+}
+.screen-chev {
+  flex: none;
+  color: var(--text-3);
+  transition: transform 0.15s var(--ease);
+}
+.screen-dock.open .screen-chev {
+  transform: rotate(90deg);
+}
+.screen-shot {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 0;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--bg);
+  cursor: zoom-in;
+}
+.screen-shot img {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+}
+.app-icon {
+  display: block;
+  flex: none;
+  object-fit: contain;
+}
+.tool-head .app-icon {
+  filter: saturate(0.85);
+}
+.cu-app {
+  color: var(--text);
+}
+.cu-step {
+  margin-left: 6px;
+}
+.cu-shot {
+  margin: 2px 0 8px;
+}
+.cu-window {
+  text-transform: none;
+  letter-spacing: normal;
+}
+.screen-glance {
+  position: relative;
+  height: calc(100% + 20px);
+  margin: -10px -12px;
+  background: var(--bg);
+}
+/* The screenshot, not the app icon in its label. */
+.screen-glance > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.screen-glance-label {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 5px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-2) 85%, transparent);
+  border: 1px solid var(--line-2);
 }
 
 /* Queued follow-ups */

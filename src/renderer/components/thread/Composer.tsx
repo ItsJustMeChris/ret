@@ -12,6 +12,7 @@ import { Select, type SelectOption } from "../ui/Select";
 import { QueueTray } from "./QueueTray";
 import { GoalBar } from "./GoalBar";
 import { AgentTray } from "./Subagents";
+import { ScreenDock } from "./ComputerUse";
 import { composerDrafts as drafts, composerFocus, takeAttachments } from "../../state/composerDrafts";
 import { addFilesToThread } from "../../state/attach";
 import { QuestionDock, useQuestionFlow, type QuestionFlow } from "./QuestionDock";
@@ -387,6 +388,7 @@ export function Composer({
     <div className="composer-dock">
       <GoalBar threadId={threadId} />
       {!agentsListed && <AgentTray threadId={threadId} />}
+      <ScreenDock threadId={threadId} compact={compact} />
       <QueueTray threadId={threadId} />
     </div>
     <div

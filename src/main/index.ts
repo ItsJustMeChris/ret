@@ -15,6 +15,7 @@ import { ClaudeEngine } from "./claude/engine";
 import { findSystemClaude, openLoginTerminal, probeClaudeVersion } from "./claude/platform";
 import { ClaudeUpdater } from "./claude/updater";
 import { createWorktree, gitInfo, mainCheckouts } from "./git";
+import { appInfo } from "./apps";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 
@@ -486,6 +487,7 @@ function registerIpc() {
     return shell.openExternal(`vscode://file${target.startsWith("/") ? "" : "/"}${encodeURI(target)}${loc}`);
   });
   ipcMain.handle(IPC.copy, (_e, text: string) => clipboard.writeText(String(text)));
+  ipcMain.handle(IPC.appInfo, (_e, appId: unknown) => appInfo(appId));
   ipcMain.on(IPC.edit, (e, command: EditCommand, arg?: string) => {
     const wc = e.sender;
     switch (command) {

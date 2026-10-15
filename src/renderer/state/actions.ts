@@ -31,6 +31,7 @@ import {
 } from "./threads";
 import { activeBoard, appId, appKind, fileId, isApp, isDraft, isFile, isThread, newId, updateBoard, useUI, type CanvasWin, type FocusSplit, type UIState, type ViewMode } from "./ui";
 import { onFsChanged, useFiles } from "./files";
+import { captureLive, captureTurns, noteAppRequest, screenTurnEnded } from "./computerUse";
 
 // ---------------------------------------------------------------------------
 // Boot: wire the transport into the stores.
@@ -148,6 +149,18 @@ function wireProvider(p: ProviderId) {
         }
         if (params?.item?.type === "userMessage" && params.item.clientId) clearOptimistic(params.threadId, params.item.clientId);
         if (method === "item/completed" && params?.item?.type === "userMessage") titleFromMessage(p, params.threadId, params.item);
+        // Computer-use steps leave their screenshots with the screens (see computerUse).
+        if (params?.item?.type === "mcpToolCall") {
+          const item = captureLive(params.threadId, params.turnId, params.item);
+          if (item !== params.item) params = { ...params, item };
+        }
+        break;
+      case "turn/completed":
+        if (params?.turn?.items?.length) {
+          const [turn] = captureTurns(params.threadId, [params.turn]);
+          if (turn !== params.turn) params = { ...params, turn };
+        }
+        if (params?.turn?.id) screenTurnEnded(params.threadId, params.turn.id);
         break;
     }
     enqueueNotification(p, method, params);
@@ -164,6 +177,7 @@ function wireProvider(p: ProviderId) {
       return;
     }
     addPendingRequest(p, req);
+    if (req.method === "mcpServer/elicitation/request") noteAppRequest(req.params.threadId, req.params.turnId ?? "", req.params);
     if (threadId && !useThreads.getState().visible[threadId]) {
       bridge.notify(`${PROVIDERS[p].name} needs your input`, threadTitle(useThreads.getState().threads[threadId]));
     }
@@ -578,6 +592,8 @@ export function mergeTurns(
   cursor: string | null,
   mode: "replace" | "prepend" | "tail",
 ) {
+  // Computer-use steps leave their screenshots with the screens, in one update for the lot.
+  turnsDesc = captureTurns(threadId, turnsDesc);
   const st = useThreads.getState();
   const external = !!st.external[threadId];
   const threadActive = st.threads[threadId]?.status.type === "active" || external;

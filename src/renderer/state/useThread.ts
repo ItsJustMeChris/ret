@@ -270,7 +270,7 @@ export const FreezeContext = createContext<FreezeGate | null>(null);
  * Results that `equal` the last one are returned as the last one (pass `shallowEqual` for arrays).
  */
 export function useThread<T>(threadId: string, selector: (s: ThreadsState) => T, equal: (a: T, b: T) => boolean = Object.is): T {
-  return useGated(threadId, (l) => listen(threadId, l), selector, equal);
+  return useGated(threadId, (l) => listen(threadId, l), useThreads.getState, selector, equal);
 }
 
 /** `useThread` over several threads (a parent's subagents, say): re-run when any of theirs change. */
@@ -281,13 +281,23 @@ export function useThreadGroup<T>(threadIds: readonly string[], selector: (s: Th
       const offs = threadIds.map((id) => listen(id, l));
       return () => offs.forEach((off) => off());
     },
+    useThreads.getState,
     selector,
     equal,
   );
 }
 
-/** A selector that follows what `on` listens to (the same for the same `key`), held still while its view is frozen. */
-function useGated<T>(key: string, on: (l: Listener) => () => void, selector: (s: ThreadsState) => T, equal: (a: T, b: T) => boolean): T {
+/** A selector over another store (one that changes rarely: it re-runs on any change), held still while its view is frozen, as `useThread`'s are. */
+export function useGatedStore<S, T>(
+  store: { getState: () => S; subscribe: (l: Listener) => () => void },
+  selector: (s: S) => T,
+  equal: (a: T, b: T) => boolean = Object.is,
+): T {
+  return useGated("", store.subscribe, store.getState, selector, equal);
+}
+
+/** A selector over `getState` that follows what `on` listens to (the same for the same `key`), held still while its view is frozen. */
+function useGated<S, T>(key: string, on: (l: Listener) => () => void, getState: () => S, selector: (s: S) => T, equal: (a: T, b: T) => boolean): T {
   const gate = useContext(FreezeContext);
   const last = useRef<{ v: T } | null>(null);
   const subscribe = useCallback(
@@ -305,7 +315,7 @@ function useGated<T>(key: string, on: (l: Listener) => () => void, selector: (s:
   const get = () => {
     const c = last.current;
     if (c && gate?.frozen) return c.v;
-    const v = selector(useThreads.getState());
+    const v = selector(getState());
     if (c && equal(c.v, v)) return c.v;
     last.current = { v };
     return v;
