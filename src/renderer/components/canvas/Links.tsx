@@ -1,11 +1,11 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "../../lib/shallow";
-import { GitFork } from "lucide-react";
+import { Bot, GitFork } from "lucide-react";
 import { useThreads } from "../../state/threads";
 import { useThread } from "../../state/useThread";
 import { useUI, type Board, type CanvasWin } from "../../state/ui";
 import { openThread } from "../../state/actions";
-import { threadTitle } from "../../state/projects";
+import { lineageParent, spawnedBy, threadTitle } from "../../state/projects";
 import { Menu, type MenuItem } from "../Menu";
 import { liveRect, onLiveRect, type Rect } from "./live";
 import { boundsOf, viewport, viewportSize } from "./viewport";
@@ -56,7 +56,7 @@ function geometry(a: Rect, b: Rect) {
   return { d: `M ${p1.x} ${p1.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${p2.x} ${p2.y}`, p1, p2, mid };
 }
 
-/** Lines from each thread window to the windows of its forks (nearest ancestor on the board). */
+/** Lines from each thread window to the windows of its forks and subagents (nearest ancestor on the board). */
 export function Links({ board }: { board: Board }) {
   const show = useUI((s) => s.showLinks);
   // For each window: the window id of its nearest forked-from ancestor on this board, plus whether it's the direct parent.
@@ -64,12 +64,13 @@ export function Links({ board }: { board: Board }) {
     useShallow((s) => {
       const byThread = new Map(board.windows.map((w) => [w.threadId, w.id]));
       return board.windows.map((w) => {
-        let p = s.threads[w.threadId]?.forkedFromId ?? null;
+        const up = (id: string) => (s.threads[id] ? lineageParent(s.threads[id]) : null);
+        let p = up(w.threadId);
         let hops = 1;
         const seen = new Set<string>();
         while (p && !byThread.has(p) && !seen.has(p)) {
           seen.add(p);
-          p = s.threads[p]?.forkedFromId ?? null;
+          p = up(p);
           hops++;
         }
         return p && byThread.has(p) ? `${byThread.get(p)}|${hops === 1 ? 1 : 0}` : "";
@@ -152,6 +153,7 @@ const LinkLabel = memo(function LinkLabel({ link }: { link: Link }) {
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const focused = useUI((s) => s.focusedWindow === link.from.id || s.focusedWindow === link.to.id);
   const parentTitle = useThread(link.from.threadId, (s) => threadTitle(s.threads[link.from.threadId]));
+  const agent = useThread(link.to.threadId, (s) => spawnedBy(s.threads[link.to.threadId]) === link.from.threadId);
   const running = useThread(link.to.threadId, (s) => !!s.live[link.to.threadId]?.activeTurnId || !!s.external[link.to.threadId]);
   useLinkGeometry(link, (g) => {
     if (el.current) el.current.style.transform = `translate(${g.mid.x}px, ${g.mid.y}px) translate(-50%, -50%) scale(min(var(--inv-zoom, 1), 2.5))`;
@@ -170,7 +172,7 @@ const LinkLabel = memo(function LinkLabel({ link }: { link: Link }) {
       <button
         ref={el}
         className={`link-label ${focused ? "focused" : ""} ${running ? "running" : ""} ${link.direct ? "" : "indirect"}`}
-        title={`${link.direct ? "Forked from" : "Descends from"} “${parentTitle}” — click to frame both, right-click for more`}
+        title={`${link.direct ? (agent ? "Spawned by" : "Forked from") : "Descends from"} “${parentTitle}” — click to frame both, right-click for more`}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={frame}
         onContextMenu={(e) => {
@@ -193,7 +195,7 @@ const LinkLabel = memo(function LinkLabel({ link }: { link: Link }) {
           });
         }}
       >
-        <GitFork size={12} />
+        {agent ? <Bot size={12} /> : <GitFork size={12} />}
       </button>
       {menu && <Menu {...menu} onClose={() => setMenu(null)} />}
     </>

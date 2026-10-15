@@ -1,6 +1,7 @@
 import { MessageCircleQuestion, Play } from "lucide-react";
 import { ownerOf } from "../../state/threads";
 import { useThread } from "../../state/useThread";
+import { takesDirectInput } from "../../state/projects";
 import { PROVIDERS } from "../../agents";
 import { focusComposer, sendFromComposer } from "../../state/composerDrafts";
 import { openQuestionItems, reopenQuestion, useQuestionDismissed } from "./QuestionDock";
@@ -23,7 +24,8 @@ type Async = { title: string; options: string[] | null };
  * afterwards a record, unless the message already lists the options itself (it usually does).
  */
 export function ReplyQuestions({ threadId, itemId, text, questions }: { threadId: string; itemId: string; text: string; questions: Async[] }) {
-  const open = useThread(threadId, (s) => openQuestionItems(s, threadId).includes(itemId));
+  // A subagent's questions are for the agent that spawned it: they're shown as asked, not to be answered here.
+  const open = useThread(threadId, (s) => takesDirectInput(s.threads[threadId]) && openQuestionItems(s, threadId).includes(itemId));
   const dismissed = useQuestionDismissed(itemId);
   if (open) {
     return (

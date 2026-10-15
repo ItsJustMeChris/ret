@@ -4,6 +4,7 @@ import { Bot, CircleAlert, CircleDashed, FileDiff, GitFork, LoaderCircle, Radar,
 import { Chevron } from "../ui/Chevron";
 import { ownerOf, useThreads } from "../../state/threads";
 import { useThread } from "../../state/useThread";
+import { takesDirectInput } from "../../state/projects";
 import { shallowEqual } from "../../lib/shallow";
 import { PROVIDERS } from "../../agents";
 import { forkThread, loadOlder, resendUnanswered } from "../../state/actions";
@@ -155,7 +156,9 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
 /** A steer that landed after the final answer: the turn ended with the user's message unanswered. */
 function UnansweredNotice({ threadId, lastItemId, count }: { threadId: string; lastItemId: string | undefined; count: number }) {
   const item = useThread(threadId, (s) => (lastItemId ? s.live[threadId]?.items[lastItemId] : undefined));
-  if (!item || item.type !== "userMessage" || count < 2) return null;
+  // A subagent takes its messages from the agent that spawned it.
+  const direct = useThread(threadId, (s) => takesDirectInput(s.threads[threadId]));
+  if (!item || item.type !== "userMessage" || count < 2 || !direct) return null;
   return (
     <div className="unanswered">
       <CircleAlert size={13} />

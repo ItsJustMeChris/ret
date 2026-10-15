@@ -21,6 +21,9 @@ import {
 import { Chevron } from "../ui/Chevron";
 import type { FileUpdateChange, ThreadItem } from "@shared/protocol";
 import { useThread } from "../../state/useThread";
+import { agentName } from "../../state/projects";
+import { StatusDot } from "../StatusDot";
+import { openFrom } from "./Subagents";
 import { changeStats, duration, shortPath, unwrapCommand } from "../../lib/format";
 import { highlight } from "../../lib/markdown";
 import { Markdown } from "../Markdown";
@@ -345,21 +348,79 @@ function Sleep({ item, threadId, live }: { item: Extract<ThreadItem, { type: "sl
   return <Disclosure icon={<Hourglass size={13} />} label="Waited" meta={took} tone="muted" />;
 }
 
-function Collab({ item }: { item: Extract<ThreadItem, { type: "collabAgentToolCall" }> }) {
+/** What a subagent goes by here: its nickname once its thread is known, else its path or id. */
+function useAgentName(threadId: string, path?: string | null): string {
+  return useThread(threadId, (s) => agentName(s.threads[threadId], path)) ?? `agent ${threadId.slice(-6)}`;
+}
+
+/** A subagent named in a row of `from`'s transcript: opens its thread. */
+function AgentLink({ threadId, path, from }: { threadId: string; path?: string | null; from: string }) {
+  const name = useAgentName(threadId, path);
+  return (
+    <button className="agent-link" onClick={(e) => openFrom(e, threadId, from)} title={`Open ${name}'s thread`}>
+      <StatusDot threadId={threadId} />
+      <span>{name}</span>
+    </button>
+  );
+}
+
+/** A subagent starting, hearing from its parent, being stopped, or finishing. The row opens its thread. */
+function SubAgentActivity({ item, from }: { item: Extract<ThreadItem, { type: "subAgentActivity" }>; from: string }) {
+  const name = useAgentName(item.agentThreadId, item.agentPath);
+  const who = <span className="agent-name">{name}</span>;
+  const label = {
+    started: <>Started {who}</>,
+    interacted: <>Messaged {who}</>,
+    interrupted: <>Interrupted {who}</>,
+    completed: <>{who} finished</>,
+  }[item.kind] ?? <>{who}</>;
+  const meta = [item.model, item.reasoningEffort].filter(Boolean).join(" · ");
+  return (
+    <div className="tool">
+      <button className="tool-head" onClick={(e) => openFrom(e, item.agentThreadId, from)} title={`Open ${name}'s thread`}>
+        <span className="tool-icon">
+          <Bot size={13} />
+        </span>
+        <span className="tool-label">{label}</span>
+        <span className="tool-meta">
+          {meta}
+          <StatusDot threadId={item.agentThreadId} />
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function Collab({ item, from }: { item: Extract<ThreadItem, { type: "collabAgentToolCall" }>; from: string }) {
   const verb: Record<string, string> = {
-    spawnAgent: "Spawned agent",
-    sendInput: "Messaged agent",
-    sendMessage: "Messaged agent",
-    wait: "Waiting on agents",
-    closeAgent: "Closed agent",
-    resumeAgent: "Resumed agent",
-    followupTask: "Follow-up task",
-    interruptAgent: "Interrupted agent",
+    spawnAgent: "Spawned",
+    sendInput: "Messaged",
+    sendMessage: "Messaged",
+    wait: "Waited on",
+    closeAgent: "Closed",
+    resumeAgent: "Resumed",
+    followupTask: "Follow-up task for",
+    interruptAgent: "Interrupted",
     listAgents: "Listed agents",
   };
+  const ids = item.receiverThreadIds;
+  const first = useAgentName(ids[0] ?? "");
+  const who = item.tool === "listAgents" ? "" : !ids.length ? "agents" : ids.length === 1 ? first : `${ids.length} agents`;
+  const label = `${verb[item.tool] ?? item.tool}${who ? ` ${who}` : ""}`;
   return (
-    <Disclosure icon={<Bot size={13} />} label={verb[item.tool] ?? item.tool} meta={<Status status={item.status as string} />}>
-      {item.prompt && <Markdown text={item.prompt} className="md-muted" />}
+    <Disclosure icon={<Bot size={13} />} label={label} meta={<Status status={item.status as string} />}>
+      {(item.prompt || ids.length > 0) && (
+        <>
+          {item.prompt && <Markdown text={item.prompt} className="md-muted" />}
+          {ids.length > 0 && (
+            <div className="agent-links">
+              {ids.map((id) => (
+                <AgentLink key={id} threadId={id} from={from} />
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </Disclosure>
   );
 }
@@ -393,15 +454,18 @@ export function activitySummary(items: ThreadItem[]): string {
   let tools = 0;
   let web = 0;
   let waits = 0;
+  let agents = 0;
   for (const it of items) {
     if (it.type === "commandExecution") {
       const t = it.commandActions?.[0]?.type;
       if (t === "read") reads += it.commandActions.length;
       else if (t === "search" || t === "listFiles") searches++;
       else cmds++;
-    } else if (it.type === "mcpToolCall" || it.type === "dynamicToolCall" || it.type === "collabAgentToolCall") tools++;
+    } else if (it.type === "collabAgentToolCall" && it.tool === "wait") waits++;
+    else if (it.type === "mcpToolCall" || it.type === "dynamicToolCall" || it.type === "collabAgentToolCall") tools++;
     else if (it.type === "webSearch") web++;
     else if (it.type === "sleep") waits++;
+    else if (it.type === "subAgentActivity" && it.kind === "started") agents++;
   }
   const parts: string[] = [];
   if (reads) parts.push(`read ${reads} ${reads === 1 ? "file" : "files"}`);
@@ -409,6 +473,7 @@ export function activitySummary(items: ThreadItem[]): string {
   if (cmds) parts.push(`ran ${cmds} ${cmds === 1 ? "command" : "commands"}`);
   if (tools) parts.push(`${tools} tool ${tools === 1 ? "call" : "calls"}`);
   if (web) parts.push(`${web} web ${web === 1 ? "lookup" : "lookups"}`);
+  if (agents) parts.push(`started ${agents} ${agents === 1 ? "agent" : "agents"}`);
   if (waits) parts.push(waits === 1 ? "waited" : `waited ${waits} times`);
   const s = parts.join(", ") || "thought";
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -476,9 +541,9 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
         </div>
       );
     case "collabAgentToolCall":
-      return <Collab item={item} />;
+      return <Collab item={item} from={ctx.threadId} />;
     case "subAgentActivity":
-      return <Disclosure icon={<Bot size={13} />} label={`Sub-agent ${item.kind}`} meta={<span className="path">{item.agentPath}</span>} />;
+      return <SubAgentActivity item={item} from={ctx.threadId} />;
     case "hookPrompt":
       return <div className="hook">{item.fragments.map((f) => f.text).join("\n")}</div>;
     case "sleep":

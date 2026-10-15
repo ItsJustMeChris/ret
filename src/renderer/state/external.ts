@@ -5,9 +5,9 @@ import { PROVIDERS } from "../agents";
 import { useConn } from "./conn";
 import type { Thread } from "@shared/protocol";
 import { loadGoal, mergeTurns } from "./actions";
-import { threadTitle } from "./projects";
+import { lineageRoot, spawnedBy, threadTitle } from "./projects";
 import { upsertThreads, useThreads, type ExternalRun } from "./threads";
-import { backfillLineage } from "./lineage";
+import { agentsUnasked, backfillLineage, listAgentsOf } from "./lineage";
 
 /**
  * Cross-client activity: the VS Code extension and the CLI each run a private
@@ -69,9 +69,40 @@ async function poll() {
   }
 }
 
+/** The most threads whose agents one pass asks about (the rest wait for the next). */
+const AGENT_ASKS = 5;
+
+/**
+ * The agents of threads at work in another app, which the plain list leaves out. A thread counts
+ * when it changed since its agents were last asked for, while its turn runs elsewhere or it changed
+ * lately (an agent can work on after its parent's turn ends); and so does, every pass, any thread
+ * one of whose agents still runs elsewhere, to see that agent through. Threads loaded here need
+ * none of this: their agents' events come here.
+ */
+async function agentsAtWork(p: ProviderId, listed: Thread[], now: number): Promise<Thread[]> {
+  const st = useThreads.getState();
+  const quiet = PROVIDERS[p].externalQuietS ?? 10 * 60;
+  const due: Thread[] = [];
+  const seen = new Set<string>();
+  const add = (t: Thread | undefined) => {
+    if (t && !seen.has(t.id)) seen.add(t.id), due.push(t);
+  };
+  // An agent at work elsewhere is only listed (and so checked on) through its root: those go first.
+  for (const id of Object.keys(st.external)) if (spawnedBy(st.threads[id])) add(st.threads[lineageRoot(st.threads, id, spawnedBy)]);
+  for (const t of listed) {
+    if (spawnedBy(t) || t.status.type !== "notLoaded" || !agentsUnasked(t)) continue;
+    if (st.external[t.id] || now - t.updatedAt < quiet) add(t);
+  }
+  return listAgentsOf(p, due.slice(0, AGENT_ASKS));
+}
+
 async function pass(p: ProviderId) {
   const res = await clients[p].request("thread/list", { limit: 40, sortKey: "updated_at", useStateDbOnly: true });
   const now = Date.now() / 1000;
+  if (PROVIDERS[p].subagentThreads) {
+    const listed = new Set(res.data.map((t) => t.id));
+    res.data.push(...(await agentsAtWork(p, res.data, now)).filter((t) => !listed.has(t.id)));
+  }
   const st = useThreads.getState();
 
   // Pick up new threads and metadata changes made by other clients (only touch the store if something moved).
@@ -82,7 +113,7 @@ async function pass(p: ProviderId) {
   if (changed.length) {
     upsertThreads(p, changed);
     // The list doesn't say which of the new ones are forks; look that up.
-    const fresh = changed.filter((t) => !st.threads[t.id]).map((t) => t.id);
+    const fresh = changed.filter((t) => !st.threads[t.id] && !spawnedBy(t)).map((t) => t.id);
     if (fresh.length) void backfillLineage(fresh);
   }
 
@@ -122,6 +153,8 @@ async function check(p: ProviderId, t: Thread, moved: boolean) {
   } else if (was) {
     setExternal(t.id, null);
     refresh(p, t.id);
+    // A subagent finishing is its parent's news, not yours (see delegated()).
+    if (spawnedBy(t)) return;
     const visible = !!useThreads.getState().visible[t.id];
     if (!useThreads.getState().attended[t.id]) {
       useThreads.setState((s) => ({ unread: { ...s.unread, [t.id]: true } }));
