@@ -5178,10 +5178,6 @@ html.autoscrolling[data-autoscroll="down"] * {
 .sel.access-read-only {
   color: var(--green);
 }
-.sel.speed-priority,
-.sel.speed-ultrafast {
-  color: var(--amber);
-}
 
 /* Select popover */
 .sel-menu {
@@ -5279,6 +5275,420 @@ html.autoscrolling[data-autoscroll="down"] * {
 }
 .sel-menu.rich .sel-opt-check {
   margin-top: 1px;
+}
+
+/*
+ * The composer's model, effort and speed (ModelTuner). Effort is a staircase of bars that fill as it
+ * gets deeper and warm from muted to bright accent; at the deepest a light crosses them now and then.
+ * Speed is amber: a Fast tier sends a quicker amber light along the bars, Ultrafast quicker still.
+ * Every light is a transform on a pseudo-element (the compositor's), and only while the popover is open.
+ */
+.tune-chip .tune-speed {
+  color: var(--amber);
+}
+.power-glyph {
+  flex: none;
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 11px;
+}
+.power-glyph i {
+  width: 2px;
+  height: calc(4px + 7px * var(--k) / max(1, var(--n) - 1));
+  border-radius: 1px;
+  background: var(--line-2);
+  transition: background-color 0.2s calc(var(--k) * 30ms);
+}
+.power-glyph i.on {
+  background: color-mix(in srgb, var(--accent) calc(55% + 45% * var(--k) / max(1, var(--n) - 1)), var(--text-3));
+}
+
+.sel-menu.tuner {
+  padding: 0;
+  overflow: hidden;
+  max-width: calc(100vw - 16px);
+  border-radius: 12px;
+}
+.tuner-page {
+  padding: 6px 6px 10px;
+}
+.tuner-page[data-from] {
+  animation: tuner-page-in 0.24s var(--ease);
+}
+.tuner-page[data-from="right"] {
+  --from: 16px;
+}
+.tuner-page[data-from="left"] {
+  --from: -16px;
+}
+@keyframes tuner-page-in {
+  from {
+    opacity: 0;
+    translate: var(--from) 0;
+  }
+}
+.tuner-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.tuner-model,
+.tuner-back {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 6px 0 8px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: var(--text);
+  text-align: left;
+  outline: none;
+  transition: background 0.12s;
+}
+.tuner-model:hover,
+.tuner-back:hover,
+.tuner-model:focus-visible,
+.tuner-back:focus-visible {
+  background: var(--bg-3);
+}
+.tuner-back {
+  flex: 0 1 auto;
+  padding-left: 4px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.tuner-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.tuner-agent {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.tuner-model-chev {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-3);
+  transition: transform 0.15s var(--ease), color 0.12s;
+}
+.tuner-model:hover .tuner-model-chev {
+  transform: translateX(2px);
+  color: var(--text-2);
+}
+.tuner-reset {
+  flex: none;
+  color: var(--text-3);
+  animation: fade 0.15s var(--ease);
+}
+
+.tuner-effort {
+  padding: 6px 8px 0;
+}
+.tuner-readout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+}
+.tuner-name {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: color-mix(in srgb, var(--accent-strong) calc(var(--heat) * 100%), var(--text));
+  transition: color 0.2s, opacity 0.15s, text-shadow 0.3s;
+}
+.tuner-effort.top .tuner-name {
+  text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 65%, transparent);
+}
+.tuner-readout.peeking .tuner-name {
+  opacity: 0.6;
+}
+.tuner-roll {
+  display: inline-block;
+}
+.tuner-roll[data-dir="1"] {
+  animation: recall-roll-up 0.26s var(--ease);
+}
+.tuner-roll[data-dir="-1"] {
+  animation: recall-roll-down 0.26s var(--ease);
+}
+.tuner-tag {
+  padding: 1px 5px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.tuner-count {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.tuner-count span {
+  font-weight: 400;
+  color: var(--text-3);
+}
+.tuner-desc {
+  margin-top: 1px;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tuner-none {
+  padding: 6px 8px 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.tuner-meter {
+  --gap: 5px;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--gap);
+  height: 30px;
+  margin: 12px 0 9px;
+  border-radius: 5px;
+  cursor: pointer;
+  touch-action: none;
+  outline: none;
+}
+.tuner-meter:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 4px;
+}
+.tuner-bar {
+  position: relative;
+  flex: 1;
+  height: calc(10px + 20px * var(--k) / max(1, var(--n) - 1));
+  transform-origin: 50% 100%;
+}
+.tuner-cell {
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  background: var(--bg-4);
+  overflow: hidden;
+  transition: background-color 0.15s, box-shadow 0.25s;
+}
+.tuner-fill {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--accent) calc(50% + 50% * var(--k) / max(1, var(--n) - 1)), var(--bg-4));
+  transform: translateY(101%);
+  transition: transform 0.3s var(--ease) var(--d), opacity 0.15s;
+}
+.tuner-bar.on .tuner-fill {
+  transform: none;
+}
+/* Hovering previews: what it would light, and what it would put out. */
+.tuner-bar.ghost .tuner-cell {
+  background: color-mix(in srgb, var(--accent) 30%, var(--bg-4));
+}
+.tuner-bar.shed .tuner-fill {
+  opacity: 0.4;
+}
+.tuner-bar.cur {
+  animation: tuner-bump 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.tuner-bar.cur .tuner-cell {
+  box-shadow: 0 0 16px -3px color-mix(in srgb, var(--accent) calc(35% + 55% * var(--heat)), transparent);
+}
+@keyframes tuner-bump {
+  from {
+    transform: scaleY(0.84);
+  }
+}
+/* The model's default, a dot under its bar. */
+.tuner-bar.default::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+/*
+ * One light crossing the whole meter, seen through the lit bars. Each bar draws the same band from
+ * the meter's left edge (back by its own place in the row), all moving in step, so the light passes
+ * from bar to bar. Unlit bars' fills sit below their cells, out of sight, but run it too, so a bar
+ * that lights up joins in step rather than starting a light of its own.
+ */
+.tuner-fill::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(-1 * var(--k) * (100% + var(--gap)));
+  /* 30% of the meter (n bars and the gaps between them). */
+  width: calc((var(--n) * 100% + (var(--n) - 1) * var(--gap)) * 0.3);
+  background: linear-gradient(100deg, transparent 20%, color-mix(in srgb, #fff 45%, transparent) 50%, transparent 80%);
+  transform: translateX(-100%);
+  opacity: 0;
+}
+/* Deepest: now and then a light crosses the bars. */
+.tuner-effort.top .tuner-fill::after {
+  opacity: 1;
+  animation: tuner-sweep 2.8s var(--ease) infinite;
+}
+/* Fast: an amber light runs along them, quicker for Ultrafast. */
+.tuner-meter:is([data-speed="priority"], [data-speed="ultrafast"]) .tuner-fill::after {
+  opacity: 1;
+  background: linear-gradient(100deg, transparent 25%, color-mix(in srgb, color-mix(in srgb, var(--amber) 75%, #fff) 70%, transparent) 50%, transparent 75%);
+  animation: tuner-sweep-fast 1.3s linear infinite;
+}
+.tuner-meter[data-speed="ultrafast"] .tuner-fill::after {
+  animation-duration: 0.75s;
+}
+/* From off the meter's left to off its right (the band is 0.3 of it: 1 / 0.3 of its own width), then a rest. */
+@keyframes tuner-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  55%,
+  100% {
+    transform: translateX(333.33%);
+  }
+}
+@keyframes tuner-sweep-fast {
+  0% {
+    transform: translateX(-100%);
+  }
+  70%,
+  100% {
+    transform: translateX(333.33%);
+  }
+}
+
+.tuner-speed-wrap {
+  margin: 8px 2px 0;
+  padding: 10px 6px 0;
+  border-top: 1px solid var(--line);
+}
+.tuner-speed {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--n), 1fr);
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+}
+.tuner-speed-thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / var(--n));
+  border-radius: 6px;
+  background: var(--bg-4);
+  transform: translateX(calc(100% * var(--i)));
+  transition: transform 0.32s cubic-bezier(0.34, 1.3, 0.64, 1), background-color 0.2s, box-shadow 0.2s;
+}
+.tuner-speed[data-speed="priority"] .tuner-speed-thumb {
+  background: var(--amber-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 40%, transparent);
+}
+.tuner-speed[data-speed="ultrafast"] .tuner-speed-thumb {
+  background: color-mix(in srgb, var(--amber) 24%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 65%, transparent), 0 0 14px -4px var(--amber);
+}
+.tuner-speed-opt {
+  position: relative;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 4px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  outline: none;
+  transition: color 0.15s;
+}
+.tuner-speed-opt svg {
+  flex: none;
+}
+.tuner-speed-opt span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tuner-speed-opt:hover,
+.tuner-speed-opt:focus-visible {
+  color: var(--text);
+}
+.tuner-speed-opt:focus-visible {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.tuner-speed-opt.on {
+  font-weight: 600;
+  color: var(--text);
+}
+.tuner-speed-opt.on:is(.speed-priority, .speed-ultrafast) {
+  color: var(--amber);
+}
+.tuner-speed-opt.on svg {
+  animation: tuner-zap 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes tuner-zap {
+  from {
+    transform: scale(0.6) rotate(-14deg);
+  }
+}
+.tuner-speed-desc {
+  margin-top: 6px;
+  padding: 0 2px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tuner-models {
+  overflow-y: auto;
+  padding-top: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tuner-page[data-from],
+  .tuner-roll,
+  .tuner-bar.cur,
+  .tuner-speed-opt.on svg,
+  .tuner-fill::after {
+    animation: none !important;
+  }
+  .tuner-fill::after {
+    opacity: 0 !important;
+  }
+  .tuner-fill,
+  .tuner-speed-thumb,
+  .power-glyph i {
+    transition: none;
+  }
 }
 
 /* Checkbox */

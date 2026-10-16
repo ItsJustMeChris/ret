@@ -89,6 +89,7 @@ The skill lives in `.agents/skills/phone-parity/`. This file is also at
 | components/thread/Transcript.tsx (turns, Working row) | thread/Transcript.tsx |
 | components/thread/Items.tsx | thread/Items.tsx |
 | components/thread/Composer.tsx | thread/Composer.tsx |
+| components/thread/ModelTuner.tsx + app.css `.tuner-*` (logic in lib/effortMeter) | thread/ModelTuner.tsx |
 | components/thread/Approvals.tsx, Questions | thread/Approvals.tsx |
 | components/ui/RetBot.tsx + app.css `.retbot` | ui/RetBot.tsx |
 | components/StatusDot.tsx (state logic shared) | ui/StatusDot.tsx |
@@ -118,6 +119,9 @@ closes or a new one is chosen on purpose.
 - Text shimmers on the desktop (the Working verb, "Thinking"); the phone pulses "Thinking" and
   shows the Working verb plainly (it has no masked view for a shimmer).
 - The phone has no canvas, Code-mode editor, command palette or keyboard shortcuts, by design.
+- The model tuner: the desktop previews an effort while the pointer hovers its bars, and swaps its
+  popover to the model list in place; the phone has no hover (a tap or drag sets it, with a haptic
+  tick per step), and its model list is a sheet of its own that hands back to the tuner.
 
 ## Maintaining this skill
 

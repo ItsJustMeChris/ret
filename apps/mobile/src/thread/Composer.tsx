@@ -2,18 +2,15 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import {
   ArrowUp,
-  Brain,
   Camera,
   ChevronDown,
   ChevronLeft,
-  Gauge,
   Images,
   ListChecks,
   ListPlus,
   LogIn,
   MessageCircleQuestion,
   Plus,
-  Rocket,
   Settings2,
   Shield,
   ShieldAlert,
@@ -24,7 +21,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react-native";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Image, Pressable, ScrollView, Text, TextInput, View, type TextInputInstance } from "react-native";
 import { bridge } from "@ret/bridge";
 import { shallowEqual } from "@ret/lib/shallow";
@@ -40,6 +37,7 @@ import { fromBase64 } from "../remote/bytes";
 import { Markdown } from "../ui/Markdown";
 import { Icon, Spinner } from "../ui/primitives";
 import { OptionSheet, type SheetOption } from "../ui/Sheet";
+import { PowerGlyph, TunerSheet, speedIcon } from "./ModelTuner";
 
 const NO_QUEUE: never[] = [];
 
@@ -53,7 +51,6 @@ const ACCESS_ICON: Record<string, LucideIcon> = {
   full: ShieldAlert,
   bypassPermissions: ShieldAlert,
 };
-const SPEED_ICON: Record<string, LucideIcon> = { default: Gauge, priority: Zap, ultrafast: Rocket };
 
 /** What the model is shown, and sent: the image types the agents take. */
 const IMAGE_EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp" };
@@ -220,7 +217,8 @@ export function Composer({ threadId, onStarted }: { threadId: string; onStarted?
               ? `Describe a task for ${s.agent.name}…`
               : "Reply…";
   const accessLabel = s.accessOptions.find((o) => o.value === s.access)?.label ?? "Access";
-  const effortLabel = s.effortOptions.find((o) => o.value === s.effort)?.label;
+  const effortLevel = s.effortOptions.findIndex((o) => o.value === s.effort);
+  const fast = s.speedOptions.length > 0 && s.speed !== "default";
 
   return (
     <View className="gap-1.5 px-3 pb-2 pt-1.5">
@@ -296,9 +294,17 @@ export function Composer({ threadId, onStarted }: { threadId: string; onStarted?
           <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-1" contentContainerClassName="items-center gap-1.5 pr-1">
             {/* As on the desktop, Plan only shows while it's on: to say so, and to turn it off. */}
             {s.planning && <Chip icon={ListChecks} label="Plan" on onPress={s.togglePlan} />}
-            {s.modelOptions.length > 0 && <Chip label={[s.modelLabel, effortLabel].filter(Boolean).join(" · ") || "Model"} onPress={() => setSheet("model")} menu />}
-            {s.speedOptions.length > 0 && s.speed !== "default" && (
-              <Chip icon={SPEED_ICON[s.speed] ?? Zap} label={s.speedOptions.find((o) => o.value === s.speed)?.label ?? s.speed} onPress={() => setSheet("speed")} menu />
+            {/* Model, effort and speed in one, as the desktop's ModelTuner chip. */}
+            {s.modelOptions.length > 0 && (
+              <Chip
+                icon={fast ? speedIcon(s.speed) : undefined}
+                iconClassName="accent-amber"
+                label={s.modelLabel ?? "Model"}
+                after={s.effortOptions.length > 1 ? <PowerGlyph level={effortLevel} of={s.effortOptions.length} /> : undefined}
+                accessibilityLabel={[s.modelLabel, effortLevel >= 0 && `${s.effortOptions[effortLevel].label} effort`, fast && s.speedOptions.find((o) => o.value === s.speed)?.label].filter(Boolean).join(", ")}
+                onPress={() => setSheet("tune")}
+                menu
+              />
             )}
             <Chip icon={ACCESS_ICON[s.access] ?? Shield} label={accessLabel} onPress={() => setSheet("access")} menu tone={s.access === "full" || s.access === "bypassPermissions" ? "danger" : undefined} />
           </ScrollView>
@@ -330,8 +336,28 @@ export function Composer({ threadId, onStarted }: { threadId: string; onStarted?
   );
 }
 
-/** A setting in the composer's bar: what it is now; tap to change it. */
-function Chip({ icon, label, onPress, on, menu, tone }: { icon?: LucideIcon; label: string; onPress: () => void; on?: boolean; menu?: boolean; tone?: "danger" }) {
+/** A setting in the composer's bar: what it is now; tap to change it. `after`: shown past the label. */
+function Chip({
+  icon,
+  iconClassName,
+  label,
+  after,
+  accessibilityLabel,
+  onPress,
+  on,
+  menu,
+  tone,
+}: {
+  icon?: LucideIcon;
+  iconClassName?: string;
+  label: string;
+  after?: ReactNode;
+  accessibilityLabel?: string;
+  onPress: () => void;
+  on?: boolean;
+  menu?: boolean;
+  tone?: "danger";
+}) {
   const fg = on ? "text-accent" : tone === "danger" ? "text-red" : "text-text-2";
   const accent = on ? "accent-accent" : tone === "danger" ? "accent-red" : "accent-text-2";
   return (
@@ -340,12 +366,14 @@ function Chip({ icon, label, onPress, on, menu, tone }: { icon?: LucideIcon; lab
         void Haptics.selectionAsync();
         onPress();
       }}
+      accessibilityLabel={accessibilityLabel}
       className={`h-8 flex-row items-center gap-1 rounded-full border px-2.5 active:bg-bg-4 ${on ? "border-accent/50 bg-accent-soft" : "border-line bg-bg-3"}`}
     >
-      {icon && <Icon icon={icon} size={13} colorClassName={accent} />}
+      {icon && <Icon icon={icon} size={13} colorClassName={iconClassName ?? accent} />}
       <Text numberOfLines={1} className={`max-w-[150px] text-[13px] ${fg}`}>
         {label}
       </Text>
+      {after}
       {menu && <Icon icon={ChevronDown} size={12} colorClassName="accent-text-3" />}
     </Pressable>
   );
@@ -353,7 +381,7 @@ function Chip({ icon, label, onPress, on, menu, tone }: { icon?: LucideIcon; lab
 
 const asSheet = (o: SettingOption, icon?: LucideIcon): SheetOption => ({ value: o.value, label: o.label, description: o.description, group: o.group, icon });
 
-type SheetName = "attach" | "model" | "effort" | "speed" | "access";
+type SheetName = "attach" | "tune" | "model" | "access";
 
 function SettingSheets({ which, setWhich, s, attach }: { which: SheetName | null; setWhich: (w: SheetName | null) => void; s: ComposerSettings; attach: (from: "library" | "camera") => void }) {
   const close = () => setWhich(null);
@@ -372,25 +400,27 @@ function SettingSheets({ which, setWhich, s, attach }: { which: SheetName | null
         // The picker can only come up once this sheet has gone.
         onPick={(v) => setTimeout(() => attach(v as "library" | "camera"), 450)}
       />
+      <TunerSheet
+        open={which === "tune"}
+        onClose={close}
+        s={s}
+        onModels={() => {
+          close();
+          then("model");
+        }}
+      />
+      {/* The desktop swaps its popover to the model list and back; here a sheet goes and comes back. */}
       <OptionSheet
         open={which === "model"}
         onClose={close}
-        title={s.modelsGrouped ? "Model and agent" : `${s.agent.name} model`}
-        options={[
-          ...s.modelOptions.map((o) => asSheet(o)),
-          // Effort and speed live with the model they're for.
-          ...(s.effortOptions.length ? [{ value: "::effort", label: "Reasoning effort", description: s.effortOptions.find((o) => o.value === s.effort)?.label, icon: Brain, tone: "accent" as const, group: "More" }] : []),
-          ...(s.speedOptions.length ? [{ value: "::speed", label: "Speed", description: s.speedOptions.find((o) => o.value === s.speed)?.label, icon: Zap, tone: "accent" as const, group: "More" }] : []),
-        ]}
+        title={s.modelsGrouped ? "Model and agent" : `${s.agent.name} models`}
+        options={s.modelOptions.map((o) => asSheet(o))}
         value={s.model}
         onPick={(v) => {
-          if (v === "::effort") then("effort");
-          else if (v === "::speed") then("speed");
-          else s.pickModel(v);
+          if (v !== s.model) s.pickModel(v);
+          then("tune");
         }}
       />
-      <OptionSheet open={which === "effort"} onClose={close} title="Reasoning effort" options={s.effortOptions.map((o) => asSheet(o))} value={s.effort} onPick={(v) => s.setPrefs({ effort: v })} />
-      <OptionSheet open={which === "speed"} onClose={close} title="Speed" options={s.speedOptions.map((o) => asSheet(o, SPEED_ICON[o.value] ?? Zap))} value={s.speed} onPick={(v) => s.setPrefs({ speed: v })} />
       <OptionSheet open={which === "access"} onClose={close} title={s.agent.accessLabel} options={s.accessOptions.map((o) => asSheet(o, ACCESS_ICON[o.value] ?? Shield))} value={s.access} onPick={(v) => s.setPrefs({ access: v })} />
     </>
   );

@@ -27,6 +27,8 @@ export interface ThreadConfig {
   /** Model alias or id ("default" = Claude Code's default). */
   model: string | null;
   effort: string | null;
+  /** Fast mode (the engine sets it only on a model that has it). */
+  fast: boolean;
   access: ClaudeAccess;
   /** Plan mode: Claude explores and proposes a plan before changing anything. */
   plan: boolean;
@@ -123,7 +125,7 @@ export class ClaudeSession {
   /** The latest checklist, which a later turn's `update_plan` may move along without restating. */
   private lastPlan: TurnPlanStep[] | null = null;
   /** Settings the running process has (so changes are pushed only when they differ). */
-  private applied: { model: string | null; effort: string | null; mode: PermissionMode | null } | null = null;
+  private applied: { model: string | null; effort: string | null; fast: boolean; mode: PermissionMode | null } | null = null;
   usage: ThreadTokenUsage | null = null;
   /** Model the session reports running (system/init), for the thread's settings. */
   runningModel: string | null = null;
@@ -179,6 +181,8 @@ export class ClaudeSession {
             : { sessionId: this.config.id }),
         ...(model ? { model } : {}),
         ...(this.config.effort ? { effort: this.config.effort as EffortLevel } : {}),
+        // An Agent SDK host opts in to fast mode through its flag settings, for this session only.
+        ...(this.config.fast ? { settings: { fastMode: true } } : {}),
         ...(mode ? { permissionMode: mode } : {}),
         allowDangerouslySkipPermissions: true,
         includePartialMessages: true,
@@ -191,7 +195,7 @@ export class ClaudeSession {
     });
     this.query = q;
     this.input = input;
-    this.applied = { model: model ?? null, effort: this.config.effort, mode };
+    this.applied = { model: model ?? null, effort: this.config.effort, fast: this.config.fast, mode };
     void this.pump(q);
     this.host.changed(this);
   }
@@ -270,16 +274,24 @@ export class ClaudeSession {
     if (!tasks.length && !this.turn && this.query) this.armIdle();
   }
 
-  /** Push changed model / effort / permission mode into the running process. */
+  /** Push changed model / effort / speed / permission mode into the running process. */
   private async sync() {
     const q = this.query;
     if (!q || !this.applied) return;
     const model = this.config.model && this.config.model !== "default" ? this.config.model : null;
     const mode = this.permissionMode();
+    // Fast mode goes off before a model change and on after one, so it's never on a model without it.
+    const setFast = async () => {
+      if (this.config.fast === this.applied!.fast) return;
+      await q.applyFlagSettings({ fastMode: this.config.fast });
+      this.applied!.fast = this.config.fast;
+    };
+    if (!this.config.fast) await setFast();
     if (model !== this.applied.model) {
       await q.setModel(model ?? undefined);
       this.applied.model = model;
     }
+    await setFast();
     if (this.config.effort !== this.applied.effort) {
       await q.applyFlagSettings({ effortLevel: (this.config.effort ?? null) as never });
       this.applied.effort = this.config.effort;
@@ -353,7 +365,7 @@ export class ClaudeSession {
   }
 
   /** Apply new settings now if a process is running (otherwise they're used when it opens). */
-  async reconfigure(patch: Partial<Pick<ThreadConfig, "model" | "effort" | "access" | "plan" | "cwd">>) {
+  async reconfigure(patch: Partial<Pick<ThreadConfig, "model" | "effort" | "fast" | "access" | "plan" | "cwd">>) {
     Object.assign(this.config, patch);
     await this.sync().catch((err) => this.host.log(`claude: settings: ${err.message}`));
     this.host.changed(this);

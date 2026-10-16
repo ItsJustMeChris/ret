@@ -35,9 +35,28 @@ interface EngineState {
   archived: string[];
   /** Fork → the thread it was forked from. */
   lineage: Record<string, string>;
-  /** Per-thread choices made in Ret (model, effort, access, plan). */
-  settings: Record<string, { model?: string | null; effort?: string | null; access?: ClaudeAccess; plan?: boolean }>;
+  /** Per-thread choices made in Ret (model, effort, speed, access, plan). */
+  settings: Record<string, ThreadChoices>;
 }
+
+interface ThreadChoices {
+  model?: string | null;
+  effort?: string | null;
+  /** Service tier as the renderer names it: "priority" is Claude Code's fast mode, "default" standard speed. */
+  speed?: string | null;
+  access?: ClaudeAccess;
+  plan?: boolean;
+}
+
+/** Claude Code's fast mode, as a speed tier on the models that have it. */
+const FAST_TIER = { id: "priority", name: "Fast", description: "Faster output, at a higher cost" };
+
+/**
+ * Why Claude Code says fast mode can't serve, from the probe (which opts in, as an Agent SDK host
+ * must): the account, organization or setup rules it out. Not yet checked, or a network hiccup,
+ * still offers it.
+ */
+const FAST_UNAVAILABLE = new Set(["free", "preference", "extra_usage_disabled", "not_first_party", "disabled_by_env", "model_not_allowed", "sdk_opt_in_required", "unknown"]);
 
 /** A thread Ret created that has no transcript on disk yet (a new thread, or a fork into another folder). */
 interface PendingThread {
@@ -95,6 +114,8 @@ export class ClaudeEngine {
   private lookingElsewhere = false;
   /** Claude Code's own model entries (with what each resolves to) and the user's configured model, from the probe. */
   private modelInfos: { list: ModelInfo[]; configured: string | null } = { list: [], configured: null };
+  /** Fast mode can serve this account (from the probe). */
+  private fastAvailable = false;
   private creating = new Map<string, Promise<ClaudeSession>>();
 
   /**
@@ -562,7 +583,7 @@ export class ClaudeEngine {
       thread,
       model: s.config.model ?? "default",
       modelProvider: "anthropic",
-      serviceTier: null,
+      serviceTier: s.config.fast ? FAST_TIER.id : null,
       disabledPluginIds: [],
       cwd: s.config.cwd,
       runtimeWorkspaceRoots: [],
@@ -607,6 +628,7 @@ export class ClaudeEngine {
       cwd: info?.cwd ?? pend?.thread.cwd ?? cwdHint ?? "",
       model: model ?? null,
       effort: set.effort ?? null,
+      fast: await this.fastFor({ ...set, model }),
       access: set.access ?? "config",
       plan: set.plan ?? false,
       exists: !!info,
@@ -616,6 +638,17 @@ export class ClaudeEngine {
     if (info) s.resumePlan((await this.history(threadId).catch(() => [] as HistoryTurn[])).findLast((t) => t.plan)?.plan ?? null);
     this.sessions.set(threadId, s);
     return s;
+  }
+
+  /**
+   * Whether a thread runs in fast mode: asked for, on a model that has it, for an account that can.
+   * Never on another model: turning fast mode on there could move the session to one that has it.
+   */
+  private async fastFor(set: ThreadChoices): Promise<boolean> {
+    if (set.speed !== FAST_TIER.id) return false;
+    if (!this.modelInfos.list.length) await this.modelList();
+    const model = set.model ?? "default";
+    return this.fastAvailable && !!this.modelInfos.list.find((i) => i.value === model || i.resolvedModel === model)?.supportsFastMode;
   }
 
   /** The model a session last ran, as its entry in Claude Code's model list ("default" when that's what Default runs). */
@@ -686,6 +719,7 @@ export class ClaudeEngine {
     const cur = { ...this.state.settings[threadId] };
     if (p.model !== undefined) cur.model = p.model;
     if (p.effort !== undefined) cur.effort = p.effort;
+    if (p.serviceTier !== undefined) cur.speed = p.serviceTier;
     if (typeof p.access === "string") cur.access = p.access as ClaudeAccess;
     if (p.collaborationMode?.mode) cur.plan = p.collaborationMode.mode === "plan";
     this.state.settings[threadId] = cur;
@@ -696,7 +730,8 @@ export class ClaudeEngine {
   private async startTurn(p: any) {
     const s = await this.session(p.threadId);
     const set = this.rememberSettings(p.threadId, p);
-    await s.reconfigure({ model: set.model ?? null, effort: set.effort ?? null, access: set.access ?? "config", plan: set.plan ?? false });
+    const fast = await this.fastFor({ ...set, model: set.model !== undefined ? set.model : s.config.model });
+    await s.reconfigure({ model: set.model ?? null, effort: set.effort ?? null, fast, access: set.access ?? "config", plan: set.plan ?? false });
     const turn = await s.startTurn(p.input ?? [], p.clientUserMessageId ?? null);
     this.historyCache.delete(p.threadId);
     // A new thread's first message becomes its preview (and title) right away.
@@ -719,7 +754,7 @@ export class ClaudeEngine {
     const id = s.config.id;
     if (this.sessions.get(id) !== s) return;
     this.refreshUsage(s);
-    const sig = JSON.stringify([s.config.cwd, s.config.model, s.runningModel, s.config.effort, s.config.plan, s.config.access]);
+    const sig = JSON.stringify([s.config.cwd, s.config.model, s.runningModel, s.config.effort, s.config.fast, s.config.plan, s.config.access]);
     if (this.reported.get(id) === sig) return this.settleFork(s);
     this.reported.set(id, sig);
     this.notify("thread/settings/updated", {
@@ -733,7 +768,7 @@ export class ClaudeEngine {
         activePermissionProfile: null,
         model: s.config.model ?? "default",
         modelProvider: "anthropic",
-        serviceTier: null,
+        serviceTier: s.config.fast ? FAST_TIER.id : null,
         effort: s.config.effort,
         summary: null,
         collaborationMode: { mode: s.config.plan ? "plan" : "default", settings: { model: s.config.model ?? "default", reasoning_effort: s.config.effort, developer_instructions: null } },
@@ -806,13 +841,16 @@ export class ClaudeEngine {
       }
       const q = query({
         prompt: nothing(),
-        options: { pathToClaudeCodeExecutable: binary, env: claudeEnv(), settingSources: [], strictMcpConfig: true, persistSession: false, stderr: (d) => this.log(d) },
+        // Opted in to fast mode (only for this process), so it says whether the account can have it.
+        options: { pathToClaudeCodeExecutable: binary, env: claudeEnv(), settingSources: [], settings: { fastMode: true }, strictMcpConfig: true, persistSession: false, stderr: (d) => this.log(d) },
       });
       try {
         const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Claude Code didn't start in time")), 30_000));
         const init = await Promise.race([q.initializationResult(), timeout]);
         const defaults = await this.userSettings();
-        this.models = { at: Date.now(), list: (init.models ?? []).map((m, _, all) => modelFrom(m, defaults.effortLevel ?? null, all, defaults.model ?? null)) };
+        this.fastAvailable = !FAST_UNAVAILABLE.has(init.fast_mode_disabled_reason ?? "");
+        const fast = this.fastAvailable;
+        this.models = { at: Date.now(), list: (init.models ?? []).map((m, _, all) => modelFrom(m, defaults.effortLevel ?? null, all, defaults.model ?? null, fast)) };
         this.modelInfos = { list: init.models ?? [], configured: defaults.model ?? null };
         try {
           const u = await Promise.race([q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }), timeout]);
@@ -970,8 +1008,8 @@ function defaultEntry(m: ModelInfo, all: ModelInfo[], configured: string | null)
   return { label: named ? `Default (${named.trim()})` : m.displayName, description: m.description };
 }
 
-/** Claude Code's model entry as the app-server's. */
-function modelFrom(m: ModelInfo, defaultEffort: string | null, all: ModelInfo[], configured: string | null): Model {
+/** Claude Code's model entry as the app-server's; `fast` when the account can have fast mode. */
+function modelFrom(m: ModelInfo, defaultEffort: string | null, all: ModelInfo[], configured: string | null, fast: boolean): Model {
   const entry = m.value === "default" ? defaultEntry(m, all, configured) : { label: m.displayName, description: m.description };
   const efforts = m.supportsEffort ? (m.supportedEffortLevels ?? []) : [];
   const describe: Record<string, string> = {
@@ -997,7 +1035,7 @@ function modelFrom(m: ModelInfo, defaultEffort: string | null, all: ModelInfo[],
     supportsPersonality: false,
     multiAgentVersion: null,
     additionalSpeedTiers: [],
-    serviceTiers: [],
+    serviceTiers: fast && m.supportsFastMode ? [FAST_TIER] : [],
     defaultServiceTier: null,
     availableAccessPrograms: null,
     isDefault: m.value === "default",

@@ -69,6 +69,7 @@ function model(id: string, displayName: string, description: string, efforts: st
 
 const ALL = ["low", "medium", "high", "xhigh", "max"];
 const FAST = [{ id: "priority", name: "Fast", description: "1.5x speed, increased usage" }];
+const CLAUDE_FAST = [{ id: "priority", name: "Fast", description: "Faster output, at a higher cost" }];
 
 const MODELS: Record<ProviderId, Model[]> = {
   codex: [
@@ -77,8 +78,8 @@ const MODELS: Record<ProviderId, Model[]> = {
     model("gpt-6-luna", "GPT-6-Luna", "Fast and affordable model for easier tasks.", ALL, "medium", { tiers: FAST }),
   ],
   claude: [
-    model("default", "Default (Opus 5.5)", "Opus 5.5 · Most capable for complex work", ALL, "high", { isDefault: true }),
-    model("opus", "Opus 5.5", "Most capable for complex work", ALL, "high"),
+    model("default", "Default (Opus 5.5)", "Opus 5.5 · Most capable for complex work", ALL, "high", { tiers: CLAUDE_FAST, isDefault: true }),
+    model("opus", "Opus 5.5", "Most capable for complex work", ALL, "high", { tiers: CLAUDE_FAST }),
     model("sonnet", "Sonnet 5.5", "Best for everyday tasks", ALL, "high"),
     model("haiku", "Haiku 5.5", "Fastest for quick answers", ["low", "medium", "high"], "medium"),
   ],

@@ -47,6 +47,7 @@ function lastUsed(provider: ProviderId): TurnOverrides {
 }
 
 const titleCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const effortLabel = (effort: string) => (effort === "xhigh" ? "Extra high" : titleCase(effort));
 
 /** Per-thread setting overrides survive the composer going away (switching tabs, leaving the screen). */
 const overrides = new Map<string, TurnOverrides>();
@@ -74,8 +75,11 @@ export interface ComposerSettings {
   /** The current model's name to show. */
   modelLabel: string | null;
   pickModel(value: string): void;
+  /** Lightest to deepest, as the model lists them. */
   effortOptions: SettingOption[];
   effort: string | null;
+  /** The effort the model uses when none is picked. */
+  defaultEffort: string | null;
   /** Speed tiers beyond Standard, when the model has any. */
   speedOptions: SettingOption[];
   speed: string;
@@ -171,11 +175,11 @@ export function useComposerSettings(threadId: string): ComposerSettings {
   };
   const effortOptions: SettingOption[] = (modelInfo?.supportedReasoningEfforts ?? []).map((e) => ({
     value: e.reasoningEffort,
-    label: titleCase(e.reasoningEffort),
+    label: effortLabel(e.reasoningEffort),
     description: e.description || undefined,
   }));
   if (currentEffort && !effortOptions.some((o) => o.value === currentEffort)) {
-    effortOptions.unshift({ value: currentEffort, label: titleCase(currentEffort) });
+    effortOptions.unshift({ value: currentEffort, label: effortLabel(currentEffort) });
   }
   const speedOptions: SettingOption[] = tiers.length
     ? [{ value: "default", label: "Standard", description: "Normal speed and usage" }, ...tiers.map((t) => ({ value: t.id, label: t.name, description: t.description }))]
@@ -201,6 +205,7 @@ export function useComposerSettings(threadId: string): ComposerSettings {
     pickModel,
     effortOptions,
     effort: currentEffort,
+    defaultEffort: modelInfo?.defaultReasoningEffort ?? null,
     speedOptions,
     speed: currentSpeed,
     accessOptions,

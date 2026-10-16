@@ -109,15 +109,7 @@ function SelectMenu<T extends string>({
   onClose: () => void;
 }) {
   const menu = useRef<HTMLDivElement>(null);
-  const [active, setActive] = useState(() => Math.max(0, options.findIndex((o) => o.value === value)));
   const [pos, setPos] = useState<{ left: number; top: number; maxHeight: number; above: boolean } | null>(null);
-  const typed = useRef({ text: "", at: 0 });
-  /**
-   * Whether the highlight came from the keyboard (or opening), so it should be scrolled into view.
-   * Never for the mouse: scrolling a half-visible option under the pointer moves the next one under
-   * it, which the browser hovers in turn, and the list runs away.
-   */
-  const follow = useRef(true);
 
   const place = useCallback(() => {
     const r = anchor.getBoundingClientRect();
@@ -139,9 +131,76 @@ function SelectMenu<T extends string>({
   useLayoutEffect(place, [place]);
 
   useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      if (!menu.current?.contains(e.target as Node) && !anchor.contains(e.target as Node)) onClose();
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("resize", onClose);
+    window.addEventListener("blur", onClose);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("resize", onClose);
+      window.removeEventListener("blur", onClose);
+    };
+  }, [onClose, anchor]);
+
+  return createPortal(
+    <OptionList
+      ref={menu}
+      options={options}
+      value={value}
+      onPick={onPick}
+      onClose={onClose}
+      className={`sel-menu ${pos?.above ? "above" : ""}`}
+      maxHeight={pos?.maxHeight}
+      style={{
+        left: pos?.left ?? -9999,
+        top: pos?.top ?? -9999,
+        minWidth: Math.max(minWidth ?? 0, anchor.getBoundingClientRect().width),
+      }}
+    />,
+    document.body,
+  );
+}
+
+/**
+ * A menu's options, and its keyboard while it's shown: arrows, Home/End, Enter, type-ahead, and
+ * Escape or Tab to close. Placing it is up to whoever shows it (a Select's popover, the model tuner).
+ */
+export function OptionList<T extends string>({
+  options,
+  value,
+  onPick,
+  onClose,
+  className,
+  style,
+  maxHeight,
+  ref,
+}: {
+  options: SelectOption<T>[];
+  value: T;
+  onPick: (v: T) => void;
+  onClose: () => void;
+  className?: string;
+  style?: React.CSSProperties;
+  /** Scrolls past this; the highlighted option is kept in view as it changes. */
+  maxHeight?: number;
+  ref?: React.Ref<HTMLDivElement>;
+}) {
+  const list = useRef<HTMLDivElement | null>(null);
+  const [active, setActive] = useState(() => Math.max(0, options.findIndex((o) => o.value === value)));
+  const typed = useRef({ text: "", at: 0 });
+  /**
+   * Whether the highlight came from the keyboard (or opening), so it should be scrolled into view.
+   * Never for the mouse: scrolling a half-visible option under the pointer moves the next one under
+   * it, which the browser hovers in turn, and the list runs away.
+   */
+  const follow = useRef(true);
+
+  useEffect(() => {
     if (!follow.current) return;
-    menu.current?.querySelector<HTMLElement>(".sel-opt.active")?.scrollIntoView({ block: "nearest" });
-  }, [active, pos]);
+    list.current?.querySelector<HTMLElement>(".sel-opt.active")?.scrollIntoView({ block: "nearest" });
+  }, [active, maxHeight]);
 
   useEffect(() => {
     const move = (dir: 1 | -1, from = active) => {
@@ -183,35 +242,22 @@ function SelectMenu<T extends string>({
         }
       }
     };
-    const onDown = (e: PointerEvent) => {
-      if (!menu.current?.contains(e.target as Node) && !anchor.contains(e.target as Node)) onClose();
-    };
     window.addEventListener("keydown", onKey, true);
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("resize", onClose);
-    window.addEventListener("blur", onClose);
-    return () => {
-      window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("resize", onClose);
-      window.removeEventListener("blur", onClose);
-    };
-  }, [active, options, onPick, onClose, anchor]);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [active, options, onPick, onClose]);
 
+  const setRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      list.current = el;
+      if (typeof ref === "function") ref(el);
+      else if (ref) ref.current = el;
+    },
+    [ref],
+  );
   const hasDescriptions = options.some((o) => o.description);
 
-  return createPortal(
-    <div
-      ref={menu}
-      role="listbox"
-      className={`sel-menu ${hasDescriptions ? "rich" : ""} ${pos?.above ? "above" : ""}`}
-      style={{
-        left: pos?.left ?? -9999,
-        top: pos?.top ?? -9999,
-        maxHeight: pos?.maxHeight,
-        minWidth: Math.max(minWidth ?? 0, anchor.getBoundingClientRect().width),
-      }}
-    >
+  return (
+    <div ref={setRef} role="listbox" className={`${className ?? ""} ${hasDescriptions ? "rich" : ""}`} style={{ ...style, maxHeight }}>
       {options.map((o, i) => [
         o.group && o.group !== options[i - 1]?.group ? (
           <div key={`group:${o.group}`} className="sel-group" role="presentation">
@@ -239,7 +285,6 @@ function SelectMenu<T extends string>({
           <span className="sel-opt-check">{o.value === value && <Check size={13} />}</span>
         </div>,
       ])}
-    </div>,
-    document.body,
+    </div>
   );
 }

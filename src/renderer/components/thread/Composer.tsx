@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, Gauge, ListChecks, LoaderCircle, LogIn, Paperclip, Rocket, Settings2, Shield, ShieldAlert, ShieldCheck, Square, X, Zap } from "lucide-react";
+import { ArrowUp, ListChecks, LoaderCircle, LogIn, Paperclip, Settings2, Shield, ShieldAlert, ShieldCheck, Square, X } from "lucide-react";
 import { useThread } from "../../state/useThread";
 import { isDraft } from "../../state/ui";
 import { hostName } from "../../state/hosts";
@@ -9,6 +9,7 @@ import { bridge, isDesktop } from "../../bridge";
 import { toast } from "../../state/toasts";
 import { Select } from "../ui/Select";
 import { DynamicIsland } from "./DynamicIsland";
+import { ModelTuner } from "./ModelTuner";
 import { composerDrafts as drafts, composerFocus, takeAttachments } from "../../state/composerDrafts";
 import { addFilesToThread } from "../../state/attach";
 import { QuestionDock } from "./QuestionDock";
@@ -25,12 +26,6 @@ const ACCESS_ICON: Record<string, React.ReactNode> = {
   acceptEdits: <Shield size={13} />,
   full: <ShieldAlert size={13} />,
   bypassPermissions: <ShieldAlert size={13} />,
-};
-
-const SPEED_ICON: Record<string, React.ReactNode> = {
-  default: <Gauge size={13} />,
-  priority: <Zap size={13} />,
-  ultrafast: <Rocket size={13} />,
 };
 
 /** Focus a textarea with the caret after its text, ready to keep typing. */
@@ -456,29 +451,7 @@ export function Composer({
               <span>Plan</span>
             </button>
           )}
-          {settings.modelOptions.length > 0 && (
-            <Select
-              value={settings.model}
-              options={settings.modelOptions}
-              onChange={settings.pickModel}
-              title={settings.modelsGrouped ? "Model (and the agent that runs it)" : `${agent.name} model`}
-              menuMinWidth={300}
-              className="sel-model"
-            />
-          )}
-          {settings.effortOptions.length > 0 && (
-            <Select value={settings.effort ?? ""} options={settings.effortOptions} onChange={(v) => setPrefs({ effort: v })} title="Reasoning effort" menuMinWidth={240} />
-          )}
-          {settings.speedOptions.length > 0 && (
-            <Select
-              value={settings.speed}
-              options={settings.speedOptions.map((o) => ({ ...o, icon: SPEED_ICON[o.value] ?? <Zap size={13} /> }))}
-              onChange={(v) => setPrefs({ speed: v })}
-              title="Speed"
-              menuMinWidth={260}
-              className={`collapsible speed-${settings.speed}`}
-            />
-          )}
+          {settings.modelOptions.length > 0 && <ModelTuner settings={settings} />}
           <Select
             value={settings.access}
             options={settings.accessOptions.map((o) => ({ ...o, icon: ACCESS_ICON[o.value] ?? <Shield size={13} /> }))}
