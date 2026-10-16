@@ -12,6 +12,7 @@
     "build": "vite build && node scripts/build-main.mjs",
     "build:demo": "vite build --config vite.demo.config.mts",
     "start": "npm run build && electron .",
+    "start:alongside": "npm run build && electron . --ret-profile=ret-alongside",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "gen:protocol": "node scripts/gen-protocol.mjs",
     "dist": "npm run build && electron-builder --win --x64",
