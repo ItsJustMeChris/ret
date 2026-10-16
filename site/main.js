@@ -17,6 +17,7 @@
   const ua = navigator.userAgent;
   const uaPlatform = (navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
   const isMobile = navigator.userAgentData?.mobile || /Android|iPhone|iPad|iPod/i.test(ua);
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
   const isMac = !isMobile && (/mac/.test(uaPlatform) || /Mac OS X/.test(ua));
   const isWin = !isMobile && (/win/.test(uaPlatform) || /Windows/.test(ua));
   const os = isMac ? "mac" : isWin ? "win" : null;
@@ -33,7 +34,7 @@
   const assets = { win: null, "mac-arm64": null, "mac-x64": null };
   let release = null;
   const mb = (bytes) => `· ${Math.round(bytes / 1048576)} MB`;
-  const mineKey = () => (os === "win" ? "win" : os === "mac" ? `mac-${macArch}` : null);
+  const mineKey = () => (os === "win" ? "win" : os === "mac" ? `mac-${macArch}` : isIOS ? "ios" : null);
 
   function applyDownloads() {
     const mine = mineKey();

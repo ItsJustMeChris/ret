@@ -80,6 +80,7 @@
       <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
       <symbol id="i-keyboard" viewBox="0 0 24 24"><path d="M10 8h.01"/><path d="M12 12h.01"/><path d="M14 8h.01"/><path d="M16 12h.01"/><path d="M18 8h.01"/><path d="M6 8h.01"/><path d="M7 16h10"/><path d="M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/></symbol>
       <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></symbol>
       <symbol id="i-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
       <symbol id="i-bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
       <symbol id="i-todo" viewBox="0 0 24 24"><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><rect x="3" y="4" width="6" height="6" rx="1"/></symbol>
@@ -120,9 +121,9 @@
         <div class="hero-glow"></div>
         <div class="wrap">
           <div class="hero-copy">
-            <a class="chip" href="#agents">
+            <a class="chip" href="#phone">
               <span class="tag">New</span>
-              Claude Code joins Codex
+              Ret for iPhone, now in beta
               <svg class="i"><use href="#i-chevr" /></svg>
             </a>
             <h1>Run lots of&nbsp;agents.<br /><span class="tint">Lose track of&nbsp;none.</span></h1>
@@ -785,6 +786,10 @@
               <p>Windows (x64) and macOS (Apple Silicon and Intel; signed and notarized). On Linux you can build it from source; see the README on GitHub.</p>
             </details>
             <details>
+              <summary>Can I use it from my phone?<svg class="i"><use href="#i-chevd" /></svg></summary>
+              <p>Yes, in beta: <a href="https://testflight.apple.com/join/ayejFk3v" rel="noopener">Ret for iPhone is on TestFlight</a>. Pair it with Ret on your computer (Settings → Remote access → Pair a device) to follow its threads, answer approvals and questions, and start new threads, with a notification when a turn finishes or an agent needs you. The agents keep running on the computer; the phone runs none.</p>
+            </details>
+            <details>
               <summary>How do updates work?<svg class="i"><use href="#i-chevd" /></svg></summary>
               <p>Ret checks for a new version every few hours, downloads it in the background, and asks before restarting into it. Choose Later and it installs the next time you quit.</p>
             </details>
@@ -836,6 +841,12 @@
               <span class="what">Intel · .dmg <span data-size="mac-x64"></span></span>
               <span class="mine-tag">Your system</span>
               <svg class="i"><use href="#i-download" /></svg>
+            </a>
+            <a class="dl-card wide" id="phone" data-dl="ios" href="https://testflight.apple.com/join/ayejFk3v" rel="noopener">
+              <span class="os"><svg class="i i-os"><use href="#i-phone" /></svg>iPhone <span class="beta">Beta</span></span>
+              <span class="what">On TestFlight · Pairs with Ret on your computer, so its threads, approvals and questions come with you</span>
+              <span class="mine-tag">Your device</span>
+              <svg class="i"><use href="#i-arrow" /></svg>
             </a>
           </div>
           <p class="dl-foot reveal">

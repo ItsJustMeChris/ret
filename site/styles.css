@@ -315,8 +315,8 @@ kbd,
   font-weight: 600;
   padding: 1px 9px;
   border-radius: 999px;
-  color: var(--claude);
-  background: var(--claude-soft);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
 }
 .chip .i {
   width: 14px;
@@ -1393,6 +1393,13 @@ h3 {
   color: var(--text-2);
   max-width: 700px;
 }
+.faq details p a {
+  color: var(--text);
+  border-bottom: 1px solid var(--line-2);
+}
+.faq details p a:hover {
+  border-color: var(--accent);
+}
 
 /* ==========================================================================
    Download
@@ -1503,7 +1510,7 @@ h3 {
   font-size: 13.5px;
   color: var(--text-3);
 }
-.dl-card .i {
+.dl-card > .i {
   position: absolute;
   right: 18px;
   top: 20px;
@@ -1512,7 +1519,7 @@ h3 {
   color: var(--text-3);
   transition: color 0.2s, transform 0.2s var(--ease);
 }
-.dl-card:hover .i {
+.dl-card:hover > .i {
   color: var(--accent);
   transform: translateY(2px);
 }
@@ -1530,6 +1537,30 @@ h3 {
 }
 .dl-card.mine .mine-tag {
   display: block;
+}
+.dl-card.wide {
+  grid-column: 1 / -1;
+}
+.dl-card.wide .os {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dl-card .i-os {
+  width: 17px;
+  height: 17px;
+  color: var(--text-2);
+}
+.dl-card .beta {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 99px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+.dl-card.wide:hover > .i {
+  transform: translateX(2px);
 }
 .dl-foot {
   margin: 22px auto 0;
