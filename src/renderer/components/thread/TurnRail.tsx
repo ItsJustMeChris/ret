@@ -4,6 +4,7 @@ import { useThread } from "../../state/useThread";
 import { shallowEqual } from "../../lib/shallow";
 import type { ThreadItem } from "@shared/protocol";
 import { duration, plainText } from "../../lib/format";
+import { requestText } from "../../lib/codexMessage";
 
 const PAD = 8; // the rail's vertical padding (matches the CSS)
 
@@ -309,7 +310,7 @@ function RailPreview({ threadId, turnId, index, place }: { threadId: string; tur
       if (!turn) return null;
       const user = turn.itemIds.map((id) => lt.items[id]).find((it): it is Extract<ThreadItem, { type: "userMessage" }> => it?.type === "userMessage");
       const text = user?.content
-        .map((c) => (c.type === "text" ? c.text : ""))
+        .map((c) => (c.type === "text" ? requestText(c.text) : ""))
         .join(" ")
         .trim();
       return { text: text ?? "", status: turn.status, stale: !!turn.stale, startedAt: turn.startedAt, durationMs: turn.durationMs };

@@ -8,6 +8,7 @@ import { useThreads } from "../state/threads";
 import { useConn } from "../state/conn";
 import { threadTitle } from "../state/projects";
 import { plainText, sinceWhen } from "../lib/format";
+import { requestText } from "../lib/codexMessage";
 import { backgroundLabel, STATE_LABEL, useBackgroundOnly, useRunsElsewhere, useThreadState } from "./StatusDot";
 import type { EngineStatus, ProviderId, UpdaterState } from "../../shared/bridge";
 import { PROVIDERS, agentOf } from "../agents";
@@ -324,7 +325,8 @@ function originLabel(originator: string | null, source: unknown): string | null 
 /** Flatten a (possibly huge, pasted) first message into a few readable lines. */
 function previewText(raw: string): string {
   const flat = (s: string) => s.replace(/\s+/g, " ").trim();
-  return flat(plainText(raw.slice(0, 4000), 360)) || flat(raw.slice(0, 360));
+  const own = requestText(raw);
+  return flat(plainText(own.slice(0, 4000), 360)) || flat(own.slice(0, 360));
 }
 
 function ThreadCard({ id, forks }: { id: string; forks: number }) {

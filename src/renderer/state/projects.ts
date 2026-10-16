@@ -1,6 +1,7 @@
 import { hostOf, type EngineId } from "@shared/bridge";
 import type { Thread } from "@shared/protocol";
 import type { ProjectConf } from "./ui";
+import { requestText } from "../lib/codexMessage";
 
 const caseInsensitive = /win/i.test(navigator.platform);
 /** Windows paths: case-insensitive, written with backslashes. A device's platform, or this computer's. */
@@ -186,7 +187,7 @@ export function threadTitle(t: Thread | undefined): string {
     const name = agentName(t);
     if (name) return t.agentRole ? `${name} (${t.agentRole})` : name;
   }
-  const first = t.preview?.split("\n").find((l) => l.trim());
+  const first = requestText(t.preview ?? "").split("\n").find((l) => l.trim());
   return first?.trim().slice(0, 120) || "Untitled thread";
 }
 

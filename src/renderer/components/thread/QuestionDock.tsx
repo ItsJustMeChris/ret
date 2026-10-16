@@ -17,6 +17,8 @@ interface DockQuestion {
   /** A written answer is allowed (typed in the composer, or in the secret field). */
   other: boolean;
   secret: boolean;
+  /** How Codex names a request_user_input_async question when it's answered; null for others. */
+  replyId: string | null;
 }
 
 /**
@@ -81,6 +83,7 @@ function useOpenAsk(threadId: string): Ask | null {
           options: (q.options ?? []).map((o) => ({ label: o.label, description: o.description || null })),
           other: q.isOther || !q.options?.length,
           secret: q.isSecret,
+          replyId: null,
         })),
       };
     }
@@ -94,6 +97,8 @@ function useOpenAsk(threadId: string): Ask | null {
           options: (q.options ?? []).map((label) => ({ label, description: null })),
           other: true,
           secret: false,
+          // The message is the tool call itself (its id is the call's).
+          replyId: it.delivery === "async" ? JSON.stringify(["request_user_input_async", it.id, i]) : null,
         }))
       : [],
   );
@@ -149,8 +154,9 @@ export function useQuestionFlow(
       });
       return;
     }
-    const text =
-      total === 1
+    const text = ask.questions.every((q) => q.replyId)
+      ? questionReply(ask.questions, answers)
+      : total === 1
         ? answers[0]
         : ask.questions
             .map((q, i) => (answers[i]?.trim() ? `${q.text}\n${answers[i].trim()}` : ""))
@@ -158,7 +164,7 @@ export function useQuestionFlow(
             .join("\n\n");
     if (!text?.trim()) return;
     setFlow({ ...state, answers, sent: true });
-    io.send(text.trim()).catch(() => setFlow((f) => (f.source === source ? { ...f, sent: false } : f)));
+    io.send(text.startsWith("<send_user_message_question_reply>") ? text : text.trim()).catch(() => setFlow((f) => (f.source === source ? { ...f, sent: false } : f)));
   };
 
   const answer = (value: string) => {
@@ -215,12 +221,24 @@ export function useQuestionFlow(
       else useDismissed.setState(Object.fromEntries(ask.itemIds.map((id) => [id, true as const])));
     },
     /**
-     * Whether text typed in the box answers the current question. A single message question is
-     * answered by simply sending your message, so the composer sends it as usual then.
+     * Whether text typed in the box answers the current question. A single question on a reply is
+     * answered by simply sending your message, so the composer sends it as usual then; an async
+     * one is answered the way Codex expects.
      */
-    takesText: q.other && !q.secret && (ask.kind === "request" || total > 1),
+    takesText: q.other && !q.secret && (ask.kind === "request" || total > 1 || !!q.replyId),
     answerText: answer,
   };
+}
+
+/**
+ * Answers to request_user_input_async, as the Codex app and CLI send them: Codex starts the turn as
+ * an answer, and its reviewer takes them as answers to those questions rather than a loose reply.
+ */
+function questionReply(questions: DockQuestion[], answers: string[]): string {
+  const replies = questions
+    .map((q, i) => ({ questionItemId: q.replyId, question: q.text, answer: answers[i]?.trim() ?? "" }))
+    .filter((r) => r.answer);
+  return replies.length ? `<send_user_message_question_reply>\n${JSON.stringify(replies)}\n</send_user_message_question_reply>\n` : "";
 }
 
 /** The question, docked at the top of the composer: numbered picks, with the box below for "Other". */
