@@ -14,6 +14,7 @@ import {
   MessageCircleQuestion,
   MessagesSquare,
   Paperclip,
+  Puzzle,
   Search,
   SquareTerminal,
   Wrench,
@@ -28,6 +29,7 @@ import { agentName, threadTitle } from "../../state/projects";
 import { bridge } from "../../bridge";
 import { viewFile } from "../../lib/viewFile";
 import { parseCodexMessage } from "../../lib/codexMessage";
+import { imageType } from "@shared/files";
 import { StatusDot } from "../StatusDot";
 import { openFrom } from "./Subagents";
 import { changeStats, duration, shortPath, unwrapCommand } from "../../lib/format";
@@ -127,7 +129,23 @@ function UserMessage({ item, ctx }: { item: Extract<ThreadItem, { type: "userMes
         {msg ? (
           msg.parts.length > 0 && (
             <div className="user-text">
-              {msg.parts.map((p, i) => ("text" in p ? p.text : <ChatRef key={i} id={p.threadId} title={p.title} from={ctx.threadId} inline />))}
+              {msg.parts.map((p, i) =>
+                "text" in p ? (
+                  p.text
+                ) : "threadId" in p ? (
+                  <ChatRef key={i} id={p.threadId} title={p.title} from={ctx.threadId} inline />
+                ) : "mention" in p ? (
+                  <span key={i} className="chip chip-inline" title={`${p.kind[0].toUpperCase()}${p.kind.slice(1)}: ${p.mention}`}>
+                    <Puzzle size={11} />
+                    <span className="chip-text">{p.mention}</span>
+                  </span>
+                ) : (
+                  <button key={i} className="chip chip-link chip-inline" title={p.file} onClick={() => void viewFile({ path: p.file }, cwd, ctx.threadId)}>
+                    {imageType(p.file) ? <ImageIcon size={11} /> : <FileText size={11} />}
+                    <span className="chip-text">{p.label}</span>
+                  </button>
+                ),
+              )}
             </div>
           )
         ) : (

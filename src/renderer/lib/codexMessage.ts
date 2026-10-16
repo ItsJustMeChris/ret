@@ -6,6 +6,8 @@
  * them apart so a message reads the way it was written.
  */
 
+import { parseFileRef } from "./files";
+
 export interface MessageFile {
   /** The file's name, or for pasted text its opening words. */
   label: string;
@@ -16,8 +18,12 @@ export interface MessageFile {
   image: boolean;
 }
 
-/** A piece of what you wrote: text, or a chat you mentioned in it. */
-export type RequestPart = { text: string } | { threadId: string; title: string };
+/** A piece of what you wrote: text, a chat, plugin/skill/app or file you mentioned in it. */
+export type RequestPart =
+  | { text: string }
+  | { threadId: string; title: string }
+  | { mention: string; kind: string }
+  | { file: string; label: string };
 
 export interface QuestionReply {
   question: string;
@@ -41,7 +47,9 @@ export interface CodexMessage {
 const REQUEST = /^## My request(?: for Codex)?:[ \t]*\n?/m;
 const REPLY = /<send_user_message_question_reply>\s*([\s\S]*?)\s*<\/send_user_message_question_reply>\s*/;
 const SECTIONS = /^(?:# Files (?:mentioned|pasted) by the user:|## Referenced chats with Codex:|# Response annotations:|<in-app-browser-context\b)/m;
-const MENTION = /\[@([^\]\n]*)\]\(thread:\/\/([^)?\s]+)[^)\s]*\)/g;
+/** `[@Title](thread://id)`, `[@Sites](plugin://sites@…)`, `[report.html](/abs/path)`: what its composer links inline. */
+const INLINE = /\[(@?)([^\]\n]*)\]\(([a-z][a-z0-9+.-]*:\/\/[^)\s]*|\/[^)\s]*|[A-Za-z]:[\\/][^)\s]*)\)/g;
+const MENTION_KINDS = new Set(["plugin", "skill", "app", "connector"]);
 
 const json = (s: string | undefined): unknown => {
   try {
@@ -73,6 +81,9 @@ export function parseCodexMessage(text: string): CodexMessage | null {
     msg.chats = msg.chats.filter((id) => !mentioned.has(id));
   } else if (msg.replies.length) {
     if (rest.trim()) msg.parts = [{ text: rest.trim() }];
+  } else if (hasInline(rest)) {
+    // Sent by the app without its context sections (its Publish action, say): only the links are markup.
+    msg.parts = requestParts(rest, new Set(), (s) => s);
   } else return null;
   return msg;
 }
@@ -81,11 +92,11 @@ const previews = new Map<string, string>();
 
 /** What you wrote, as plain text: for previews and titles (every thread's, on every render). */
 export function requestText(text: string): string {
-  if (!text.includes("## My request") && !text.includes("<send_user_message_question_reply>")) return text;
+  if (!text.includes("## My request") && !text.includes("<send_user_message_question_reply>") && !hasInline(text)) return text;
   let own = previews.get(text);
   if (own === undefined) {
     const msg = parseCodexMessage(text);
-    own = !msg ? text : msg.parts.map((p) => ("text" in p ? p.text : `@${p.title}`)).join("") || msg.replies.map((r) => r.answer).join("\n");
+    own = !msg ? text : msg.parts.map(partText).join("") || msg.replies.map((r) => r.answer).join("\n");
     if (previews.size > 500) previews.clear();
     previews.set(text, own);
   }
@@ -123,20 +134,44 @@ function readSections(pre: string, msg: CodexMessage) {
   }
 }
 
-/** The Codex app's composer writes markdown: undo its escaping, keep chat mentions apart. */
-function requestParts(md: string, mentioned: Set<string>): RequestPart[] {
+function partText(p: RequestPart): string {
+  if ("text" in p) return p.text;
+  if ("threadId" in p) return `@${p.title}`;
+  if ("mention" in p) return `@${p.mention}`;
+  return p.label;
+}
+
+function hasInline(text: string): boolean {
+  if (!text.includes("](")) return false;
+  for (const m of text.matchAll(INLINE)) if (inlinePart(m)) return true;
+  return false;
+}
+
+function inlinePart([, at, label, href]: RegExpMatchArray): RequestPart | null {
+  const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(href)?.[1].toLowerCase();
+  if (at && scheme === "thread") return { threadId: href.slice(9).split(/[?#]/)[0], title: label };
+  if (at && scheme && MENTION_KINDS.has(scheme)) return { mention: label, kind: scheme };
+  if (scheme && scheme !== "file") return null;
+  const ref = parseFileRef(href);
+  return ref && /^(\/|[A-Za-z]:[\\/])/.test(ref.path) ? { file: ref.path, label: label.replace(/\\(.)/g, "$1") || ref.path } : null;
+}
+
+/** The Codex app's composer writes markdown: undo its escaping, keep what it links (chats, plugins, files) apart. */
+function requestParts(md: string, mentioned: Set<string>, clean: (s: string) => string = unescape): RequestPart[] {
   const parts: RequestPart[] = [];
   let last = 0;
   const push = (s: string) => {
     if (s) parts.push({ text: s });
   };
-  for (const m of md.matchAll(MENTION)) {
-    push(unescape(md.slice(last, m.index)));
-    parts.push({ threadId: m[2], title: m[1] });
-    mentioned.add(m[2]);
+  for (const m of md.matchAll(INLINE)) {
+    const part = inlinePart(m);
+    if (!part) continue;
+    push(clean(md.slice(last, m.index)));
+    parts.push(part);
+    if ("threadId" in part) mentioned.add(part.threadId);
     last = m.index + m[0].length;
   }
-  push(unescape(md.slice(last)));
+  push(clean(md.slice(last)));
   // Trim the ends of the whole, not of each piece.
   const first = parts[0];
   if (first && "text" in first) first.text = first.text.replace(/^\s+/, "");
