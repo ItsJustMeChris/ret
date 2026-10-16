@@ -97,8 +97,11 @@ function vscodeInstalled(): Promise<boolean> {
   })();
   return vscodeCache;
 }
-// Dev runs get their own profile so they can coexist with an installed Ret.
-if (isDev) app.setPath("userData", join(app.getPath("appData"), "ret-dev"));
+// Dev runs get their own profile so they can coexist with an installed Ret, and so does a run started
+// with --ret-profile=<name> (a build from the repo tried out next to the installed app, say).
+const profileArg = process.argv.find((a) => a.startsWith("--ret-profile="))?.slice("--ret-profile=".length);
+const profile = profileArg || (isDev ? "ret-dev" : null);
+if (profile) app.setPath("userData", join(app.getPath("appData"), profile));
 const userData = app.getPath("userData");
 const windowStateFile = join(userData, "window.json");
 
