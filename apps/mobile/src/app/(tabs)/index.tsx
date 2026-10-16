@@ -6,10 +6,9 @@ import { create } from "zustand";
 import { hostOf } from "@shared/bridge";
 import { plainText, timeAgo } from "@ret/lib/format";
 import { useShallow } from "@ret/lib/shallow";
-import { threadStateOf, type ThreadState } from "@ret/components/StatusDot";
 import { hostName } from "@ret/state/hosts";
-import { SECTIONS, askFor, type Section } from "@ret/state/inbox";
-import { recencyOf, spawnedBy, threadTitle, type ThreadNode } from "@ret/state/projects";
+import { SECTIONS, inboxStates, rowAsk, rowRequest, type Section } from "@ret/state/inbox";
+import { recencyOf, threadTitle, type ThreadNode } from "@ret/state/projects";
 import { useProjectTree } from "@ret/state/projectTree";
 import { markSeen, useThreads } from "@ret/state/threads";
 import { HostBanner, useRemoteState } from "../../ui/HostBanner";
@@ -28,17 +27,8 @@ export default function InboxScreen() {
   const tree = useProjectTree();
   const kept = useKept();
 
-  // Each thread's state; a subagent working, done or failed is its parent's to report.
-  const states = useThreads(
-    useShallow((s) => {
-      const out: Record<string, ThreadState> = {};
-      for (const id of Object.keys(s.threads)) {
-        const st = threadStateOf(s, id);
-        if (st === "attention" || (st !== "idle" && !spawnedBy(s.threads[id]))) out[id] = st;
-      }
-      return out;
-    }),
-  );
+  // Each listed thread's state (a job's agents fold into the thread they work for).
+  const states = useThreads(useShallow(inboxStates));
 
   const projectName = useMemo(() => {
     const map = new Map<string, string>();
@@ -66,7 +56,8 @@ export default function InboxScreen() {
   const open = (id: string) => {
     const st = states[id];
     if (st && st !== "idle") useKept.setState({ [id]: st as Section });
-    router.push({ pathname: "/thread/[id]", params: { id } });
+    // An agent asking on a job's behalf is answered in its own thread.
+    router.push({ pathname: "/thread/[id]", params: { id: rowRequest(useThreads.getState(), id)?.threadId ?? id } });
   };
   const clear = (id: string) => {
     useKept.setState((s) => {
@@ -108,7 +99,8 @@ export default function InboxScreen() {
 const InboxRow = memo(function InboxRow({ id, seen, project, onOpen, onClear }: { id: string; seen: boolean; project: string | null; onOpen: () => void; onClear?: () => void }) {
   const thread = useThreads((s) => s.threads[id]);
   const host = useThreads((s) => (s.owner[id] ? hostOf(s.owner[id]) : null));
-  const req = useThreads((s) => Object.values(s.requests).find((r) => r.threadId === id));
+  const req = useThreads((s) => rowRequest(s, id));
+  const ask = useThreads((s) => rowAsk(s, req, id));
   // The latest thing the agent said, if the thread is loaded; else what you asked.
   const said = useThreads((s) => {
     const lt = s.live[id];
@@ -122,7 +114,6 @@ const InboxRow = memo(function InboxRow({ id, seen, project, onOpen, onClear }: 
     }
     return null;
   });
-  const ask = askFor(req);
   const preview = ask ?? plainText(said ?? thread?.preview ?? "", 180);
   return (
     <Pressable onPress={onOpen} className="mx-2 flex-row items-start gap-3 rounded-xl px-3 py-3 active:bg-bg-3">

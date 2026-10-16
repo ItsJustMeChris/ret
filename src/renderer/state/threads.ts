@@ -336,7 +336,8 @@ function setThread(d: Draft, id: string, patch: Partial<Thread>) {
 }
 
 export interface Hooks {
-  onTurnCompleted?: (threadId: string, turn: Turn) => void;
+  /** `waiting`: it ended with the thread's agents still at work (see agentsWorking). */
+  onTurnCompleted?: (threadId: string, turn: Turn, waiting: boolean) => void;
 }
 
 /**
@@ -348,6 +349,26 @@ export interface Hooks {
 export function delegated(thread: Thread | undefined, turn: Turn): boolean {
   if (thread) return !!spawnedBy(thread);
   return !!turn.rootTurnId && turn.rootTurnId !== turn.id;
+}
+
+/** Background work that's agents doing part of the thread's job (not shells or monitors: a dev server can run all day). */
+const AGENT_WORK = new Set<BackgroundTask["kind"]>(["agent", "workflow"]);
+
+type Activity = Pick<ThreadsState, "threads" | "live" | "external" | "background" | "agents">;
+
+/** A turn of the thread's own is running, here or in another app. */
+export const turnRunning = (s: Activity, threadId: string): boolean =>
+  !!s.live[threadId]?.activeTurnId || !!s.external[threadId] || s.threads[threadId]?.status.type === "active";
+
+/**
+ * Agents the thread started are still at it: Codex's spawned agents (and theirs), or Claude Code's
+ * background agents. Its job isn't done till they are, so it's still working, with nothing to
+ * report yet: their reports wake it for another turn, and that one's the news.
+ */
+export function agentsWorking(s: Activity, threadId: string, depth = 0): boolean {
+  if (s.background[threadId]?.some((t) => AGENT_WORK.has(t.kind))) return true;
+  if (depth > 8) return false;
+  return (s.agents[threadId] ?? NO_AGENTS).some((id) => turnRunning(s, id) || agentsWorking(s, id, depth + 1));
 }
 
 /** The engine a thread belongs to (this computer's Codex until known: it was the only one). */
@@ -465,11 +486,13 @@ function apply(d: Draft, engine: EngineId, method: string, p: any, hooks: Hooks)
       endSleeps(lt);
       lt.notice = null;
       setThread(d, p.threadId, { updatedAt: Math.floor(Date.now() / 1000), recencyAt: Math.floor(Date.now() / 1000) });
-      if (!d.attended[p.threadId] && !delegated(d.threads[p.threadId], turn)) {
+      // A turn that ends with its agents still out isn't news yet (finished.ts marks it once they're done).
+      const waiting = turn.status !== "failed" && agentsWorking(d, p.threadId);
+      if (!d.attended[p.threadId] && !delegated(d.threads[p.threadId], turn) && !waiting) {
         d.unread = own(d.unread);
         d.unread[p.threadId] = true;
       }
-      hooks.onTurnCompleted?.(p.threadId, turn);
+      hooks.onTurnCompleted?.(p.threadId, turn, waiting);
       break;
     }
     case "turn/diff/updated":

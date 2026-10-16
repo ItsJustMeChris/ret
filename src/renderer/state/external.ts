@@ -1,4 +1,3 @@
-import { bridge } from "../bridge";
 import { appHasFocus, onAppFocus } from "../lib/appFocus";
 import { rpcFor } from "../rpc/client";
 import { PROVIDER_IDS, providerOf, type EngineId } from "@shared/bridge";
@@ -7,9 +6,10 @@ import { useConn } from "./conn";
 import { engineName, hostEngines, useHosts } from "./hosts";
 import type { Thread } from "@shared/protocol";
 import { loadGoal, mergeTurns } from "./actions";
-import { lineageRoot, spawnedBy, threadTitle } from "./projects";
+import { lineageRoot, spawnedBy } from "./projects";
 import { upsertThreads, useThreads, type ExternalRun } from "./threads";
 import { agentsUnasked, backfillLineage, listAgentsOf } from "./lineage";
+import { turnFinished, waitsOnAgents } from "./finished";
 
 /**
  * Cross-client activity: the VS Code extension and the CLI each run a private
@@ -176,13 +176,12 @@ async function check(p: EngineId, t: Thread, moved: boolean) {
     refresh(p, t.id);
     // A subagent finishing is its parent's news, not yours (see delegated()).
     if (spawnedBy(t)) return;
-    const visible = !!useThreads.getState().visible[t.id];
-    if (!useThreads.getState().attended[t.id]) {
+    const failed = last?.status === "failed";
+    const waiting = waitsOnAgents(t.id, failed);
+    if (!waiting && !useThreads.getState().attended[t.id]) {
       useThreads.setState((s) => ({ unread: { ...s.unread, [t.id]: true } }));
     }
-    if (!visible || !appHasFocus()) {
-      bridge.notify(last?.status === "failed" ? "Turn failed elsewhere" : `${engineName(p)} finished elsewhere`, threadTitle(t));
-    }
+    turnFinished(t.id, last?.id ?? was.turnId, { heading: failed ? "Turn failed elsewhere" : `${engineName(p)} finished elsewhere`, devices: false }, waiting);
   } else if (moved) {
     // A turn came and went between two looks (say one a background task's end woke): nothing to
     // announce, but a transcript on screen is behind, perhaps still showing it as unfinished.

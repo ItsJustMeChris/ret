@@ -4,11 +4,11 @@ import { Check, CheckCheck, Inbox as InboxIcon } from "lucide-react";
 import { Kept, useRecent, useVisibility } from "../ui/Kept";
 import { markSeen, useThreads } from "../../state/threads";
 import { useUI } from "../../state/ui";
-import { recencyOf, spawnedBy, threadTitle, type ThreadNode } from "../../state/projects";
+import { recencyOf, threadTitle, type ThreadNode } from "../../state/projects";
 import { useProjectTree } from "../../state/projectTree";
 import { plainText, timeAgo } from "../../lib/format";
-import { StatusDot, threadStateOf, type ThreadState } from "../StatusDot";
-import { SECTIONS, askFor, type Section } from "../../state/inbox";
+import { StatusDot } from "../StatusDot";
+import { SECTIONS, inboxStates, rowAsk, rowRequest, type Section } from "../../state/inbox";
 import { ThreadPane } from "../thread/ThreadPane";
 import { hostName } from "../../state/hosts";
 
@@ -25,17 +25,7 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
   const tree = useProjectTree();
 
   // Each thread's state, recomputed when anything relevant moves.
-  const states = useThreads(
-    useShallow((s) => {
-      const out: Record<string, ThreadState> = {};
-      // A subagent working, done or failed is its parent's to report; what it asks you is yours.
-      for (const id of Object.keys(s.threads)) {
-        const st = threadStateOf(s, id);
-        if (st === "attention" || (st !== "idle" && !spawnedBy(s.threads[id]))) out[id] = st;
-      }
-      return out;
-    }),
-  );
+  const states = useThreads(useShallow(inboxStates));
 
   // Like email: reading something marks it seen, but it stays listed (dimmed) until you clear it
   // with e / Done, or leave the Inbox. So you can go back to what you just read.
@@ -120,7 +110,15 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const reading = selected && threads[selected] ? selected : null;
+  // A row an agent is asking on reads as that agent, where it's answered, and stays on it once answered.
+  const selectedRow = selected && threads[selected] ? selected : null;
+  const asker = useThreads((s) => (selectedRow ? rowRequest(s, selectedRow)?.threadId : null) ?? null);
+  const [askedOn, setAskedOn] = useState<{ row: string; agent: string } | null>(null);
+  useEffect(() => {
+    if (selectedRow && asker && asker !== selectedRow) setAskedOn({ row: selectedRow, agent: asker });
+  }, [selectedRow, asker]);
+  const agent = asker && asker !== selectedRow ? asker : askedOn?.row === selectedRow ? askedOn.agent : null;
+  const reading = selectedRow && agent && threads[agent] ? agent : selectedRow;
   const read = useRecent(reading, 3, (id) => !!threads[id]);
   const empty = order.length === 0;
   return (
@@ -199,7 +197,8 @@ const InboxRow = memo(function InboxRow({
   onClear?: () => void;
 }) {
   const thread = useThreads((s) => s.threads[id]);
-  const req = useThreads((s) => Object.values(s.requests).find((r) => r.threadId === id));
+  const req = useThreads((s) => rowRequest(s, id));
+  const ask = useThreads((s) => rowAsk(s, req, id));
   // The latest thing the agent said, if the thread is loaded; else what you asked.
   const said = useThreads((s) => {
     const lt = s.live[id];
@@ -213,7 +212,6 @@ const InboxRow = memo(function InboxRow({
     }
     return null;
   });
-  const ask = askFor(req);
   const preview = ask ?? plainText(said ?? thread?.preview ?? "", 180);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {

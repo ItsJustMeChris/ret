@@ -191,6 +191,16 @@ export function threadTitle(t: Thread | undefined): string {
   return first?.trim().slice(0, 120) || "Untitled thread";
 }
 
+/** The thread an agent works for, at the top of its spawns (itself when it isn't one, or its spawner isn't known). */
+export const jobOf = (threads: Record<string, Thread>, id: string): string => lineageRoot(threads, id, spawnedBy);
+
+/** A thread that asks you something, by the job you know: an agent goes by its job's title and its own name. */
+export function askerTitle(threads: Record<string, Thread>, id: string): string {
+  const job = jobOf(threads, id);
+  if (job === id) return threadTitle(threads[id]);
+  return `${threadTitle(threads[job])} · ${agentName(threads[id]) ?? "an agent"}`;
+}
+
 export function projectKeyFor(
   thread: Thread,
   byId: Record<string, Thread>,

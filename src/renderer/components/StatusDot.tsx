@@ -1,5 +1,6 @@
 import { memo } from "react";
-import { useThreads } from "../state/threads";
+import { agentsWorking, useThreads } from "../state/threads";
+import { spawnedBy } from "../state/projects";
 import { useThread } from "../state/useThread";
 import { agentOf } from "../agents";
 
@@ -18,7 +19,15 @@ export function threadStateOf(s: ReturnType<typeof useThreads.getState>, threadI
   if (s !== statesOf) {
     statesOf = s;
     states = new Map();
-    asking = new Set(Object.values(s.requests).map((r) => r.threadId));
+    asking = new Set();
+    // An agent asking you something holds up the job it works for, so the threads it works for need you too.
+    for (const r of Object.values(s.requests)) {
+      for (let id: string | null = r.threadId; id && !asking.has(id); ) {
+        asking.add(id);
+        const up = spawnedBy(s.threads[id]);
+        id = up && s.threads[up] ? up : null;
+      }
+    }
   }
   let state = states.get(threadId);
   if (!state) states.set(threadId, (state = stateOf(s, threadId)));
@@ -38,6 +47,8 @@ function stateOf(s: ReturnType<typeof useThreads.getState>, threadId: string): T
   // Its turn is over but work it started still runs (a background shell, subagent, monitor), and
   // the agent picks the thread up again when that's done: not idle, not dead.
   if (s.background[threadId]?.length) return "running";
+  // Its turn is over but the agents it started are still at it: the job's still going.
+  if (agentsWorking(s, threadId)) return "running";
   return "idle";
 }
 

@@ -1,12 +1,12 @@
 import { bridge } from "../bridge";
-import { appHasFocus, onAppFocus } from "../lib/appFocus";
+import { onAppFocus } from "../lib/appFocus";
 import { dropClient, rpcFor } from "../rpc/client";
 import { PROVIDER_IDS, engineId, hostOf, providerOf, type EngineId, type ProviderId, type ProvidersSettings } from "@shared/bridge";
 import type { ServerRequest, Thread, ThreadItem, UsageActivity, UserInput } from "@shared/protocol";
 import { PROVIDERS, accessFor, agentOf, pickProvider } from "../agents";
 import { dropProvider, emptyProviderConn, enabledProviders, enabledProvidersOn, patchProvider, signedIn, useConn, type ProviderConn, type TokenUsage } from "./conn";
 import { guarded, toast } from "./toasts";
-import { hostOfKey, lineageRoot, normPath, scopedKey, spawnedBy, threadTitle, type Workspace } from "./projects";
+import { askerTitle, hostOfKey, lineageRoot, normPath, scopedKey, spawnedBy, threadTitle, type Workspace } from "./projects";
 import { projectKeyNow } from "./projectTree";
 import { engineName, hostEngines, hostName, hostPlatform, useHosts, watchHosts } from "./hosts";
 import { fillComposer } from "./composerDrafts";
@@ -36,6 +36,7 @@ import {
 import { activeBoard, appId, appKind, fileId, isApp, isDraft, isFile, isThread, newId, updateBoard, useUI, type CanvasWin, type FocusSplit, type UIState, type ViewMode } from "./ui";
 import { onFsChanged, useFiles } from "./files";
 import { captureLive, captureTurns, noteAppRequest, screenTurnEnded } from "./computerUse";
+import { turnFinished } from "./finished";
 
 // ---------------------------------------------------------------------------
 // Boot: wire the transport into the stores.
@@ -73,16 +74,13 @@ export function bootstrap() {
   });
 
   setThreadHooks({
-    onTurnCompleted: (threadId, turn) => {
+    onTurnCompleted: (threadId, turn, waiting) => {
       // Send the next queued follow-up (outside the reducer flush that called us).
       if (turn.status !== "failed") setTimeout(() => void drainQueue(threadId), 0);
-      const visible = useThreads.getState().visible[threadId];
       if (delegated(useThreads.getState().threads[threadId], turn)) return;
-      const title = threadTitle(useThreads.getState().threads[threadId]);
       const heading = turn.status === "failed" ? "Turn failed" : `${engineName(ownerOf(threadId))} finished`;
-      if (!visible || !appHasFocus()) bridge.notify(heading, title);
       // Paired phones that are away hear about this computer's own threads (theirs, they're told by their own computer).
-      if (!hostOfThread(threadId)) bridge.remoteAccess.notifyDevices({ title: heading, body: title, threadId });
+      turnFinished(threadId, turn.id, { heading, devices: true }, waiting);
     },
   });
 
@@ -245,10 +243,10 @@ function wireEngine(p: EngineId) {
     addPendingRequest(p, req);
     if (req.method === "mcpServer/elicitation/request") noteAppRequest(req.params.threadId, req.params.turnId ?? "", req.params);
     if (threadId && !useThreads.getState().visible[threadId]) {
-      bridge.notify(`${engineName(p)} needs your input`, threadTitle(useThreads.getState().threads[threadId]));
+      bridge.notify(`${engineName(p)} needs your input`, askerTitle(useThreads.getState().threads, threadId));
     }
     if (threadId && !hostOf(p)) {
-      bridge.remoteAccess.notifyDevices({ title: `${engineName(p)} needs your input`, body: threadTitle(useThreads.getState().threads[threadId]), threadId });
+      bridge.remoteAccess.notifyDevices({ title: `${engineName(p)} needs your input`, body: askerTitle(useThreads.getState().threads, threadId), threadId });
     }
   });
 
