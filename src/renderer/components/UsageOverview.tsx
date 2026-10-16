@@ -1,10 +1,11 @@
 import { useMemo, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Box, LoaderCircle } from "lucide-react";
+import { PROVIDER_IDS, type ProviderId } from "@shared/bridge";
 import { PROVIDERS } from "../agents";
 import { useConn } from "../state/conn";
 import { useShallow } from "../lib/shallow";
 import { compactNumber } from "../lib/format";
-import { bareModel, prettyModel, usageStats, WEEKS, type ModelMaker, type ModelShare, type UsageStats } from "../lib/usageStats";
+import { bareModel, prettyModel, usageStats, WEEKS, type DayUsage, type ModelMaker, type ModelShare, type UsageStats } from "../lib/usageStats";
 import { dayLabel, useTokenUsage } from "./TokenUsageChart";
 
 /** Models named, side by side and in the share; the rest are "Other models". */
@@ -61,7 +62,7 @@ export function UsageOverview() {
       {(stats.models.length > 0 || stats.prompts > 0) && (
         <div className="stats-pair">
           {stats.models.length > 0 && <TokenShare models={stats.models} />}
-          {stats.prompts > 0 && <HourChart hours={stats.hours} />}
+          {stats.prompts > 0 && <HourChart hours={stats.hours} by={stats.hoursBy} />}
         </div>
       )}
     </section>
@@ -103,9 +104,16 @@ function monthLabels(weeks: UsageStats["weeks"]) {
   return out;
 }
 
+/** The provider with the most tokens on a day, whose color the day's square takes. */
+function lead(d: DayUsage | undefined) {
+  if (!d?.providers.length) return undefined;
+  return d.providers.reduce((a, b) => (b.tokens > a.tokens ? b : a)).p;
+}
+
 /**
- * A square per day, a column per week, shaded by tokens. Pointing at a day, or arrowing through
- * them (left and right by week, up and down by day), puts its numbers in the header.
+ * A square per day, a column per week, shaded by tokens and colored by the provider that did most
+ * of that day's work. Pointing at a day, or arrowing through them (left and right by week, up and
+ * down by day), puts its numbers in the header.
  */
 function ActivityGrid({ stats }: { stats: UsageStats }) {
   const [hover, setHover] = useState<string | null>(null);
@@ -114,7 +122,8 @@ function ActivityGrid({ stats }: { stats: UsageStats }) {
   const order = useMemo(() => stats.weeks.flat().filter((d): d is string => !!d), [stats.weeks]);
   const active = Object.keys(stats.days).length;
   const d = hover ? stats.days[hover] : null;
-  const multi = new Set(Object.values(stats.days).flatMap((x) => x.providers.map((y) => y.p))).size > 1;
+  const who = PROVIDER_IDS.filter((p) => Object.values(stats.days).some((x) => x.providers.some((y) => y.p === p)));
+  const multi = who.length > 1;
   const weekdays = [1, 3, 5].map((i) => ({ row: i, label: new Date(2000, 0, 2 + i).toLocaleDateString(undefined, { weekday: "short" }) }));
 
   const onKey = (e: KeyboardEvent) => {
@@ -195,18 +204,31 @@ function ActivityGrid({ stats }: { stats: UsageStats }) {
           >
             {stats.weeks.map((col, w) => (
               <div key={w} className="heat-week">
-                {col.map((day, i) =>
-                  day ? <div key={day} data-day={day} className={`heat-cell l${level(day)}${hover === day ? " on" : ""}`} /> : <div key={i} className="heat-cell later" />,
-                )}
+                {col.map((day, i) => {
+                  if (!day) return <div key={i} className="heat-cell later" />;
+                  const p = lead(stats.days[day]);
+                  return <div key={day} data-day={day} className={`heat-cell l${level(day)}${p ? ` by-${p}` : ""}${hover === day ? " on" : ""}`} />;
+                })}
               </div>
             ))}
           </div>
         </div>
       </div>
+      {/* With two providers, the hue says whose day it was and the steps how busy, so the steps go grey. */}
       <div className="heat-key" aria-hidden>
+        {multi && (
+          <span className="heat-who">
+            {who.map((p) => (
+              <span key={p} className="tok-key">
+                <i className={`heat-cell l4 by-${p}`} />
+                {PROVIDERS[p].short}
+              </span>
+            ))}
+          </span>
+        )}
         Less
         {[0, 1, 2, 3, 4].map((l) => (
-          <i key={l} className={`heat-cell l${l}`} />
+          <i key={l} className={`heat-cell l${l} ${multi ? "by-none" : `by-${who[0]}`}`} />
         ))}
         More
       </div>
@@ -398,14 +420,17 @@ const pctY = (y: number) => `${(y / ARC.h) * 100}%`;
 
 /**
  * Prompts by the hour they were sent, as a dot per hour along a half circle: midnight at the
- * left, noon at the top, 11 PM at the right. A dot grows and brightens with its count. The middle
- * names the busiest hour, or the one pointed at (or arrowed to) with its count.
+ * left, noon at the top, 11 PM at the right. A dot grows and brightens with its count, in the
+ * color of the provider that took most of that hour's prompts. The middle names the busiest
+ * hour, or the one pointed at (or arrowed to) with its count, split by provider.
  */
-function HourChart({ hours }: { hours: number[] }) {
+function HourChart({ hours, by }: { hours: number[]; by: UsageStats["hoursBy"] }) {
   const [hover, setHover] = useState<number | null>(null);
   const max = Math.max(1, ...hours);
   const peak = hours.indexOf(Math.max(...hours));
   const shown = hover ?? peak;
+  const who = PROVIDER_IDS.filter((p) => by[p]?.some(Boolean));
+  const lead = hours.map((_, h) => who.reduce<ProviderId | undefined>((a, p) => (a === undefined || by[p]![h] > by[a]![h] ? p : a), undefined));
 
   const onKey = (e: KeyboardEvent) => {
     const next =
@@ -428,6 +453,16 @@ function HourChart({ hours }: { hours: number[] }) {
     <div className="stats-hours">
       <div className="tok-head">
         <h4>Prompts by hour</h4>
+        {who.length > 1 && (
+          <div className="tok-readout">
+            {who.map((p) => (
+              <span key={p} className="tok-key">
+                <i style={{ background: `var(--series-${p})` }} />
+                {PROVIDERS[p].short}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
       <div className="hours-arc">
         <svg
@@ -445,15 +480,16 @@ function HourChart({ hours }: { hours: number[] }) {
             const f = n / max;
             // Quiet hours shrink to specks, the busy ones stand out.
             const r = n ? 2 + 7 * f : 1.5;
+            const hue = lead[h] ? `var(--series-${lead[h]})` : "var(--accent)";
             return (
               <g key={h}>
                 {hover === h && <circle className="hours-ring" cx={x} cy={y} r={r + 3} />}
                 <circle
-                  className={`hours-dot${h === peak ? " peak" : ""}`}
+                  className="hours-dot"
                   cx={x}
                   cy={y}
                   r={r}
-                  style={n && h !== peak ? { fill: `color-mix(in srgb, var(--accent) ${Math.round(25 + 60 * f)}%, var(--bg-3))` } : undefined}
+                  style={n ? { fill: h === peak ? hue : `color-mix(in srgb, ${hue} ${Math.round(25 + 60 * f)}%, var(--bg-3))` } : undefined}
                 />
               </g>
             );
@@ -462,6 +498,7 @@ function HourChart({ hours }: { hours: number[] }) {
         <div className="hours-center" style={{ top: pctY(ARC.cy) }} aria-live="polite">
           <b>{hourLabel(shown)}</b>
           <span>{hover == null ? "busiest hour" : `${hours[shown].toLocaleString()} ${hours[shown] === 1 ? "prompt" : "prompts"}`}</span>
+          {hover != null && who.length > 1 && <span>{who.map((p) => `${by[p]![hover].toLocaleString()} ${PROVIDERS[p].short}`).join(" · ")}</span>}
         </div>
         {[0, 12, 23].map((h) => (
           <span key={h} className="hours-end" style={{ left: pctX(h === 12 ? ARC.cx : hourAt(h).x), top: pctY(ARC.cy + 12) }}>

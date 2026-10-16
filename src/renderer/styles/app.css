@@ -4290,27 +4290,40 @@ html.autoscrolling[data-autoscroll="down"] * {
   flex-direction: column;
   gap: 3px;
 }
-/* One hue, more is stronger: the empty step is the surface lifted, the top step the accent itself. */
+/*
+ * A day takes the color of the provider that did most of its work, stronger the more there was:
+ * the empty step is the surface lifted, the top step the provider's color itself.
+ */
 .heat-cell {
+  --heat: var(--accent);
   aspect-ratio: 1;
   border-radius: 2px;
   background: var(--bg-3);
   transition: background-color 500ms var(--ease);
 }
+.heat-cell.by-codex {
+  --heat: var(--series-codex);
+}
+.heat-cell.by-claude {
+  --heat: var(--series-claude);
+}
+.heat-cell.by-none {
+  --heat: var(--text-2);
+}
 .heat-cell.later {
   background: none;
 }
 .heat-cell.l1 {
-  background: color-mix(in srgb, var(--accent) 28%, var(--bg-3));
+  background: color-mix(in srgb, var(--heat) 28%, var(--bg-3));
 }
 .heat-cell.l2 {
-  background: color-mix(in srgb, var(--accent) 50%, var(--bg-3));
+  background: color-mix(in srgb, var(--heat) 50%, var(--bg-3));
 }
 .heat-cell.l3 {
-  background: color-mix(in srgb, var(--accent) 75%, var(--bg-3));
+  background: color-mix(in srgb, var(--heat) 75%, var(--bg-3));
 }
 .heat-cell.l4 {
-  background: var(--accent);
+  background: var(--heat);
 }
 .heat-cell.on {
   outline: 1px solid var(--text-2);
@@ -4328,10 +4341,19 @@ html.autoscrolling[data-autoscroll="down"] * {
 .heat-key i {
   width: 10px;
 }
-.heat-key i:first-of-type {
+.heat-who {
+  display: flex;
+  gap: 12px;
+  margin-right: auto;
+}
+.heat-who .tok-key i {
+  width: 10px;
+  height: 10px;
+}
+.heat-key > i:first-of-type {
   margin-left: 4px;
 }
-.heat-key i:last-of-type {
+.heat-key > i:last-of-type {
   margin-right: 4px;
 }
 .stats-pair {
@@ -4506,13 +4528,10 @@ html.autoscrolling[data-autoscroll="down"] * {
   outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
   outline-offset: 4px;
 }
-/* An hour without prompts keeps the arc's shape as a speck; the busiest is the accent itself. */
+/* An hour without prompts keeps the arc's shape as a speck; the busiest is its provider's color itself. */
 .hours-dot {
   fill: var(--bg-4);
   transition: fill 500ms var(--ease);
-}
-.hours-dot.peak {
-  fill: var(--accent);
 }
 .hours-ring {
   fill: none;

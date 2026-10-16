@@ -37,8 +37,9 @@ export interface UsageStats {
   longest: number;
   /** Tokens by model, most first. */
   models: ModelShare[];
-  /** Prompts by local hour, 0–23. */
+  /** Prompts by local hour, 0–23; and the same by provider. */
   hours: number[];
+  hoursBy: Partial<Record<ProviderId, number[]>>;
 }
 
 /**
@@ -65,6 +66,7 @@ export function usageStats(usage: { p: ProviderId; u: TokenUsage | null | undefi
   const days: Record<string, DayUsage> = {};
   const models = new Map<string, ModelShare>();
   const hours = new Array<number>(24).fill(0);
+  const hoursBy: Partial<Record<ProviderId, number[]>> = {};
   let tokens = 0;
   let elsewhere = 0;
   let prompts = 0;
@@ -89,7 +91,11 @@ export function usageStats(usage: { p: ProviderId; u: TokenUsage | null | undefi
         if (m) m.tokens += mt;
         else models.set(name, { name, maker: modelMaker(id), tokens: mt });
       }
-      a.hours.forEach((h, i) => (hours[i] += h));
+      const mine = (hoursBy[p] ??= new Array<number>(24).fill(0));
+      a.hours.forEach((h, i) => {
+        hours[i] += h;
+        mine[i] += h;
+      });
     }
   }
 
@@ -120,6 +126,7 @@ export function usageStats(usage: { p: ProviderId; u: TokenUsage | null | undefi
     longest: Math.max(longest, current),
     models: [...models.values()].sort((a, b) => b.tokens - a.tokens),
     hours,
+    hoursBy,
   };
 }
 
