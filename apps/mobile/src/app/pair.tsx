@@ -2,7 +2,7 @@ import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
 import { Laptop, Radar } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View, type TextInputInstance } from "react-native";
 import { REMOTE_DEFAULT_PORT } from "@shared/remote";
 import { bridge } from "@ret/bridge";
 import { toast } from "@ret/state/toasts";
@@ -23,7 +23,7 @@ export default function PairScreen() {
   const [code, setCode] = useState((params.code ?? "").replace(/\D/g, "").slice(0, 6));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const codeInput = useRef<TextInput>(null);
+  const codeInput = useRef<TextInputInstance>(null);
 
   useEffect(() => bridge.remoteAccess.discover(), []);
 

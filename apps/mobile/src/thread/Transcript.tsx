@@ -34,8 +34,8 @@ export function Transcript({ ctx, header }: { ctx: Ctx; header?: React.ReactElem
       data={data}
       keyExtractor={(id) => id}
       renderItem={({ item }) => <Turn turnId={item} ctx={ctx} />}
-      ListHeaderComponent={header}
-      ListFooterComponent={older ? <View className="items-center py-4">{loadingOlder ? <Spinner colorClassName="accent-text-3" /> : null}</View> : null}
+      ListHeaderComponent={header ?? undefined}
+      ListFooterComponent={older ? <View className="items-center py-4">{loadingOlder ? <Spinner colorClassName="accent-text-3" /> : null}</View> : undefined}
       onEndReached={() => older && void loadOlder(ctx.threadId)}
       onEndReachedThreshold={0.4}
       keyboardDismissMode="interactive"

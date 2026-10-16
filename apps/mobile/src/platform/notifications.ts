@@ -1,5 +1,6 @@
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
+import { AndroidImportance } from "expo-notifications";
 import { router } from "expo-router";
 import { AppState, Platform } from "react-native";
 import { create } from "zustand";
@@ -53,7 +54,7 @@ async function register(ask: boolean) {
       return;
     }
     if (Platform.OS === "android") {
-      await Notifications.setNotificationChannelAsync("default", { name: "Threads", importance: Notifications.AndroidImportance.HIGH });
+      await Notifications.setNotificationChannelAsync("default", { name: "Threads", importance: AndroidImportance.HIGH });
     }
     const token = (await Notifications.getExpoPushTokenAsync({ projectId: id })).data;
     (await access).setPushToken(token);

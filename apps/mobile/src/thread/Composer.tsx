@@ -25,7 +25,7 @@ import {
   type LucideIcon,
 } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
-import { Image, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Image, Pressable, ScrollView, Text, TextInput, View, type TextInputInstance } from "react-native";
 import { bridge } from "@ret/bridge";
 import { shallowEqual } from "@ret/lib/shallow";
 import { discardQueued, interrupt, isWritingFinalAnswer, sendMessage, steerQueued, type Attachment } from "@ret/state/actions";
@@ -69,7 +69,7 @@ type Pending = Attachment & { previewUrl: string; uploading: boolean };
  * A new thread (a draft) starts with its first message: `onStarted` hears its id.
  */
 export function Composer({ threadId, onStarted }: { threadId: string; onStarted?: (threadId: string) => void }) {
-  const input = useRef<TextInput>(null);
+  const input = useRef<TextInputInstance>(null);
   const [text, setText] = useState(() => composerDrafts.get(threadId) ?? "");
   const [images, setImages] = useState<Pending[]>([]);
   const [sending, setSending] = useState(false);
