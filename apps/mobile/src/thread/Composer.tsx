@@ -294,7 +294,8 @@ export function Composer({ threadId, onStarted }: { threadId: string; onStarted?
             <Icon icon={Plus} size={19} colorClassName="accent-text-2" />
           </Pressable>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-1" contentContainerClassName="items-center gap-1.5 pr-1">
-            {s.hasModes && <Chip icon={ListChecks} label="Plan" on={s.planning} onPress={s.togglePlan} />}
+            {/* As on the desktop, Plan only shows while it's on: to say so, and to turn it off. */}
+            {s.planning && <Chip icon={ListChecks} label="Plan" on onPress={s.togglePlan} />}
             {s.modelOptions.length > 0 && <Chip label={[s.modelLabel, effortLabel].filter(Boolean).join(" · ") || "Model"} onPress={() => setSheet("model")} menu />}
             {s.speedOptions.length > 0 && s.speed !== "default" && (
               <Chip icon={SPEED_ICON[s.speed] ?? Zap} label={s.speedOptions.find((o) => o.value === s.speed)?.label ?? s.speed} onPress={() => setSheet("speed")} menu />
