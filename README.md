@@ -26,5 +26,4 @@ src/renderer/   the UI (demo/ is the website's in-browser version)
 src/shared/     what both sides share, including the agent protocol
 apps/mobile/    Ret for iPhone and Android: pairs with a desktop Ret and uses its agents (see its README)
 site/           getret.app
-promo/          the launch video
 ```

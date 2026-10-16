@@ -17,3 +17,6 @@ CSC_*.txt
 # getret.app: the demo is built from src/renderer on deploy; the tour video is hosted on a CDN.
 site/demo/
 site/assets/*.mp4
+
+# The launch video's source (Remotion) is kept out of the repo.
+promo/
