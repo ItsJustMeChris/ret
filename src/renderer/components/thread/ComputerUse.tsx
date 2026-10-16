@@ -33,7 +33,7 @@ export function useLiveScreen(threadId: string): { screen: Screen; shot: Shot | 
 
 /**
  * While the agent is using an app: which one, the window it's in, what it's doing, and the last
- * screenshot it sent back of that window (not a live view). Docks above the composer; folds down to one line.
+ * screenshot it sent back of that window (not a live view). Shows in the thread's Dynamic Island; folds down to one line.
  */
 export const ScreenDock = memo(function ScreenDock({ threadId, compact }: { threadId: string; compact?: boolean }) {
   const live = useLiveScreen(threadId);

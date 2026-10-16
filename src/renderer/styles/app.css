@@ -2927,6 +2927,107 @@ body.resizing .transcript {
 .composer.planning {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line-2));
 }
+
+/* ↑/↓ through what you've sent: where you are in it, clipped onto the box's top edge. */
+.recall-anchor {
+  position: relative;
+  height: 0;
+}
+.recall-pill {
+  position: absolute;
+  top: -21px;
+  left: -6px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 9px 0 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line-2));
+  background: var(--bg-2);
+  box-shadow: 0 4px 12px -6px rgba(0, 0, 0, 0.5);
+  font-size: 11px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transform-origin: 12px 50%;
+  animation: recall-in 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.recall-pill.leaving {
+  animation: recall-out 0.16s ease-in forwards;
+}
+/* How far back you are: newest at the bottom of the track, oldest at the top. */
+.recall-track {
+  position: relative;
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--line-2);
+  overflow: hidden;
+}
+.recall-thumb {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: translateY(calc((1 - var(--p)) * 7px));
+  transition: transform 0.26s var(--ease);
+}
+.recall-num {
+  display: inline-flex;
+  height: 13px;
+  align-items: center;
+  overflow: hidden;
+}
+.recall-pos {
+  display: inline-block;
+  font-weight: 600;
+  color: var(--text);
+}
+.recall-pos[data-dir="1"] {
+  animation: recall-roll-up 0.26s var(--ease);
+}
+.recall-pos[data-dir="-1"] {
+  animation: recall-roll-down 0.26s var(--ease);
+}
+.recall-of {
+  color: var(--text-3);
+}
+@keyframes recall-in {
+  from {
+    opacity: 0;
+    transform: translateY(7px) scale(0.8);
+  }
+}
+@keyframes recall-out {
+  to {
+    opacity: 0;
+    transform: translateY(5px) scale(0.9);
+  }
+}
+@keyframes recall-roll-up {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+}
+@keyframes recall-roll-down {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .recall-pill,
+  .recall-pos {
+    animation-duration: 1ms; /* still ends, so the pill clears when it leaves */
+  }
+  .recall-thumb {
+    transition: none;
+  }
+}
 .field {
   display: flex;
   flex-direction: column;
@@ -6023,33 +6124,103 @@ body.resizing .sidebar-dock {
 }
 
 /*
- * The dock on top of the composer: one box for whatever the thread has to show there (its goal,
- * its subagents, the app it's using, queued follow-ups…), stacked with a rule between, so any mix
- * of them joins up.
- * Its sections draw no box of their own; it hides when none of them renders.
+ * The Dynamic Island, on top of the composer: one box for what the thread has going on right now
+ * (its goal, the agents it has out, the app it's using, queued follow-ups), stacked with a rule
+ * between, so any mix of them joins up. With none of them it isn't laid out at all.
+ *
+ * It moves on the compositor (DynamicIsland's IslandMotion): growing or shrinking, it's laid out at
+ * its new height at once and slid down behind the composer by what it hasn't reached yet, while
+ * `--pull` keeps it to the smaller height in the flow. Its parts are laid out from the composer up.
  */
-.composer-dock {
+.dynamic-island {
+  --island-bg: color-mix(in srgb, var(--bg-2) 65%, var(--bg));
+  position: relative;
+  isolation: isolate;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
   width: calc(100% - 32px - 28px);
   max-width: calc(860px - 28px);
-  margin: 6px auto 0;
-  border: 1px solid var(--line-2);
-  border-bottom: none;
+  margin: calc(4px - var(--pull, 0px)) auto 0;
   border-radius: 10px 10px 0 0;
-  background: color-mix(in srgb, var(--bg-2) 65%, var(--bg));
+  background: var(--island-bg);
   overflow: hidden;
-  animation: tray-in 0.2s var(--ease);
 }
-.composer-dock:empty {
+/* Its edge: drawn over its parts, and nothing at all at no height. */
+.dynamic-island::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 1px var(--line-2),
+    inset 1px 0 var(--line-2),
+    inset -1px 0 var(--line-2);
+  pointer-events: none;
+}
+/* Empty, it isn't laid out at all (there's one on every composer); set by IslandMotion, which shows it again first. */
+.dynamic-island[data-empty] {
   display: none;
 }
-.composer-dock:not(:empty) + .composer {
+/* Over the island while it slides behind. */
+.dynamic-island:not([data-empty]) + .composer {
+  position: relative;
   margin-top: 0;
 }
-.composer-dock > * + * {
+/*
+ * What the island's sections are placed in, and a leaving one held (IslandList). A leaving row is
+ * held in its section, which also covers what's sliding out from behind the section above it.
+ */
+.island-body {
+  position: relative;
+  flex: none;
+}
+.island-body > .island-part {
+  position: relative;
+  background: var(--island-bg);
+}
+.island-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.island-body > .island-part:not(.leaving) ~ .island-part:not(.leaving) {
   border-top: 1px solid var(--line);
 }
+.island-part {
+  transform-origin: 50% 100%;
+}
+.island-part.arrive {
+  animation: island-in 0.28s var(--ease) both;
+}
+/* Gone quickly, before what closes up over it gets there. */
+.island-part.leaving {
+  pointer-events: none;
+  animation: island-out 0.16s var(--ease) forwards;
+}
+@keyframes island-in {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+    scale: 0.97;
+  }
+}
+@keyframes island-out {
+  to {
+    opacity: 0;
+    scale: 0.97;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .island-part.arrive,
+  .island-part.leaving {
+    animation-duration: 1ms; /* still ends, so a part that left goes */
+  }
+}
 
-/* Computer use: the app an agent is driving and its window, docked above the composer. */
+/* Computer use: the app an agent is driving and its window, in the Dynamic Island. */
 .screen-dock {
   padding: 4px;
 }
@@ -6194,7 +6365,6 @@ body.resizing .sidebar-dock {
   border-radius: 6px;
   font-size: 12px;
   color: var(--text-2);
-  animation: queue-row-in 0.22s var(--ease);
 }
 .queue-row:hover {
   background: var(--bg-3);
@@ -6224,7 +6394,7 @@ body.resizing .sidebar-dock {
   text-transform: uppercase;
   color: var(--text-3);
 }
-.queue-row:first-child .queue-when {
+.queue-when.next {
   color: var(--accent);
 }
 .queue-actions {
@@ -6238,26 +6408,13 @@ body.resizing .sidebar-dock {
 .queue-row:focus-within .queue-actions {
   opacity: 1;
 }
-@keyframes tray-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-}
-@keyframes queue-row-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-}
 @container pane (width < 640px) {
-  .composer-dock {
+  .dynamic-island {
     width: calc(100% - 16px - 20px);
-    margin-top: 4px;
   }
 }
 
-/* A thread's goal, docked on top of the composer (above any queued follow-ups) */
+/* A thread's goal, at the top of its Dynamic Island */
 .goal-bar {
   padding: 4px;
 }
@@ -7206,7 +7363,7 @@ body.resizing .sidebar-dock {
   margin-left: 0;
 }
 
-/* Subagents: a tray of them on the parent's composer, and a bar in place of their own */
+/* Subagents: the ones at work in the parent's Dynamic Island, and a bar in place of their own composer */
 .agent-tray-head {
   width: 100%;
   text-align: left;
@@ -7216,6 +7373,9 @@ body.resizing .sidebar-dock {
 }
 .agent-tray-running {
   color: var(--green);
+}
+.agent-tray-asking {
+  color: var(--accent);
 }
 .agent-row {
   width: 100%;

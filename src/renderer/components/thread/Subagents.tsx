@@ -6,7 +6,9 @@ import { useThread, useThreadGroup } from "../../state/useThread";
 import { agentName, spawnedBy, threadTitle } from "../../state/projects";
 import { interrupt, openThread } from "../../state/actions";
 import { useUI } from "../../state/ui";
-import { STATE_LABEL, StatusDot, threadStateOf, useThreadState } from "../StatusDot";
+import { shallowEqual } from "../../lib/shallow";
+import { STATE_LABEL, StatusDot, threadStateOf, useThreadState, type ThreadState } from "../StatusDot";
+import { IslandList } from "./IslandList";
 
 /**
  * Open a thread mentioned in another (`from`): a subagent from its parent, or the other way round.
@@ -18,33 +20,54 @@ export function openFrom(e: React.MouseEvent, threadId: string, from: string) {
   else openThread(threadId, { besideThread: from });
 }
 
-/**
- * The agents a thread spawned, docked on top of its composer: what each is up to, and a way into
- * its thread. Open while any of them works; folded to a line once they're all done.
- */
-export const AgentTray = memo(function AgentTray({ threadId }: { threadId: string }) {
-  const ids = useThread(threadId, (s) => s.agents[threadId] ?? NO_AGENTS);
-  return ids.length ? <Tray threadId={threadId} ids={ids} /> : null;
-});
+/** An agent that matters right now: at work, or waiting on you. */
+const CURRENT = new Set<ThreadState>(["running", "attention"]);
 
-function Tray({ threadId, ids }: { threadId: string; ids: readonly string[] }) {
-  const running = useThreadGroup(ids, (s) => ids.filter((id) => threadStateOf(s, id) === "running").length);
-  const [unfolded, setUnfolded] = useState<boolean | null>(null);
-  const expanded = unfolded ?? running > 0;
+/** The agents a thread spawned that are at work or waiting on you (the rest are done with). */
+export function useActiveAgents(threadId: string): readonly string[] {
+  const ids = useThread(threadId, (s) => s.agents[threadId] ?? NO_AGENTS);
+  return useThreadGroup(
+    ids,
+    (s) => {
+      const current = ids.filter((id) => CURRENT.has(threadStateOf(s, id)));
+      return current.length === ids.length ? ids : current.length ? current : NO_AGENTS;
+    },
+    shallowEqual,
+  );
+}
+
+/**
+ * The agents a thread has out that are working or need you (`ids`), in its Dynamic Island: what each
+ * is up to, and a way into its thread. One that's done leaves.
+ */
+export const AgentTray = memo(function AgentTray({ threadId, ids }: { threadId: string; ids: readonly string[] }) {
+  const asking = useThreadGroup(ids, (s) => ids.filter((id) => threadStateOf(s, id) === "attention").length);
+  const working = ids.length - asking;
+  const [folded, setFolded] = useState(false);
   return (
-    <div className={`queue-tray agent-tray ${expanded ? "open" : ""}`}>
-      <button className="queue-row agent-tray-head" onClick={() => setUnfolded(!expanded)}>
+    <div className={`queue-tray agent-tray ${folded ? "" : "open"}`}>
+      <button className="queue-row agent-tray-head" onClick={() => setFolded(!folded)}>
         <Bot size={12} className="queue-icon" />
         <span className="queue-text">
           {ids.length} {ids.length === 1 ? "subagent" : "subagents"}
-          {running > 0 && <span className="agent-tray-running"> · {running} working</span>}
+          {asking ? (
+            <>
+              {working > 0 && <span className="agent-tray-running"> · {working} working</span>}
+              <span className="agent-tray-asking">
+                {" "}
+                · {asking} {asking === 1 ? "needs" : "need"} your input
+              </span>
+            </>
+          ) : (
+            <span className="agent-tray-running"> working</span>
+          )}
         </span>
         <Chevron size={12} className="tool-chev" />
       </button>
-      {expanded && ids.map((id) => <AgentRow key={id} agentId={id} from={threadId} />)}
+      <IslandList className="island-list">{!folded && ids.map((id) => <AgentRow key={id} agentId={id} from={threadId} />)}</IslandList>
     </div>
   );
-}
+});
 
 function AgentRow({ agentId, from }: { agentId: string; from: string }) {
   const title = useThread(agentId, (s) => threadTitle(s.threads[agentId]));
@@ -53,8 +76,8 @@ function AgentRow({ agentId, from }: { agentId: string; from: string }) {
     <button className="queue-row agent-row" onClick={(e) => openFrom(e, agentId, from)} title={`Open ${title}'s thread`}>
       <StatusDot threadId={agentId} />
       <span className="queue-text">{title}</span>
-      {/* An agent with nothing left to do has finished its task. */}
-      <span className={`queue-when state-${state}`}>{state === "idle" ? "Done" : STATE_LABEL[state]}</span>
+      {/* One with nothing left to do (seen on its way out) has finished its task. */}
+      <span className={`queue-when state-${state}`}>{state === "idle" || state === "unread" ? "Done" : STATE_LABEL[state]}</span>
     </button>
   );
 }

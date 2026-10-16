@@ -1,16 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowUp, Gauge, ListChecks, LoaderCircle, LogIn, Paperclip, Rocket, Settings2, Shield, ShieldAlert, ShieldCheck, Square, X, Zap } from "lucide-react";
 import { useThread } from "../../state/useThread";
 import { isDraft } from "../../state/ui";
 import { hostName } from "../../state/hosts";
-import { interrupt, isWritingFinalAnswer, sendMessage, startLogin, type Attachment } from "../../state/actions";
+import { interrupt, isWritingFinalAnswer, loadOlder, sendMessage, startLogin, type Attachment } from "../../state/actions";
+import { sentMessages } from "../../state/composerHistory";
 import { bridge, isDesktop } from "../../bridge";
 import { toast } from "../../state/toasts";
 import { Select } from "../ui/Select";
-import { QueueTray } from "./QueueTray";
-import { GoalBar } from "./GoalBar";
-import { AgentTray } from "./Subagents";
-import { ScreenDock } from "./ComputerUse";
+import { DynamicIsland } from "./DynamicIsland";
 import { composerDrafts as drafts, composerFocus, takeAttachments } from "../../state/composerDrafts";
 import { addFilesToThread } from "../../state/attach";
 import { QuestionDock } from "./QuestionDock";
@@ -43,6 +41,51 @@ function focusAtEnd(el: HTMLTextAreaElement | null) {
   el.scrollTop = el.scrollHeight;
 }
 
+/** Going back through what you've sent with ↑/↓: the messages (newest first) and which one's in the box. */
+interface Recall {
+  list: string[];
+  /** Older turns not loaded yet could add to it. */
+  more: boolean;
+  at: number;
+  /** Which way the last step went: 1 back in time, -1 forward. */
+  dir: 1 | -1;
+  /** Steps that hit the oldest (each nudges the pill). */
+  bumps: number;
+  /** Stepped out of it (the pill is on its way out). */
+  leaving?: boolean;
+}
+
+/** Where you are in what you've sent, on the box's top edge: the number rolls as you step, and it nudges at the oldest. */
+function RecallPill({ recall, onGone }: { recall: Recall; onGone: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (recall.bumps) ref.current?.animate([{ transform: "none" }, { transform: "translateY(-3px)" }, { transform: "none" }], { duration: 200, easing: "ease-out" });
+  }, [recall.bumps]);
+  const n = recall.list.length;
+  return (
+    <div
+      ref={ref}
+      className={`recall-pill ${recall.leaving ? "leaving" : ""}`}
+      title="↑ older · ↓ newer · Esc puts back an empty box"
+      aria-live="polite"
+      onAnimationEnd={(e) => e.animationName === "recall-out" && onGone()}
+    >
+      <span className="recall-track" style={{ "--p": n > 1 ? recall.at / (n - 1) : 1 } as React.CSSProperties}>
+        <span className="recall-thumb" />
+      </span>
+      <span className="recall-num">
+        <span key={recall.at} className="recall-pos" data-dir={recall.dir}>
+          {recall.at + 1}
+        </span>
+      </span>
+      <span className="recall-of">
+        of {n}
+        {recall.more ? "+" : ""}
+      </span>
+    </div>
+  );
+}
+
 /** What the box says while a question is open. */
 function askHint(ask: QuestionFlow): string {
   if (ask.q.secret) return "Answer in the field above…";
@@ -60,7 +103,7 @@ export function Composer({
   threadId: string;
   autoFocus?: boolean;
   compact?: boolean;
-  /** The thread's subagents are on screen already (the details panel), so the dock leaves them out. */
+  /** The thread's subagents are on screen already (the details panel), so the Dynamic Island leaves them out. */
   agentsListed?: boolean;
 }) {
   const [text, setText] = useState(() => drafts.get(threadId) ?? "");
@@ -81,6 +124,58 @@ export function Composer({
   useEffect(() => {
     drafts.set(threadId, text);
   }, [threadId, text]);
+
+  // ↑ in an empty box brings back what you sent last; more ↑ go further back, ↓ comes forward again.
+  const [recall, setRecall] = useState<Recall | null>(null);
+  const recalling = recall && !recall.leaving && text === recall.list[recall.at] ? recall : null;
+  // Edited, sent or cleared: it's yours now, and the pill goes.
+  useEffect(() => {
+    if (recall && !recall.leaving && !recalling) setRecall({ ...recall, leaving: true });
+  }, [recall, recalling]);
+  /** Once the box shows a recalled message, the caret goes after it, ready to add to it. */
+  const caretToEnd = useRef(false);
+  useLayoutEffect(() => {
+    const el = ta.current;
+    if (!el || !caretToEnd.current) return;
+    caretToEnd.current = false;
+    el.setSelectionRange(el.value.length, el.value.length);
+    el.scrollTop = el.scrollHeight;
+  }, [text, recall]);
+  const showRecalled = (next: Recall) => {
+    caretToEnd.current = true;
+    setText(next.list[next.at]);
+    setRecall(next);
+  };
+  /** One step back (1) or forward (-1) through what you've sent. False when the key should move the caret as usual. */
+  const stepRecall = (dir: 1 | -1, el: HTMLTextAreaElement): boolean => {
+    if (el.selectionStart !== el.selectionEnd) return false;
+    if (!recalling) {
+      // Only from an empty box: in something you're writing, ↑ moves the caret.
+      if (dir === -1 || text !== "") return false;
+      const { list, more } = sentMessages(threadId);
+      if (!list.length) return false;
+      showRecalled({ list, more, at: 0, dir, bumps: 0 });
+      return true;
+    }
+    // With the caret where recalling left it (the end), ↑ goes on back; moved into a message of
+    // several lines, the arrows go through its lines first.
+    const parked = el.selectionStart === text.length;
+    if (dir === 1 ? !parked && text.slice(0, el.selectionStart).includes("\n") : text.slice(el.selectionEnd).includes("\n")) return false;
+    const at = recalling.at + dir;
+    if (at < 0) setText("");
+    else if (at < recalling.list.length) showRecalled({ ...recalling, at, dir });
+    else {
+      setRecall({ ...recalling, bumps: recalling.bumps + 1 });
+      // The oldest loaded: fetch older turns, and the next ↑ goes on into them.
+      if (recalling.more) {
+        void loadOlder(threadId).then(() => {
+          const { list, more } = sentMessages(threadId);
+          setRecall((r) => (r && !r.leaving ? { ...r, list, more } : r));
+        });
+      }
+    }
+    return true;
+  };
 
   // Kept built while another view shows (see Kept), it leaves what's handed to the thread's composer
   // to the one on screen, or picks it up when it's back, as one mounting would.
@@ -219,6 +314,18 @@ export function Composer({
         return;
       }
     }
+    if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !e.nativeEvent.isComposing) {
+      if (stepRecall(e.key === "ArrowUp" ? 1 : -1, e.currentTarget)) {
+        e.preventDefault();
+        return;
+      }
+    }
+    if (e.key === "Escape" && recalling) {
+      // Back to the empty box you started from (before Esc would stop a running turn).
+      e.preventDefault();
+      setText("");
+      return;
+    }
     if (e.key === "Tab" && e.shiftKey && hasModes) {
       // Same as Codex and Claude Code: Shift+Tab switches Plan mode.
       e.preventDefault();
@@ -250,16 +357,16 @@ export function Composer({
 
   return (
     <>
-    {/* Docked on top, longest-lived first and the next message nearest the box. */}
-    <div className="composer-dock">
-      <GoalBar threadId={threadId} />
-      {!agentsListed && <AgentTray threadId={threadId} />}
-      <ScreenDock threadId={threadId} compact={compact} />
-      <QueueTray threadId={threadId} />
-    </div>
+    {/* Another thread's is another island, not this one changing. */}
+    <DynamicIsland key={threadId} threadId={threadId} compact={compact} agentsListed={agentsListed} />
     <div
       className={`composer ${running ? "running" : ""} ${elsewhere ? "elsewhere" : ""} ${compact ? "compact" : ""} ${planning ? "planning" : ""} ${ask ? "asking" : ""}`}
     >
+      {recall && (
+        <div className="recall-anchor">
+          <RecallPill recall={recall} onGone={() => setRecall((r) => (r?.leaving ? null : r))} />
+        </div>
+      )}
       {ask && <QuestionDock flow={ask} compact={compact} />}
       {elsewhere && (
         <div className="composer-elsewhere">
@@ -324,6 +431,9 @@ export function Composer({
         }
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
+        // Gone elsewhere: what's recalled stays in the box, as a draft. The pill goes at once, as the
+        // view may be going hidden, where an exit animation would never end.
+        onBlur={() => setRecall(null)}
         onPaste={onPaste}
         spellCheck
       />
@@ -334,11 +444,12 @@ export function Composer({
               <Paperclip size={14} />
             </button>
           )}
-          {hasModes && (
+          {/* Plan mode is Shift+Tab; the pill only shows while it's on, to say so and to turn it off. */}
+          {planning && (
             <button
-              className={`plan-toggle ${planning ? "on" : ""}`}
-              title={planning ? `Plan mode is on: ${agent.name} plans, asks you questions, then proposes a plan (Shift+Tab to turn off)` : "Plan mode (Shift+Tab): think it through, ask questions, and propose a plan before changing anything"}
-              aria-pressed={planning}
+              className="plan-toggle on"
+              title={`Plan mode is on: ${agent.name} plans, asks you questions, then proposes a plan. Click or Shift+Tab to turn it off`}
+              aria-pressed
               onClick={togglePlan}
             >
               <ListChecks size={13} />

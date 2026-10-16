@@ -165,7 +165,7 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
                 threadId={threadId}
                 compact={size === "compact"}
                 autoFocus={props.focused && props.chrome === "focus"}
-                // The details panel lists the subagents; the dock keeps its room for the rest.
+                // The details panel lists the subagents; the Dynamic Island keeps its room for the rest.
                 agentsListed={size === "wide" && showDetails}
               />
             ) : (

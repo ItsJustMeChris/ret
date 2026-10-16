@@ -18,8 +18,8 @@ const LABEL: Record<ThreadGoalStatus, string> = {
 };
 
 /**
- * The objective the agent keeps working toward across turns (Codex's `/goal`), docked on top of
- * the composer: what it is, how long it's been worked on, and controls to pause, resume or drop it.
+ * The objective the agent keeps working toward across turns (Codex's `/goal`), in the thread's
+ * Dynamic Island: what it is, how long it's been worked on, and controls to pause, resume or drop it.
  */
 export const GoalBar = memo(function GoalBar({ threadId }: { threadId: string }) {
   const goal = useThread(threadId, (s) => s.goals[threadId]);

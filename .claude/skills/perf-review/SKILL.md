@@ -117,7 +117,7 @@ Each is a page script returning what it measured; run with `node $B run <target>
 | Steps | Measures | Healthy |
 |---|---|---|
 | `js-cu-lib+js-cu-prep+js-cu-history+js-cu-open+js-cu-live-apps+js-cu-live+js-cu-sizes` | Computer use: an 804-step history merge, re-merges, opening it, 30 live 1600×900 screenshots with the dock open and 3 thumbnails shown, blob and thumbnail sizes | first merge < ~15 ms, re-merge < 5 ms, live: 0 long frames, `640x360 blob` thumbnails; with `trace` and `EVENTS=FinalizeFrame,DecodeImage`, none of it on `main` |
-| `js-agents-prep+js-agents-stream+js-agents-index` (prefix `js-agents-control+` for the same load as plain threads) | Subagents: a parent with 20 agents (8 streaming), its tray open, ~420 threads in the sidebar, the external poll at 3 s | tray "20 subagents · 8 working", stream p50 like the control, index update < 1 ms |
+| `js-agents-prep+js-agents-stream+js-agents-index` (prefix `js-agents-control+` for the same load as plain threads) | Subagents: a parent with 20 agents (8 streaming), its tray open, ~420 threads in the sidebar, the external poll at 3 s | tray "8 subagents working" (the 12 done ones aren't in it), stream p50 like the control, index update < 1 ms |
 | `run.js-goals` | Goal timers in 10 windows: shown, culled, canvas hidden | only shown windows' spans change; all 0 with the canvas hidden |
 | `js-codex-app-messages+rstream+rstreamtype+rstreamscroll+rcards` | Every user message in the Codex app's wrapped format (files, a referenced chat, a mention), then streaming | head no slower than base |
 | `js-viz-prep+rpan+rcards+rstream+rstreamscroll+still` (prefix `js-viz-anim+` for frames that always animate; set `__vizCount`, `__vizStyle` or `__vizDoc` in an earlier step to vary them) | Codex visualizations: the last reply in up to 8 windows on screen ends with a `visualize` reference, shown in a sandboxed frame (a stand-in for the skill's runtime) | frames sized (`sized` = `frames`); with frames on screen pan and cards cost more (see rules 3.5), stream, scroll and still don't |
@@ -147,6 +147,7 @@ an optional chain with a side effect inside (`turns?.[order[--i]]`) skips it and
 |---|---|
 | `run <t> run.wait3000+js-check-canvas --board demo` | wheel pans by its delta and is prevented; over a transcript that can scroll it isn't (canvas still); zoom keeps its anchor |
 | `run <t> run.wait3000+js-check-transcripts --board demo` | a culled window's transcript keeps its scroll (`back.sameNode`, same `scrollTop`); the composer grows and shrinks back |
+| `run <t> run.mode-focus+js-check-island --board demo` | the Dynamic Island (goal, subagents, queue on a composer) reshapes without jumps as parts come and go, mid-animation too: `worst` < 1 px, every change's `left` empty |
 | `run <t> run.wait3000+js-check-flights --board demo` | flight lands (`flight: false`), a pan interrupts it (`anims: 0`) |
 | `run <t> run.wait3000+js-check-rail --board demo` | rail jumps put the first/last turn near the top (`…FromView` small) |
 | `run <t> run.js-check-kept-views` | drafts follow a thread between views, a send goes out once, scroll kept, rail jump reaches undrawn turns (`isFirst`, small offset), hidden views ignore keys, boards switch back intact |
