@@ -17,6 +17,13 @@ function loadState(path: string, host: string | null): unknown {
   }
 }
 
+/** The frame document with the widget's saved state in it: the runtime reads it once, as it starts. */
+function withState(html: string, path: string, host: string | null): string {
+  const globals = { widgetState: loadState(path, host), statePersistence: "local" };
+  const state = JSON.stringify(globals).replaceAll("<", "\\u003c");
+  return html.replace(STATE_PLACEHOLDER, () => STATE_PLACEHOLDER.replace("__CODEX_VISUALIZATION_WIDGET_STATE__", state));
+}
+
 /**
  * An inline Codex visualization: the fragment runs in an opaque-origin sandboxed frame under the
  * skill's CSP, and talks to us only over the MessagePort handed to it on load (height, links,
@@ -28,17 +35,20 @@ export const Visualization = memo(function Visualization({ viz, host }: { viz: V
   const [rev, setRev] = useState(0);
   const frame = useRef<HTMLIFrameElement>(null);
   const port = useRef<MessagePort | null>(null);
+  /** The document as read, the one the frame has, and whether the widget saved state since it was made. */
+  const loaded = useRef<{ template: string; html: string; stale: boolean } | null>(null);
 
   useEffect(() => {
     let alive = true;
     setDoc(null);
+    loaded.current = null;
     void bridge.files.visualization(viz.path, viz.title, host).then(
       (res) => {
         if (!alive) return;
         if ("error" in res) return setDoc(res);
-        const globals = { widgetState: loadState(viz.path, host), statePersistence: "local" };
-        const state = JSON.stringify(globals).replaceAll("<", "\\u003c");
-        setDoc({ html: res.html.replace(STATE_PLACEHOLDER, () => STATE_PLACEHOLDER.replace("__CODEX_VISUALIZATION_WIDGET_STATE__", state)) });
+        const html = withState(res.html, viz.path, host);
+        loaded.current = { template: res.html, html, stale: false };
+        setDoc({ html });
       },
       (err: Error) => alive && setDoc({ error: err.message }),
     );
@@ -50,6 +60,18 @@ export const Visualization = memo(function Visualization({ viz, host }: { viz: V
   useEffect(() => () => port.current?.close(), []);
 
   const onLoad = useCallback(() => {
+    // A frame that leaves the document (its window culled, its view put away) loses its page, and
+    // back in it loads the document it was given again: give it one with the state saved since.
+    const l = loaded.current;
+    if (l?.stale) {
+      l.stale = false;
+      const html = withState(l.template, viz.path, host);
+      if (html !== l.html) {
+        l.html = html;
+        setDoc({ html });
+        return;
+      }
+    }
     port.current?.close();
     const channel = new MessageChannel();
     port.current = channel.port1;
@@ -81,6 +103,7 @@ export const Visualization = memo(function Visualization({ viz, host }: { viz: V
               const parsed = JSON.parse(data.state);
               if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
                 localStorage.setItem(stateKey(viz.path, host), JSON.stringify(parsed));
+                if (loaded.current) loaded.current.stale = true;
                 ok = true;
               }
             }
