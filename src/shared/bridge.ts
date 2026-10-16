@@ -153,6 +153,9 @@ export interface GitInfo {
   branch: string | null;
 }
 
+/** A Codex visualization fragment wrapped in its runtime, ready for a sandboxed frame's srcdoc. */
+export type VisualizationResult = { html: string } | { error: string };
+
 export interface RetBridge {
   platform: string;
   appVersion: string;
@@ -214,6 +217,8 @@ export interface RetBridge {
   files: {
     saveImage(data: ArrayBuffer, ext: string, host?: string | null): Promise<string>;
     stat(path: string, host?: string | null): Promise<{ exists: boolean; isDir: boolean; size?: number }>;
+    /** Loads a Codex visualization fragment (from its `visualize` content reference) as a standalone frame document. */
+    visualization(path: string, title?: string, host?: string | null): Promise<VisualizationResult>;
     /** Where a dropped/pasted File lives on disk; null when it has no path (e.g. dragged from a web page). */
     pathFor(file: File): string | null;
   };
@@ -283,6 +288,7 @@ export const IPC = {
   setTheme: "app:setTheme",
   reveal: "shell:reveal",
   stat: "files:stat",
+  visualization: "files:visualization",
   editorAvailable: "editor:available",
   editorOpen: "editor:open",
   edit: "edit:command",
