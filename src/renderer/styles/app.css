@@ -1351,6 +1351,72 @@ body.resizing .transcript {
   gap: 4px;
   margin-top: 6px;
 }
+.attachments:first-child {
+  margin-top: 0;
+}
+
+/* What a message from the Codex app carried: files, pasted text, chats, its browser's page. */
+.msg-user .chip {
+  background: var(--bg-4);
+}
+.chip-link {
+  border: 0;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.chip-link:hover:not(:disabled) {
+  color: var(--text);
+}
+.chip-link:disabled {
+  cursor: default;
+  opacity: 1;
+}
+.chip-link svg {
+  flex-shrink: 0;
+}
+.chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip-inline {
+  height: 18px;
+  margin: 0 1px;
+  vertical-align: -3px;
+}
+/* Text picked out of an earlier reply, quoted above what you said about it. */
+.user-quote {
+  margin: 0 0 6px;
+  padding: 1px 0 1px 9px;
+  border-left: 2px solid var(--line-2);
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.user-quote-comment {
+  color: var(--text);
+}
+/* An answer to the agent's question, under the question it answers. */
+.user-reply + .user-reply,
+.user-reply + .user-text {
+  margin-top: 8px;
+}
+.user-reply-q {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-bottom: 3px;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+.user-reply-q svg {
+  flex-shrink: 0;
+  transform: translateY(1px);
+}
 
 /* Images in threads: what you attached, what the agent looked at. Click to see full size. */
 .user-images {
