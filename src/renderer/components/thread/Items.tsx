@@ -24,7 +24,6 @@ import {
 import { Chevron } from "../ui/Chevron";
 import type { FileUpdateChange, ThreadItem } from "@shared/protocol";
 import { useThread } from "../../state/useThread";
-import { useThreads } from "../../state/threads";
 import { agentName, threadTitle } from "../../state/projects";
 import { bridge } from "../../bridge";
 import { viewFile } from "../../lib/viewFile";
@@ -168,7 +167,8 @@ function UserMessage({ item, ctx }: { item: Extract<ThreadItem, { type: "userMes
 
 /** A Codex chat referenced in a message: opens beside this thread when Ret knows it. */
 function ChatRef({ id, title, from, inline }: { id: string; title: string | null; from: string; inline?: boolean }) {
-  const thread = useThreads((s) => s.threads[id]);
+  // That chat's entry only (a whole-store selector would re-run on every streamed token).
+  const thread = useThread(id, (s) => s.threads[id]);
   const name = thread ? threadTitle(thread) : title || "Codex chat";
   return (
     <button

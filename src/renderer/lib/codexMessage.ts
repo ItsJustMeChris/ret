@@ -156,6 +156,7 @@ function unescape(md: string): string {
       // Hard line breaks, and escaped punctuation.
       .replace(/\\\n/g, "\n")
       .replace(/\\([!-/:-@[-`{-~])/g, "$1")
-      .replace(/[ \t]+$/gm, "")
+      // Spaces left at line ends: not at the end of a piece, which may be the space before a mention.
+      .replace(/[ \t]+(?=\n)/g, "")
   );
 }
