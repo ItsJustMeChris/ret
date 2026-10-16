@@ -16,7 +16,9 @@ card, mid-gesture, hidden).
 - Cost when broken: a subagent tray scanning `Object.values(s.threads)` from every composer took
   5.6 ms per store update at 700 threads × 92 composers, ~170 ms of every second while streaming.
 - Spot it: `useThreads(` in anything rendered inside a thread pane, transcript, composer, window or
-  card; `Object.values(s.threads)` / `Object.values(s.requests)` inside a selector.
+  card; `Object.values(s.threads)` / `Object.values(s.requests)` inside a selector; `useConn(` for
+  something that changes often (usage read's running totals) in a view Kept holds hidden (the home
+  screen is in Focus, which stays built behind the canvas).
 - Fix: `useThread(id, …)`; several threads: `useThreadGroup(ids, …)`; another zustand store:
   `useGatedStore(store, …)` (computer use has `useScreen`).
 
@@ -26,6 +28,9 @@ subscribers never hear its changes (goals and agents are there).
 **1.3 No O(threads) work per update.** Derive indexes once per `threads` identity and keep unchanged
 entries' arrays (the `agents` index in threads.ts; `threadStateOf` caches per store snapshot). Selectors
 return primitives or stable references; arrays and objects only with `shallowEqual` or a cache.
+- Cost when broken: every composer selected `useConn((s) => s.providers)`, so each usage read's
+  running total (16 a second for a while on a first read) re-rendered ~100 composers: 550 ms of
+  script per 3 s on an idle canvas, p95 frame 133 ms (46 ms and 13 ms once it took just the models).
 
 **1.4 Store writes stay batched and in place.** Notifications are applied about 30 times a second
 (`enqueueNotification`); `flushNow()` defeats that, so not on hot paths. Items are updated in place
@@ -51,7 +56,14 @@ frozen, as GoalTime does.
 animation or transition that *starts* in there never finishes, and Chrome then renders a frame every
 vsync. Gated subscriptions (1.1) keep hidden views from re-rendering into new animations.
 
-**2.4 A child's layout effects run before its parent's.** A container that portals its children must
+**2.4 A frame that leaves the document loses its page.** An `<iframe>` in a transcript (Codex
+visualizations) is unloaded when its window is culled or its kept view leaves the document, and
+loads its `srcdoc` again when it's back: its scripts run again from the start. Whatever it should
+come back with (widget state) has to be in the document it reloads, not only in what it said since
+(Visualization rebuilds its document with the saved state when it reloads).
+- Spot it: `<iframe`, `srcDoc`, `MessageChannel` in anything inside a window or a kept view.
+
+**2.5 A child's layout effects run before its parent's.** A container that portals its children must
 be in the document before they measure or set scroll offsets (Kept attaches its host from a sibling
 ref rendered before the portal).
 
@@ -80,7 +92,16 @@ transform node (viewBox scaling) and paint-chunk breaks: about half the re-layer
 was icons. Rows that repeat per item use a size-native SVG (components/ui/Chevron.tsx); one-off icons
 (headers, menus, the sidebar) are fine.
 
-**3.5 Smaller rules.** Scroll offsets and transforms stay under ~2^18 px (float32 in the compositor;
+**3.5 A sandboxed frame on screen re-layerizes the canvas on every gesture frame.** A frame
+without `allow-same-origin` (Codex visualizations) runs in a renderer process of its own, and while
+one is on screen every frame of a pan or zoom runs a full PaintArtifactCompositor update of the
+whole canvas instead of the fast path. Pan p50 2.2 ms with none, 2.9 with one, 4.8–5.7 with six
+(layerize 128 → 479 → 731–809 ms per run); zooming across the card threshold +2.5 ms. The same
+frames in the page's process cost nothing (1.9 ms), but drop process isolation for model-written
+HTML, so that's a decision, not a fix. CSS (`will-change`, `contain`) doesn't change it.
+- Spot it: a new `<iframe sandbox>` (or any cross-origin frame) that can sit in a canvas window.
+
+**3.6 Smaller rules.** Scroll offsets and transforms stay under ~2^18 px (float32 in the compositor;
 the canvas rebases its origin). A scroller the app scrolls itself is `overflow: scroll` with hidden
 scrollbars, not `overflow: hidden` (not composited: it repaints). Cursor changes during a drag use the
 cursor shield (lib/cursorShield.ts), not a `body` class that restyles the document. Monaco keeps
@@ -109,6 +130,10 @@ show blob URLs, thumbnails for anything small, revoke on eviction.
 
 **4.5 Text derived from messages is computed once.** Parse per text in `useMemo`, with a cheap fast
 path for the common case and a bounded cache for what every render asks (titles: `requestText`).
+The fast path is `includes` of a marker; a check that could be a regex (is this link one of ours?)
+goes behind the cache, or every title pays it on every render.
+- Cost when broken: a link check ahead of `requestText`'s cache took a 20 KB message with links from
+  0.8 to 10–16 µs per title per render.
 
 ## 5. Talking to the engines
 

@@ -88,6 +88,9 @@ changes), a folder with a checkout, or a folder that is already a build. Builds 
   stages the change touches and keeps its sign across rounds.
 - **Idle must be idle**: `run <target> cpu.still` should show ~0 frames and ~0 script. Anything else
   is a timer, an animation in hidden content, or a poll.
+- **Sandboxed frames run in a process of their own** (Codex visualizations: `sandbox="allow-scripts"`,
+  an opaque origin). `cpu` counts only the page's renderer and reports theirs as `framesCpu`; `trace`
+  groups their main threads as `frames`.
 - Reference values (8d5576d on an RTX 4090 / 144 Hz Windows machine, quiet), p50 ms: drag 0.8–1.1,
   pan 1.3–2, zoom 2.5–3.5, cards 2.5–3.5; streaming: idle 1.2–1.5, pan 4–5, cards 3–3.5, drag 1.5–2,
   typing 4.2–5, scrolling 1.2–1.6, clicking windows 2.8–3.2. Mode/tab switches 10–40 ms, a cold
@@ -117,6 +120,9 @@ Each is a page script returning what it measured; run with `node $B run <target>
 | `js-agents-prep+js-agents-stream+js-agents-index` (prefix `js-agents-control+` for the same load as plain threads) | Subagents: a parent with 20 agents (8 streaming), its tray open, ~420 threads in the sidebar, the external poll at 3 s | tray "20 subagents · 8 working", stream p50 like the control, index update < 1 ms |
 | `run.js-goals` | Goal timers in 10 windows: shown, culled, canvas hidden | only shown windows' spans change; all 0 with the canvas hidden |
 | `js-codex-app-messages+rstream+rstreamtype+rstreamscroll+rcards` | Every user message in the Codex app's wrapped format (files, a referenced chat, a mention), then streaming | head no slower than base |
+| `js-viz-prep+rpan+rcards+rstream+rstreamscroll+still` (prefix `js-viz-anim+` for frames that always animate; set `__vizCount`, `__vizStyle` or `__vizDoc` in an earlier step to vary them) | Codex visualizations: the last reply in up to 8 windows on screen ends with a `visualize` reference, shown in a sandboxed frame (a stand-in for the skill's runtime) | frames sized (`sized` = `frames`); with frames on screen pan and cards cost more (see rules 3.5), stream, scroll and still don't |
+| `run.js-viz-statedoc+js-viz-prep+js-viz-cull` | Frames whose widget saves state, culled out of the document and back | `loads` > 0 (they reload), each culled frame's height one more after than before (state kept) |
+| `js-usage-home+js-usage-read+rstream+still` | A first usage read that takes 20 s (running totals every 120 ms) while the home screen is built but hidden behind the canvas | `still` script near 0 (~50 ms per 3 s is the probe's own engine), stream like without the read |
 | `run.js-nav-modes`, `run.js-nav-board`, `run.js-nav-load` | What `--suite nav` runs, one at a time | see reference values |
 
 Writing one: a page script is an expression (usually an async IIFE) returning a JSON-able value.

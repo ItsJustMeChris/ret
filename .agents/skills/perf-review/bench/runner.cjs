@@ -168,8 +168,10 @@ app.whenReady().then(async () => {
       const tn = new Map();
       for (const e of events) if (e.ph === 'M' && e.name === 'thread_name') tn.set(`${e.pid}:${e.tid}`, e.args.name);
       const thread = (e) => tn.get(`${e.pid}:${e.tid}`) || '?';
+      // The page's renderer only: sandboxed frames (Codex visualizations) run in a process of their own.
+      const pagePid = win.webContents.getOSProcessId();
       // The measured window: from the renderer's first BeginMainFrame to its last.
-      const main = events.filter((e) => e.ph === 'X' && thread(e) === 'CrRendererMain');
+      const main = events.filter((e) => e.ph === 'X' && thread(e) === 'CrRendererMain' && e.pid === pagePid);
       const bmf = main.filter((e) => e.name === 'ProxyMain::BeginMainFrame').sort((a, b) => a.ts - b.ts);
       const t0 = bmf.length ? bmf[0].ts : 0, t1 = bmf.length ? bmf[bmf.length - 1].ts + bmf[bmf.length - 1].dur : 0;
       const inWin = (e) => e.ts >= t0 && e.ts <= t1;
@@ -177,6 +179,7 @@ app.whenReady().then(async () => {
       const tasks = main.filter((e) => e.name === 'RunTask' && inWin(e));
       const by = (name) => sumT(main.filter((e) => e.name === name && inWin(e)));
       const gpuTasks = events.filter((e) => e.ph === 'X' && thread(e) === 'CrGpuMain' && e.name === 'RunTask' && inWin(e));
+      const frameTasks = events.filter((e) => e.ph === 'X' && thread(e) === 'CrRendererMain' && e.pid !== pagePid && e.name === 'RunTask' && inWin(e));
       // Main-thread CPU between consecutive frames.
       const iv = [];
       for (let i = 1; i < bmf.length; i++) iv.push(sumT(tasks.filter((e) => e.ts >= bmf[i - 1].ts && e.ts < bmf[i].ts)));
@@ -184,7 +187,7 @@ app.whenReady().then(async () => {
       const q = (p) => (iv.length ? Math.round(iv[Math.min(iv.length - 1, Math.floor(iv.length * p))] * 100) / 100 : 0);
       const r2 = (v) => Math.round(v * 100) / 100;
       const out = typeof res === 'object' && res && res.fps ? { fps: res.fps, frameP95: res.p95, longFrames: res.loafs } : res;
-      console.log(JSON.stringify({ step: sc, res: out, frames: bmf.length, p50: q(0.5), p95: q(0.95), p99: q(0.99), secs: r2((t1 - t0) / 1e6), mainCpu: r2(sumT(tasks)), gpuCpu: r2(sumT(gpuTasks)), script: r2(by('FunctionCall')), style: r2(by('UpdateLayoutTree')), layout: r2(by('Layout')), layerize: r2(by('Layerize')), paint: r2(by('Paint')), walk: r2(by('LocalFrameView::performPostLayoutTasks')), ro: r2(by('LocalFrameView::NotifyResizeObservers')) }));
+      console.log(JSON.stringify({ step: sc, res: out, frames: bmf.length, p50: q(0.5), p95: q(0.95), p99: q(0.99), secs: r2((t1 - t0) / 1e6), mainCpu: r2(sumT(tasks)), gpuCpu: r2(sumT(gpuTasks)), ...(frameTasks.length ? { framesCpu: r2(sumT(frameTasks)) } : {}), script: r2(by('FunctionCall')), style: r2(by('UpdateLayoutTree')), layout: r2(by('Layout')), layerize: r2(by('Layerize')), paint: r2(by('Paint')), walk: r2(by('LocalFrameView::performPostLayoutTasks')), ro: r2(by('LocalFrameView::NotifyResizeObservers')) }));
     }
   } else if (kind === 'trace') {
     await contentTracing.startRecording({ included_categories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'blink', 'cc', 'v8.execute', 'blink.user_timing', ...(process.env.EXTRA ? process.env.EXTRA.split(',') : [])] });
@@ -195,13 +198,16 @@ app.whenReady().then(async () => {
     const names = new Map();
     for (const e of events) if (e.ph === 'M' && e.name === 'thread_name') names.set(`${e.pid}:${e.tid}`, e.args.name);
     const threadOf = (e) => names.get(`${e.pid}:${e.tid}`) || '?';
-    const group = (n) => (n === 'CrRendererMain' ? 'main' : /Worker/.test(n) ? 'worker' : /Compositor/.test(n) ? 'compositor' : /CrGpuMain/.test(n) ? 'gpu' : /Raster/.test(n) ? 'raster' : null);
+    const pagePid = win.webContents.getOSProcessId();
+    // "frames": the main threads of other renderers, where sandboxed frames (Codex visualizations) run.
+    const groupOf = (n) => (n === 'CrRendererMain' ? 'main' : /Worker/.test(n) ? 'worker' : /Compositor/.test(n) ? 'compositor' : /CrGpuMain/.test(n) ? 'gpu' : /Raster/.test(n) ? 'raster' : null);
+    const group = (n, e) => (n === 'CrRendererMain' && e.pid !== pagePid ? 'frames' : groupOf(n));
     // Traces run to hundreds of MB: kept only when asked for (KEEP_TRACE=1, e.g. to open in DevTools).
     if (process.env.KEEP_TRACE === '1') console.log(JSON.stringify({ trace: file }));
     else fs.unlinkSync(file);
     if (process.env.WORST) {
       // The longest main-thread tasks, and what took the time inside each.
-      const main = events.filter((e) => e.ph === 'X' && e.dur && threadOf(e) === 'CrRendererMain');
+      const main = events.filter((e) => e.ph === 'X' && e.dur && threadOf(e) === 'CrRendererMain' && e.pid === pagePid);
       const longest = main.filter((e) => e.name === 'RunTask').sort((a, b) => b.dur - a.dur).slice(0, Number(process.env.WORST));
       for (const t of longest) {
         const inner = new Map();
@@ -216,7 +222,7 @@ app.whenReady().then(async () => {
       const sums = new Map();
       for (const e of events) {
         if (e.ph !== 'X' || !want.some((w) => e.name.includes(w))) continue;
-        const g = group(threadOf(e));
+        const g = group(threadOf(e), e);
         if (!g) continue;
         const k = `${g.padEnd(10)} ${e.name}`;
         const c = sums.get(k) || { n: 0, ms: 0 };
@@ -230,7 +236,7 @@ app.whenReady().then(async () => {
     const sums = new Map();
     for (const e of events) {
       if (e.ph !== 'X' || !e.dur) continue;
-      const g = group(threadOf(e));
+      const g = group(threadOf(e), e);
       if (!g) continue;
       const k = `${g} ${e.name}`;
       const c = sums.get(k) || { n: 0, ms: 0 };
