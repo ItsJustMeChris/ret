@@ -16,6 +16,18 @@ export interface RemoteClient extends PairedDevice {
   /** Connected right now (from this address). */
   connected: boolean;
   address: string | null;
+  /** It asked to be notified (a phone, through its push service) of what happens while it's away. */
+  notifications: boolean;
+}
+
+/**
+ * Something a paired phone hears about while it's away (its app closed or in the background): a
+ * turn that finished or failed, or an agent waiting on you. Sent through the phone's push service.
+ */
+export interface DeviceNotice {
+  title: string;
+  body: string;
+  threadId: string | null;
 }
 
 /** A device whose Ret this one uses: its engines, threads and files show up here as its own. */
@@ -69,6 +81,16 @@ export function hostKeyOf(deviceId: string): string {
   return deviceId.slice(0, 16).toLowerCase();
 }
 
+/** A device's name as another one tells it: no control characters, and not too long. */
+export function cleanName(name: unknown): string {
+  return (
+    String(name ?? "")
+      .replace(/[\u0000-\u001f\u007f]/g, "")
+      .trim()
+      .slice(0, 64) || "Unnamed device"
+  );
+}
+
 /** The short form of a device id people compare: ABCD-EF12-3456. */
 export function shortDeviceId(id: string): string {
   return (id.slice(0, 12).toUpperCase().match(/.{4}/g) ?? []).join("-");
@@ -103,5 +125,6 @@ export function noRemoteAccess(reason: string): RetBridge["remoteAccess"] {
     pair: fail,
     forget: fail,
     discover: () => {},
+    notifyDevices: () => {},
   };
 }

@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { Check, Copy, ExternalLink, FileCode2, FileWarning, FolderOpen, LoaderCircle, Pencil, RotateCw, Save } from "lucide-react";
 import type * as Monaco from "monaco-editor/editor/editor.api.js";
 import { fsClient } from "../../rpc/client";
+import { readText } from "../../lib/fileText";
 import { bridge, isDesktop } from "../../bridge";
 import { copyText, openFileRef, revealLabel } from "../../lib/files";
 import { shortPath } from "../../lib/format";
@@ -10,28 +11,9 @@ import { fileHost, filePath } from "../../state/ui";
 import { fileBuffers, setFileDirty, useFiles, watchPath } from "../../state/files";
 import { useConn } from "../../state/conn";
 
-const MAX_BYTES = 8 * 1024 * 1024;
-
 type MonacoModule = typeof import("../../lib/monaco");
 let monacoModule: Promise<MonacoModule> | null = null;
 const loadMonaco = () => (monacoModule ??= import("../../lib/monaco"));
-
-/** Through the app-server, so it works in the desktop app and the web build alike (and for a paired device's files, `device`). */
-async function readText(path: string, device: string | null): Promise<{ text: string } | { binary: true } | { large: number }> {
-  if (isDesktop) {
-    const st = await bridge.files.stat(path, device);
-    if (!st.exists) throw new Error("File not found");
-    if (st.isDir) throw new Error("That's a folder");
-    if (st.size && st.size > MAX_BYTES) return { large: st.size };
-  }
-  const res = (await fsClient(device).request("fs/readFile", { path })) as { dataBase64: string };
-  const raw = atob(res.dataBase64);
-  if (raw.length > MAX_BYTES) return { large: raw.length };
-  const bytes = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-  if (bytes.subarray(0, 8000).includes(0)) return { binary: true };
-  return { text: new TextDecoder("utf-8").decode(bytes) };
-}
 
 async function writeText(path: string, text: string, device: string | null) {
   const bytes = new TextEncoder().encode(text);

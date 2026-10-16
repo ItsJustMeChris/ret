@@ -166,6 +166,7 @@ function Hosting({ state }: { state: RemoteState }) {
             </div>
             <div className="muted small">
               {c.connected ? `From ${c.address}` : `Last connected ${ago(c.lastSeen)}`} · device {shortDeviceId(c.id)}
+              {c.notifications && " · notified while away"}
             </div>
           </div>
           <button className="btn ghost" title={`Stop letting ${c.name} in`} onClick={() => void attempt(() => bridge.remoteAccess.revoke(c.id))}>

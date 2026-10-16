@@ -4,7 +4,7 @@ import { useThread } from "../../state/useThread";
 import { takesDirectInput } from "../../state/projects";
 import { agentOf } from "../../agents";
 import { focusComposer, sendFromComposer } from "../../state/composerDrafts";
-import { openQuestionItems, reopenQuestion, useQuestionDismissed } from "./QuestionDock";
+import { openQuestionItems, reopenQuestion, useQuestionDismissed } from "../../state/questionFlow";
 
 /** True while `itemId` is in the thread's latest turn and nothing is running: the moment to answer. */
 function useAnswerable(threadId: string, itemId: string): boolean {

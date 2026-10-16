@@ -1,23 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Gauge, ListChecks, LoaderCircle, LogIn, Paperclip, Rocket, Settings2, Shield, ShieldAlert, ShieldCheck, Square, X, Zap } from "lucide-react";
-import { engineId, hostOf, providerOf, type ProviderId } from "@shared/bridge";
 import { useThread } from "../../state/useThread";
-import { useUI, isDraft, type ComposerPrefs } from "../../state/ui";
-import { useConn, useEnabledProvidersOn } from "../../state/conn";
+import { isDraft } from "../../state/ui";
 import { hostName } from "../../state/hosts";
-import { hostOfKey } from "../../state/projects";
-import { interrupt, isWritingFinalAnswer, sendMessage, setDraftProvider, startLogin, type Attachment, type TurnOverrides } from "../../state/actions";
-import { PROVIDERS, accessFor, agentOf, pickProvider } from "../../agents";
+import { interrupt, isWritingFinalAnswer, sendMessage, startLogin, type Attachment } from "../../state/actions";
 import { bridge, isDesktop } from "../../bridge";
 import { toast } from "../../state/toasts";
-import { Select, type SelectOption } from "../ui/Select";
+import { Select } from "../ui/Select";
 import { QueueTray } from "./QueueTray";
 import { GoalBar } from "./GoalBar";
 import { AgentTray } from "./Subagents";
 import { ScreenDock } from "./ComputerUse";
 import { composerDrafts as drafts, composerFocus, takeAttachments } from "../../state/composerDrafts";
 import { addFilesToThread } from "../../state/attach";
-import { QuestionDock, useQuestionFlow, type QuestionFlow } from "./QuestionDock";
+import { QuestionDock } from "./QuestionDock";
+import { useQuestionFlow, type QuestionFlow } from "../../state/questionFlow";
+import { useComposerSettings } from "../../state/composerSettings";
 import { useVisibility } from "../ui/Kept";
 
 /** Access choices escalate: default, careful, in-between, everything. */
@@ -31,49 +29,11 @@ const ACCESS_ICON: Record<string, React.ReactNode> = {
   bypassPermissions: <ShieldAlert size={13} />,
 };
 
-function accessOptions(provider: ProviderId): SelectOption[] {
-  return PROVIDERS[provider].access.map((o) => ({
-    value: o.id,
-    label: o.id === "config" ? "Config default" : o.label,
-    description: o.title,
-    icon: ACCESS_ICON[o.id] ?? <Shield size={13} />,
-  }));
-}
-
-/** Model menu values carry their agent, so one menu can list every agent's models. */
-const modelKey = (provider: ProviderId, model: string) => `${provider}::${model}`;
-function parseModelKey(value: string): { provider: ProviderId; model: string } {
-  const at = value.indexOf("::");
-  return { provider: value.slice(0, at) as ProviderId, model: value.slice(at + 2) };
-}
-
-/** Remember settings picked for a new thread with this provider, for the next one. */
-function rememberPrefs(provider: ProviderId, patch: TurnOverrides) {
-  useUI.setState((s) => {
-    const prev = s.composerBy?.[provider] ?? (provider === "codex" ? s.composer : { model: null, effort: null, access: "config" });
-    const merged = { ...prev, ...patch, access: patch.access ?? prev.access } as ComposerPrefs;
-    return { composerBy: { ...s.composerBy, [provider]: merged }, ...(provider === "codex" ? { composer: merged } : {}) };
-  });
-}
-
-/** Last-used settings for a new thread with this provider. */
-function lastUsed(provider: ProviderId): TurnOverrides {
-  const ui = useUI.getState();
-  const prefs: ComposerPrefs | undefined = ui.composerBy?.[provider] ?? (provider === "codex" ? ui.composer : undefined);
-  if (!prefs) return {};
-  return { model: prefs.model, effort: prefs.effort, access: accessFor(provider, prefs.access), speed: prefs.speed };
-}
-
 const SPEED_ICON: Record<string, React.ReactNode> = {
   default: <Gauge size={13} />,
   priority: <Zap size={13} />,
   ultrafast: <Rocket size={13} />,
 };
-
-const titleCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
-/** Per-thread setting overrides survive switching tabs/windows (as does unsent text, in composerDrafts). */
-const overrides = new Map<string, TurnOverrides>();
 
 /** Focus a textarea with the caret after its text, ready to keep typing. */
 function focusAtEnd(el: HTMLTextAreaElement | null) {
@@ -115,59 +75,8 @@ export function Composer({
   });
   // Another Codex process owns the current turn; writing to the same thread from here could corrupt it.
   const elsewhere = useThread(threadId, (s) => !!s.external[threadId]);
-  // The agent this thread runs on: its owner, or for a new thread the one picked in this composer.
-  const draft = isDraft(threadId);
-  const owner = useThread(threadId, (s) => s.owner[threadId]);
-  const chosen = useUI((s) => s.drafts[threadId]?.provider);
-  const draftProject = useUI((s) => s.drafts[threadId]?.projectKey);
-  const lastAgent = useUI((s) => s.lastAgent);
-  // The device it runs on: the draft's project's, or the thread's engine's. Its agents, models and sign-in are that device's.
-  const host = draft ? (draftProject ? hostOfKey(draftProject) : null) : owner ? hostOf(owner) : null;
-  const enabled = useEnabledProvidersOn(host);
-  const provider: ProviderId = draft ? pickProvider(enabled, chosen, lastAgent) : providerOf(owner ?? "codex");
-  const engine = engineId(provider, host);
-  const agent = PROVIDERS[provider];
-  const needsSignIn = useConn((s) => {
-    const c = s.providers[engine];
-    return !!c && c.status?.state === "running" && c.accountLoaded && !c.account?.account && !!c.account?.requiresOpenaiAuth;
-  });
-  // What the thread actually runs with, once its engine has said (see hydrateThread).
-  const threadAccess = useThread(threadId, (s) => {
-    const st = s.live[threadId]?.settings;
-    return st ? (st.access ?? agentOf(s.owner[threadId] ?? "codex").accessOf?.(st.approvalPolicy, st.sandbox) ?? null) : null;
-  });
-  const threadModel = useThread(threadId, (s) => s.live[threadId]?.settings?.model ?? s.threads[threadId]?.model ?? null);
-  const threadEffort = useThread(threadId, (s) => s.live[threadId]?.settings?.effort ?? s.threads[threadId]?.reasoningEffort ?? null);
-  // Known once the thread is loaded in the app-server; undefined means "not known yet".
-  const threadTier = useThread(threadId, (s) => {
-    const st = s.live[threadId]?.settings;
-    return st ? (st.serviceTier ?? "default") : undefined;
-  });
-  const conns = useConn((s) => s.providers);
-  const modelsOf = (p: ProviderId) => conns[engineId(p, host)]?.models ?? [];
-  const models = modelsOf(provider);
-  const hasModes = useConn((s) => !!s.providers[engine]?.modes.some((m) => m.mode === "plan"));
-  const threadMode = useThread(threadId, (s) => s.live[threadId]?.settings?.mode ?? null);
-  const configTier = useConn((s) => s.providers[engine]?.defaults.serviceTier ?? null);
-  // New threads start from the last-used settings for their agent; existing threads from their own.
-  const [over, setOver] = useState<TurnOverrides>(() => overrides.get(threadId) ?? (draft ? lastUsed(provider) : {}));
-  const setPrefs = (patch: TurnOverrides) => {
-    const next = { ...over, ...patch };
-    setOver(next);
-    overrides.set(threadId, next);
-    if (draft) rememberPrefs(provider, patch);
-  };
-  /**
-   * A new thread picking another agent's model moves to that agent, with its last-used settings
-   * and the model picked.
-   */
-  const switchProvider = (next: ProviderId, model: string) => {
-    setDraftProvider(threadId, next);
-    rememberPrefs(next, { model, effort: null });
-    const prefs = { ...lastUsed(next), mode: over.mode };
-    setOver(prefs);
-    overrides.set(threadId, prefs);
-  };
+  const settings = useComposerSettings(threadId);
+  const { host, provider, agent, needsSignIn, hasModes, planning, togglePlan, setPrefs, effectiveOverrides } = settings;
 
   useEffect(() => {
     drafts.set(threadId, text);
@@ -246,10 +155,6 @@ export function Composer({
       setSending(false);
     }
   };
-
-  // Plan mode: the agent thinks it through, can ask you questions, and proposes a plan before changing anything.
-  const planning = (over.mode ?? threadMode) === "plan";
-  const togglePlan = () => setPrefs({ mode: planning ? "default" : "plan" });
 
   // The agent's questions dock on top of the box: number keys pick, and what you type answers "Other".
   // An answer steers the running turn (async questions leave it running), or starts the next one.
@@ -342,52 +247,6 @@ export function Composer({
     const path = await bridge.dialog.pickFile([{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }]);
     if (path) setAttachments((a) => [...a, { path, name: path.split(/[\\/]/).pop() ?? "image" }]);
   };
-
-  const defaultModel = models.find((m) => m.isDefault);
-  const currentModel = over.model ?? threadModel ?? defaultModel?.id ?? null;
-  const modelInfo = models.find((m) => m.id === currentModel || m.model === currentModel);
-  const currentEffort = over.effort ?? threadEffort ?? modelInfo?.defaultReasoningEffort ?? null;
-  const access = accessFor(provider, over.access ?? threadAccess ?? "config");
-
-  // Speed tiers are per model (e.g. Fast + Ultrafast on some, Fast only or none on others).
-  const tiers = modelInfo?.serviceTiers ?? [];
-  const supports = (tier: string) => tier === "default" || tiers.some((t) => t.id === tier);
-  const wantedSpeed = over.speed ?? threadTier ?? configTier ?? "default";
-  const currentSpeed = supports(wantedSpeed) ? wantedSpeed : "default";
-
-  /** What gets sent: an unsupported speed becomes an explicit "standard" rather than being dropped silently. */
-  function effectiveOverrides(): TurnOverrides {
-    const speed = over.speed === undefined ? undefined : supports(over.speed) ? over.speed : "default";
-    return { ...over, speed };
-  }
-
-  // A new thread lists every agent's models (picking one picks the agent); a thread keeps to its own agent's.
-  const pickable = draft ? enabled.filter((p) => p === provider || modelsOf(p).length) : [provider];
-  const grouped = pickable.length > 1;
-  const modelOptions: SelectOption[] = pickable.flatMap((p) => {
-    const opts: SelectOption[] = modelsOf(p).map((m) => ({ value: modelKey(p, m.id), label: m.displayName || m.id, description: m.description || undefined }));
-    if (p === provider && currentModel && !modelInfo) opts.unshift({ value: modelKey(p, currentModel), label: currentModel });
-    return grouped ? opts.map((o) => ({ ...o, group: PROVIDERS[p].name })) : opts;
-  });
-  const pickModel = (value: string) => {
-    const { provider: p, model } = parseModelKey(value);
-    // New threads start on the last model picked, whichever agent runs it.
-    if (draft) useUI.setState({ lastAgent: p });
-    if (p !== provider) switchProvider(p, model);
-    else setPrefs({ model, effort: null });
-  };
-  const effortOptions: SelectOption[] = (modelInfo?.supportedReasoningEfforts ?? []).map((e) => ({
-    value: e.reasoningEffort,
-    label: titleCase(e.reasoningEffort),
-    description: e.description || undefined,
-  }));
-  if (currentEffort && !effortOptions.some((o) => o.value === currentEffort)) {
-    effortOptions.unshift({ value: currentEffort, label: titleCase(currentEffort) });
-  }
-  const speedOptions: SelectOption[] = [
-    { value: "default", label: "Standard", description: "Normal speed and usage", icon: SPEED_ICON.default },
-    ...tiers.map((t) => ({ value: t.id, label: t.name, description: t.description, icon: SPEED_ICON[t.id] ?? <Zap size={13} /> })),
-  ];
 
   return (
     <>
@@ -486,36 +345,36 @@ export function Composer({
               <span>Plan</span>
             </button>
           )}
-          {modelOptions.length > 0 && (
+          {settings.modelOptions.length > 0 && (
             <Select
-              value={currentModel ? modelKey(provider, currentModel) : ""}
-              options={modelOptions}
-              onChange={pickModel}
-              title={grouped ? "Model (and the agent that runs it)" : `${agent.name} model`}
+              value={settings.model}
+              options={settings.modelOptions}
+              onChange={settings.pickModel}
+              title={settings.modelsGrouped ? "Model (and the agent that runs it)" : `${agent.name} model`}
               menuMinWidth={300}
               className="sel-model"
             />
           )}
-          {effortOptions.length > 0 && (
-            <Select value={currentEffort ?? ""} options={effortOptions} onChange={(v) => setPrefs({ effort: v })} title="Reasoning effort" menuMinWidth={240} />
+          {settings.effortOptions.length > 0 && (
+            <Select value={settings.effort ?? ""} options={settings.effortOptions} onChange={(v) => setPrefs({ effort: v })} title="Reasoning effort" menuMinWidth={240} />
           )}
-          {tiers.length > 0 && (
+          {settings.speedOptions.length > 0 && (
             <Select
-              value={currentSpeed}
-              options={speedOptions}
+              value={settings.speed}
+              options={settings.speedOptions.map((o) => ({ ...o, icon: SPEED_ICON[o.value] ?? <Zap size={13} /> }))}
               onChange={(v) => setPrefs({ speed: v })}
               title="Speed"
               menuMinWidth={260}
-              className={`collapsible speed-${currentSpeed}`}
+              className={`collapsible speed-${settings.speed}`}
             />
           )}
           <Select
-            value={access}
-            options={accessOptions(provider)}
+            value={settings.access}
+            options={settings.accessOptions.map((o) => ({ ...o, icon: ACCESS_ICON[o.value] ?? <Shield size={13} /> }))}
             onChange={(v) => setPrefs({ access: v })}
             title={agent.accessLabel}
             menuMinWidth={280}
-            className={`collapsible access-${access}`}
+            className={`collapsible access-${settings.access}`}
           />
         </div>
         {running && !text.trim() ? (

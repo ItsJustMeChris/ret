@@ -17,6 +17,8 @@ export interface PeerRecord extends PairedDevice {
   address?: string;
   port?: number;
   platform?: string;
+  /** Clients only: the phone's push token, if it asked to be notified while it's away (see push.ts). */
+  push?: string;
 }
 
 export interface RemoteSettings {

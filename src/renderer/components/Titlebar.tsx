@@ -1,6 +1,6 @@
 import { AppWindow, Code2, Command, Inbox, PanelLeft, Rows3 } from "lucide-react";
 import { useUI } from "../state/ui";
-import { useInboxCount } from "./inbox/InboxView";
+import { useInboxCount } from "../state/inbox";
 import { useConn, useEnabledProviders } from "../state/conn";
 import { PROVIDERS } from "../agents";
 import { useThreads } from "../state/threads";

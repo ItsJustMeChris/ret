@@ -702,6 +702,13 @@ function registerIpc() {
   ipcMain.handle(IPC.remotePair, (_e, target: { address: string; port: number }, code: string) => remote.pair(target, String(code)));
   ipcMain.handle(IPC.remoteForget, (_e, id: string) => remote.forget(String(id)));
   ipcMain.on(IPC.remoteDiscover, () => remote.discover());
+  ipcMain.on(IPC.remoteNotify, (_e, n: { title?: unknown; body?: unknown; threadId?: unknown }) =>
+    remote.notifyDevices({
+      title: String(n?.title ?? "").slice(0, 200),
+      body: String(n?.body ?? "").slice(0, 500),
+      threadId: typeof n?.threadId === "string" ? n.threadId : null,
+    }),
+  );
 }
 
 function installMenu() {

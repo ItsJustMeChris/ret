@@ -1,7 +1,8 @@
 import { memo } from "react";
 import { Code2, Inbox } from "lucide-react";
 import { appKind, useUI } from "../../state/ui";
-import { InboxView, useInboxCount } from "../inbox/InboxView";
+import { InboxView } from "../inbox/InboxView";
+import { useInboxCount } from "../../state/inbox";
 import { CodeView } from "../code/CodeView";
 import { filePath } from "../../state/ui";
 

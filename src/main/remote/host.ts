@@ -2,12 +2,15 @@ import { randomBytes, randomInt } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import tls, { type TLSSocket } from "node:tls";
 import { PROVIDER_IDS, type ProviderId, type ProvidersSettings } from "../../shared/bridge";
-import { REMOTE_DEFAULT_PORT, REMOTE_PROTOCOL_VERSION } from "../../shared/remote";
+import { REMOTE_DEFAULT_PORT, REMOTE_PROTOCOL_VERSION, cleanName, hostKeyOf, type DeviceNotice } from "../../shared/remote";
 import { peerId } from "./cert";
 import type { AgentMux, MuxClient } from "./mux";
 import { PAIR_EXPORTER_LABEL, Pake, confirmTag, pairingChannel, tagsEqual } from "./pake";
+import { EXPO_TOKEN, sendExpoPush, type PushSender } from "./push";
 import type { RemoteStore } from "./store";
 import { Wire } from "./wire";
+
+export { cleanName };
 
 /** What a connected device may ask of this one beyond the engines: an allowlist, nothing generic. */
 export type HostCalls = Record<string, (...args: any[]) => unknown>;
@@ -20,6 +23,8 @@ export interface HostDeps {
   changed(): void;
   /** A paired device connected (shown to whoever sits at this one). */
   connected(name: string): void;
+  /** How notices reach phones that are away (Expo's push service; tests pass their own). */
+  push?: PushSender;
 }
 
 const PAIRING_MS = 120_000;
@@ -136,6 +141,40 @@ export class RemoteHost {
     this.deps.changed();
   }
 
+  /**
+   * Tell the paired phones that asked to be notified, unless they're in front right now (connected
+   * and not away): they see it already. Dead tokens (the app was removed) are forgotten.
+   */
+  notifyDevices(notice: DeviceNotice) {
+    const store = this.deps.store;
+    const attending = new Set([...this.sessions].filter((s) => s.live && !s.away && s.deviceId).map((s) => s.deviceId));
+    const targets = store.clients.filter((c) => c.push && !attending.has(c.id));
+    if (!targets.length) return;
+    const data = { threadId: notice.threadId, host: hostKeyOf(this.id) };
+    const send = this.deps.push ?? sendExpoPush;
+    send(targets.map((c) => ({ to: c.push!, title: notice.title, body: notice.body, data }))).then(
+      (results) => {
+        const gone = targets.filter((_, i) => { const r = results[i]; return !!r && !r.ok && r.gone; });
+        for (const c of gone) delete c.push;
+        if (gone.length) {
+          store.saveClients();
+          this.deps.changed();
+        }
+      },
+      (err: Error) => console.warn("push:", err.message),
+    );
+  }
+
+  /** A connected phone's push token (null: it stopped wanting notices). */
+  setPush(s: HostSession, token: string | null) {
+    const record = this.deps.store.clients.find((c) => c.id === s.deviceId);
+    if (!record || (record.push ?? null) === token) return;
+    if (token) record.push = token;
+    else delete record.push;
+    this.deps.store.saveClients();
+    this.deps.changed();
+  }
+
   /** Devices connected right now, with where from. */
   connected(): Map<string, string | null> {
     const out = new Map<string, string | null>();
@@ -200,6 +239,8 @@ class HostSession {
   name = "";
   /** In a session (paired, past hello). */
   live = false;
+  /** The phone said its app went to the background: notices go to it as if it were gone. */
+  away = false;
   private stage: "hello" | "pairing" | "session" | "done" = "hello";
   private clients: Partial<Record<ProviderId, MuxClient>> = {};
   private helloTimer: NodeJS.Timeout;
@@ -314,6 +355,10 @@ class HostSession {
 
   private onSession(m: any) {
     if (m?.t === "call") void this.call(m);
+    else if (m?.t === "push") {
+      const token = typeof m.token === "string" && EXPO_TOKEN.test(m.token) ? m.token : null;
+      if (token || m.token === null) this.host.setPush(this, token);
+    } else if (m?.t === "away") this.away = m.away === true;
     else if (m?.t === "reset") {
       // The window on the other end reloaded: it starts over with each engine.
       for (const p of PROVIDER_IDS) this.host.deps.muxes[p].reset(this.clients[p]!);
@@ -349,15 +394,6 @@ class HostSession {
     this.host.sessionEnded(this);
     this.live = false;
   }
-}
-
-export function cleanName(name: unknown): string {
-  return (
-    String(name ?? "")
-      .replace(/[\u0000-\u001f\u007f]/g, "")
-      .trim()
-      .slice(0, 64) || "Unnamed device"
-  );
 }
 
 function bytes(b64: unknown, length: number): Buffer {

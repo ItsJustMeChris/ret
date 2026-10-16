@@ -1,7 +1,7 @@
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import { engineId, type EngineStatus, type EngineId, type ProviderId, type ProvidersSettings } from "../../shared/bridge";
-import { hostKeyOf, type RemoteState } from "../../shared/remote";
+import { hostKeyOf, type DeviceNotice, type RemoteState } from "../../shared/remote";
 import { Discovery } from "./discovery";
 import { RemoteHost, cleanName, type HostCalls } from "./host";
 import { HostLink, pairWithHost, type Target } from "./link";
@@ -75,7 +75,7 @@ export class RemoteAccess {
       error: this.host.error,
       pairing: this.host.pairing && { code: this.host.pairing.code, expiresAt: this.host.pairing.expiresAt },
       pairingResult: this.host.pairingResult,
-      clients: this.store.clients.map((c) => ({ ...c, connected: connected.has(c.id), address: connected.get(c.id) ?? null })),
+      clients: this.store.clients.map(({ push, ...c }) => ({ ...c, connected: connected.has(c.id), address: connected.get(c.id) ?? null, notifications: !!push })),
       hosts: this.store.hosts.map((h) => {
         const link = this.links.get(h.id);
         return {
@@ -153,6 +153,11 @@ export class RemoteAccess {
   revoke(id: string) {
     this.host.revoke(id);
     return this.state();
+  }
+
+  /** Paired phones that are away hear about it (see RemoteHost.notifyDevices). */
+  notifyDevices(notice: DeviceNotice) {
+    this.host.notifyDevices(notice);
   }
 
   broadcastProviders(settings: ProvidersSettings) {

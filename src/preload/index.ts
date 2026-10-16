@@ -85,6 +85,7 @@ const bridge: RetBridge = {
     pair: (target, code) => ipcRenderer.invoke(IPC.remotePair, target, code),
     forget: (id) => ipcRenderer.invoke(IPC.remoteForget, id),
     discover: () => ipcRenderer.send(IPC.remoteDiscover),
+    notifyDevices: (notice) => ipcRenderer.send(IPC.remoteNotify, notice),
   },
 };
 

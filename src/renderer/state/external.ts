@@ -1,4 +1,5 @@
 import { bridge } from "../bridge";
+import { appHasFocus, onAppFocus } from "../lib/appFocus";
 import { rpcFor } from "../rpc/client";
 import { PROVIDER_IDS, providerOf, type EngineId } from "@shared/bridge";
 import { PROVIDERS, agentOf } from "../agents";
@@ -65,7 +66,7 @@ function hook(e: EngineId) {
 export function startExternalWatcher() {
   if (started) return;
   started = true;
-  window.addEventListener("focus", kick);
+  onAppFocus(kick);
   watched();
   // A device paired later gets its engines watched from then on.
   useHosts.subscribe(() => watched());
@@ -73,7 +74,7 @@ export function startExternalWatcher() {
 
 function schedule() {
   clearTimeout(timer);
-  timer = window.setTimeout(() => void poll(), document.hasFocus() ? POLL_FOCUSED_MS : POLL_BLURRED_MS);
+  timer = window.setTimeout(() => void poll(), appHasFocus() ? POLL_FOCUSED_MS : POLL_BLURRED_MS);
 }
 
 async function poll() {
@@ -179,7 +180,7 @@ async function check(p: EngineId, t: Thread, moved: boolean) {
     if (!useThreads.getState().attended[t.id]) {
       useThreads.setState((s) => ({ unread: { ...s.unread, [t.id]: true } }));
     }
-    if (!visible || !document.hasFocus()) {
+    if (!visible || !appHasFocus()) {
       bridge.notify(last?.status === "failed" ? "Turn failed elsewhere" : `${engineName(p)} finished elsewhere`, threadTitle(t));
     }
   } else if (moved) {

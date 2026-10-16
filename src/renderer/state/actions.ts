@@ -1,4 +1,5 @@
 import { bridge } from "../bridge";
+import { appHasFocus, onAppFocus } from "../lib/appFocus";
 import { dropClient, rpcFor } from "../rpc/client";
 import { PROVIDER_IDS, engineId, hostOf, providerOf, type EngineId, type ProviderId, type ProvidersSettings } from "@shared/bridge";
 import type { ServerRequest, Thread, ThreadItem, UserInput } from "@shared/protocol";
@@ -76,15 +77,17 @@ export function bootstrap() {
       // Send the next queued follow-up (outside the reducer flush that called us).
       if (turn.status !== "failed") setTimeout(() => void drainQueue(threadId), 0);
       const visible = useThreads.getState().visible[threadId];
-      if ((!visible || !document.hasFocus()) && !delegated(useThreads.getState().threads[threadId], turn)) {
-        const title = threadTitle(useThreads.getState().threads[threadId]);
-        bridge.notify(turn.status === "failed" ? "Turn failed" : `${engineName(ownerOf(threadId))} finished`, title);
-      }
+      if (delegated(useThreads.getState().threads[threadId], turn)) return;
+      const title = threadTitle(useThreads.getState().threads[threadId]);
+      const heading = turn.status === "failed" ? "Turn failed" : `${engineName(ownerOf(threadId))} finished`;
+      if (!visible || !appHasFocus()) bridge.notify(heading, title);
+      // Paired phones that are away hear about this computer's own threads (theirs, they're told by their own computer).
+      if (!hostOfThread(threadId)) bridge.remoteAccess.notifyDevices({ title: heading, body: title, threadId });
     },
   });
 
   let lastRefresh = 0;
-  window.addEventListener("focus", () => {
+  onAppFocus(() => {
     if (Date.now() - lastRefresh < 30_000) return;
     lastRefresh = Date.now();
     void loadThreadList();
@@ -239,6 +242,9 @@ function wireEngine(p: EngineId) {
     if (req.method === "mcpServer/elicitation/request") noteAppRequest(req.params.threadId, req.params.turnId ?? "", req.params);
     if (threadId && !useThreads.getState().visible[threadId]) {
       bridge.notify(`${engineName(p)} needs your input`, threadTitle(useThreads.getState().threads[threadId]));
+    }
+    if (threadId && !hostOf(p)) {
+      bridge.remoteAccess.notifyDevices({ title: `${engineName(p)} needs your input`, body: threadTitle(useThreads.getState().threads[threadId]), threadId });
     }
   });
 

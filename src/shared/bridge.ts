@@ -1,7 +1,7 @@
 // Contract between the Electron main process and the renderer.
 // The renderer only ever sees `window.ret`, which implements RetBridge.
 
-import type { RemoteHost, RemoteState } from "./remote";
+import type { DeviceNotice, RemoteHost, RemoteState } from "./remote";
 
 /**
  * Agent backends Ret can drive. Each one is an *engine* in the main process that speaks the
@@ -246,6 +246,8 @@ export interface RetBridge {
     forget(hostId: string): Promise<RemoteState>;
     /** Look for devices on the network now. */
     discover(): void;
+    /** Tell paired phones that are away (see DeviceNotice); the ones in front see it already. */
+    notifyDevices(notice: DeviceNotice): void;
   };
 }
 
@@ -296,6 +298,7 @@ export const IPC = {
   remotePairStop: "remote:pairStop",
   remoteRevoke: "remote:revoke",
   remotePair: "remote:pair",
+  remoteNotify: "remote:notify",
   remoteForget: "remote:forget",
   remoteDiscover: "remote:discover",
   appInfo: "apps:info",
