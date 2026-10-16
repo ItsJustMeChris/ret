@@ -190,6 +190,7 @@ export function createMobileBridge(deps: MobileBridgeDeps): { bridge: RetBridge;
     files: {
       saveImage: async (data, ext, host) => (await linkTo(host)).call("files.saveImage", toBase64(new Uint8Array(data)), ext),
       stat: async (path, host) => (host ? (await linkTo(host)).call("files.stat", path) : { exists: false, isDir: false }),
+      visualization: async () => ({ error: "Visualizations show in Ret on your computer" }),
       pathFor: () => null,
     },
     apps: {

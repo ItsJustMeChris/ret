@@ -2,6 +2,7 @@ import {
   Bot,
   ClipboardPaste,
   Brain,
+  ChartColumn,
   Check,
   ChevronRight,
   FilePen,
@@ -26,6 +27,7 @@ import { memo, useMemo, useState, type ReactNode } from "react";
 import { Image, Pressable, ScrollView, Text, View } from "react-native";
 import type { FileUpdateChange, ThreadItem } from "@shared/protocol";
 import { parseCodexMessage } from "@ret/lib/codexMessage";
+import { splitContentRefs } from "@ret/lib/visualize";
 import { changeStats, duration, shortPath, unwrapCommand } from "@ret/lib/format";
 import { focusComposer, sendFromComposer } from "@ret/state/composerDrafts";
 import { agentName, takesDirectInput, threadTitle } from "@ret/state/projects";
@@ -192,7 +194,21 @@ function UserMessage({ item, ctx }: { item: Extract<ThreadItem, { type: "userMes
         {msg ? (
           msg.parts.length > 0 && (
             <Text selectable className="text-[15px] leading-[22px] text-text">
-              {msg.parts.map((p) => ("text" in p ? p.text : `“${p.title || "a chat"}”`)).join("")}
+              {msg.parts.map((p, i) =>
+                "text" in p ? (
+                  p.text
+                ) : "threadId" in p ? (
+                  `“${p.title || "a chat"}”`
+                ) : "mention" in p ? (
+                  <Text key={i} className="text-accent">
+                    @{p.mention}
+                  </Text>
+                ) : (
+                  <Text key={i} className={ctx.host ? "text-accent" : undefined} onPress={ctx.host ? () => open(p.file) : undefined}>
+                    {p.label}
+                  </Text>
+                ),
+              )}
             </Text>
           )
         ) : text ? (
@@ -239,8 +255,26 @@ function ChatRef({ id }: { id: string }) {
 function AgentMessage({ item, streaming, threadId }: { item: Extract<ThreadItem, { type: "agentMessage" }>; streaming: boolean; threadId: string }) {
   return (
     <View className="gap-2 px-0.5 py-0.5">
-      <Markdown text={item.text} muted={item.phase === "commentary"} />
+      {splitContentRefs(item.text, streaming).map((part, i) =>
+        part.kind === "text" ? (
+          <Markdown key={i} text={part.text} muted={item.phase === "commentary"} />
+        ) : (
+          <VisualizationNote key={i} title={part.kind === "viz" ? part.viz.title || part.viz.path.split(/[\\/]/).pop() : undefined} />
+        ),
+      )}
       {!streaming && item.questions?.length ? <ReplyQuestions threadId={threadId} itemId={item.id} /> : null}
+    </View>
+  );
+}
+
+/** A Codex visualization runs in a frame on the desktop; here just where it is (no title while it streams in). */
+function VisualizationNote({ title }: { title?: string }) {
+  return (
+    <View className="flex-row items-center gap-2 rounded-lg border border-line px-3 py-2.5">
+      <Icon icon={ChartColumn} size={13} colorClassName="accent-text-2" />
+      <Text numberOfLines={1} className="flex-1 text-[13px] text-text-2">
+        {title ? `Visualization: ${title}. Open it in Ret on your computer.` : "Preparing visualization…"}
+      </Text>
     </View>
   );
 }
