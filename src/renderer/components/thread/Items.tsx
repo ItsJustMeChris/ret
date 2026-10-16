@@ -1,8 +1,9 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import {
   Bot,
   Brain,
   Check,
+  ClipboardPaste,
   FileText,
   FolderOpen,
   Globe,
@@ -10,6 +11,8 @@ import {
   Image as ImageIcon,
   ListChecks,
   LoaderCircle,
+  MessageCircleQuestion,
+  MessagesSquare,
   Paperclip,
   Search,
   SquareTerminal,
@@ -21,7 +24,11 @@ import {
 import { Chevron } from "../ui/Chevron";
 import type { FileUpdateChange, ThreadItem } from "@shared/protocol";
 import { useThread } from "../../state/useThread";
-import { agentName } from "../../state/projects";
+import { useThreads } from "../../state/threads";
+import { agentName, threadTitle } from "../../state/projects";
+import { bridge } from "../../bridge";
+import { viewFile } from "../../lib/viewFile";
+import { parseCodexMessage } from "../../lib/codexMessage";
 import { StatusDot } from "../StatusDot";
 import { openFrom } from "./Subagents";
 import { changeStats, duration, shortPath, unwrapCommand } from "../../lib/format";
@@ -75,14 +82,20 @@ function Disclosure({
 
 // ---------------------------------------------------------------------------
 
-function UserMessage({ item, cwd, host }: { item: Extract<ThreadItem, { type: "userMessage" }>; cwd: string | null; host: string | null }) {
+function UserMessage({ item, ctx }: { item: Extract<ThreadItem, { type: "userMessage" }>; ctx: Ctx }) {
+  const { cwd, host } = ctx;
   const text = item.content
     .filter((c): c is Extract<typeof c, { type: "text" }> => c.type === "text")
     .map((c) => c.text)
     .join("\n");
+  // Written in the Codex app: its context sections become chips, and what you wrote reads as written.
+  const msg = useMemo(() => parseCodexMessage(text), [text]);
   // Images you sent show as pictures; anything else stays a chip.
   const images = item.content.filter((c) => c.type === "localImage" || c.type === "image");
   const files = item.content.filter((c) => c.type !== "text" && c.type !== "localImage" && c.type !== "image");
+  const pictured = new Set(images.map((c) => ("path" in c ? c.path : "")));
+  const mentioned = msg?.files.filter((f) => !(f.image && pictured.has(f.path))) ?? [];
+  const chips = files.length + mentioned.length + (msg?.chats.length ?? 0) + (msg?.browser ? 1 : 0);
   return (
     <div className="msg-user">
       <div className="bubble">
@@ -93,8 +106,33 @@ function UserMessage({ item, cwd, host }: { item: Extract<ThreadItem, { type: "u
             )}
           </div>
         )}
-        {text && <div className="user-text">{text}</div>}
-        {files.length > 0 && (
+        {msg?.quotes.map((q, i) => (
+          <blockquote key={i} className="user-quote">
+            {q.text}
+            {q.comment && <div className="user-quote-comment">{q.comment}</div>}
+          </blockquote>
+        ))}
+        {msg?.replies.map((r, i) => (
+          <div key={i} className="user-reply">
+            {r.question && (
+              <div className="user-reply-q">
+                <MessageCircleQuestion size={11} />
+                <span>{r.question}</span>
+              </div>
+            )}
+            <div className="user-text">{r.answer}</div>
+          </div>
+        ))}
+        {msg ? (
+          msg.parts.length > 0 && (
+            <div className="user-text">
+              {msg.parts.map((p, i) => ("text" in p ? p.text : <ChatRef key={i} id={p.threadId} title={p.title} from={ctx.threadId} inline />))}
+            </div>
+          )
+        ) : (
+          text && <div className="user-text">{text}</div>
+        )}
+        {chips > 0 && (
           <div className="attachments">
             {files.map((f, i) => (
               <span className="chip" key={i} data-path={"path" in f ? f.path : undefined}>
@@ -102,10 +140,46 @@ function UserMessage({ item, cwd, host }: { item: Extract<ThreadItem, { type: "u
                 {"path" in f ? shortPath(f.path) : "url" in f ? f.url : "attachment"}
               </span>
             ))}
+            {mentioned.map((f, i) => (
+              <button
+                key={`f${i}`}
+                className="chip chip-link"
+                data-path={f.path}
+                title={f.path}
+                onClick={() => void viewFile({ path: f.path }, cwd, ctx.threadId)}
+              >
+                {f.pasted ? <ClipboardPaste size={11} /> : f.image ? <ImageIcon size={11} /> : f.path.endsWith("/") ? <FolderOpen size={11} /> : <FileText size={11} />}
+                <span className="chip-text">{f.pasted ? f.label.replace(/…$/, "") || "Pasted text" : f.label}</span>
+              </button>
+            ))}
+            {msg?.chats.map((id) => <ChatRef key={id} id={id} title={null} from={ctx.threadId} />)}
+            {msg?.browser && (
+              <button className="chip chip-link" title={`Open in the Codex app's browser: ${msg.browser}`} onClick={() => void bridge.shell.openExternal(msg.browser!)}>
+                <Globe size={11} />
+                <span className="chip-text">{msg.browser.replace(/^https?:\/\//, "")}</span>
+              </button>
+            )}
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+/** A Codex chat referenced in a message: opens beside this thread when Ret knows it. */
+function ChatRef({ id, title, from, inline }: { id: string; title: string | null; from: string; inline?: boolean }) {
+  const thread = useThreads((s) => s.threads[id]);
+  const name = thread ? threadTitle(thread) : title || "Codex chat";
+  return (
+    <button
+      className={`chip chip-link ${inline ? "chip-inline" : ""}`}
+      disabled={!thread}
+      title={thread ? `Open “${name}”` : "A chat Ret doesn't have"}
+      onClick={(e) => openFrom(e, id, from)}
+    >
+      <MessagesSquare size={11} />
+      <span className="chip-text">{name}</span>
+    </button>
   );
 }
 
@@ -545,7 +619,7 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
   if (!item) return null;
   switch (item.type) {
     case "userMessage":
-      return <UserMessage item={item} cwd={ctx.cwd} host={ctx.host} />;
+      return <UserMessage item={item} ctx={ctx} />;
     case "agentMessage":
       return <AgentMessage item={item} streaming={live} threadId={ctx.threadId} />;
     case "reasoning":
