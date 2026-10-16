@@ -88,3 +88,22 @@ export interface ThreadBackgroundTasksUpdatedNotification {
   threadId: string;
   tasks: BackgroundTask[];
 }
+
+/**
+ * What one provider's agents did on each local day (YYYY-MM-DD), read from its transcripts on
+ * this computer: Ret's own `ret/usage/activity`, answered by the Claude Code engine and, for
+ * Codex, by Ret's main process ahead of the app-server. It covers the past year; days with
+ * nothing are left out. While a read is underway, running totals arrive as
+ * `account/usage/updated` with an `activity`.
+ */
+export interface UsageActivity {
+  days: Record<string, UsageDay>;
+}
+export interface UsageDay {
+  /** Tokens (input with cache, plus output), and the same split by model id. */
+  tokens: number;
+  models: Record<string, number>;
+  /** Prompts the user sent (not subagents or the agent's own follow-ups), and by local hour, 0–23. */
+  prompts: number;
+  hours: number[];
+}

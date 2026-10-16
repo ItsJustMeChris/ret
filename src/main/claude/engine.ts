@@ -18,11 +18,11 @@ import type { BackgroundTask, Model, RateLimitSnapshot, Thread, TurnWithPlan } f
 import type { RateLimitWindow } from "../../shared/protocol/generated/v2";
 import { FsService } from "../fsService";
 import { gitInfo } from "../git";
+import { dailyBuckets, LocalUsage } from "../usage";
 import { sameTasks, TranscriptBackground } from "./background";
 import { buildTurns, type HistoryTurn, type StoredMessage } from "./history";
 import { claudeAuthStatus, claudeConfigDir, claudeEnv } from "./platform";
 import { ClaudeSession, type ClaudeAccess, type SessionHost, type ThreadConfig } from "./session";
-import { TranscriptUsage } from "./usage";
 
 export interface ClaudeTarget {
   binary: string;
@@ -93,11 +93,15 @@ export class ClaudeEngine {
   /** What was last reported of it, per session; and whether a look is underway. */
   private reportedElsewhere = new Map<string, BackgroundTask[]>();
   private lookingElsewhere = false;
-  /** Tokens per day, tallied from transcripts (`account/usage/read`); running totals go out while a read is underway. */
-  private tokens = new TranscriptUsage(claudeConfigDir, (days) => this.notify("account/usage/updated", { dailyUsageBuckets: days }));
   /** Claude Code's own model entries (with what each resolves to) and the user's configured model, from the probe. */
   private modelInfos: { list: ModelInfo[]; configured: string | null } = { list: [], configured: null };
   private creating = new Map<string, Promise<ClaudeSession>>();
+
+  /**
+   * Tokens, models and prompts per day, tallied from transcripts (`account/usage/read`,
+   * `ret/usage/activity`) and kept next to Ret's state; running totals go out while a read is underway.
+   */
+  private activity: LocalUsage;
 
   constructor(
     private readonly stateFile: string,
@@ -106,6 +110,9 @@ export class ClaudeEngine {
     private readonly onStatus: (status: EngineStatus) => void,
   ) {
     this.host = this.makeHost();
+    this.activity = new LocalUsage("claude", () => [join(claudeConfigDir(), "projects")], join(dirname(stateFile), "claude-usage.json"), (activity) =>
+      this.notify("account/usage/updated", { dailyUsageBuckets: dailyBuckets(activity), activity }),
+    );
     try {
       this.state = { ...this.state, ...JSON.parse(readFileSync(stateFile, "utf8")) };
     } catch {
@@ -353,13 +360,15 @@ export class ClaudeEngine {
       }
       case "account/usage/read": {
         if (p?.threadId) throw rpcError("Per-thread usage isn't available for Claude Code", -32601);
-        const daily = await this.tokens.daily();
+        const daily = dailyBuckets(await this.activity.read());
         const peak = daily.reduce((m, d) => Math.max(m, d.tokens), 0);
         return {
           summary: { lifetimeTokens: null, peakDailyTokens: daily.length ? peak : null, longestRunningTurnSec: null, currentStreakDays: null, longestStreakDays: null },
           dailyUsageBuckets: daily,
         };
       }
+      case "ret/usage/activity":
+        return this.activity.read();
       case "account/login/start":
       case "account/logout":
         throw rpcError("Sign in and out with Claude Code itself (`claude auth login`).");

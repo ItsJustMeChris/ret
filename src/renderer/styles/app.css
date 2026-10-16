@@ -2740,6 +2740,7 @@ body.resizing .transcript {
 .side-panel h4,
 .empty-grid h4,
 .tok h4,
+.stats h4,
 .modal h4 {
   margin: 0 0 8px;
   font-size: 11px;
@@ -4081,7 +4082,7 @@ html.autoscrolling[data-autoscroll="down"] * {
   gap: 4px 16px;
   margin-bottom: 12px;
 }
-.tok .tok-head h4 {
+.tok-head h4 {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -4199,10 +4200,363 @@ html.autoscrolling[data-autoscroll="down"] * {
   right: 0;
   transform: none;
 }
+
+/* Usage overview (home screen): the past year's totals, a square per day, models and hours */
+.stats {
+  margin-top: 36px;
+  container: stats / inline-size;
+}
+.stats-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 30px;
+}
+/* Four across, or two by two: never one left over on a row of its own. */
+@container stats (width < 480px) {
+  .stats-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.stats-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.stats-tile span {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.stats-tile b {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--text);
+}
+.heat-body {
+  position: relative;
+  padding-left: 32px;
+}
+/*
+ * Weekday names on the rows they name: laid over the grid's height (under the month names' band),
+ * so a name taller than the cells, at narrow widths, overflows its row centered instead of
+ * stretching the rows apart.
+ */
+.heat-days {
+  position: absolute;
+  top: 18px;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  grid-template-rows: repeat(7, minmax(0, 1fr));
+  row-gap: 3px;
+  font-size: 10px;
+  line-height: 10px;
+  color: var(--text-3);
+}
+.heat-days span {
+  align-self: center;
+}
+.heat-main {
+  flex: 1;
+  min-width: 0;
+}
+.heat-months {
+  position: relative;
+  height: 14px;
+  margin-bottom: 4px;
+  font-size: 10px;
+  color: var(--text-3);
+}
+.heat-months span {
+  position: absolute;
+  white-space: nowrap;
+}
+.heat-grid {
+  display: flex;
+  gap: 3px;
+  border-radius: 3px;
+}
+.heat-grid:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 4px;
+}
+.heat-week {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+/* One hue, more is stronger: the empty step is the surface lifted, the top step the accent itself. */
+.heat-cell {
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: var(--bg-3);
+  transition: background-color 500ms var(--ease);
+}
+.heat-cell.later {
+  background: none;
+}
+.heat-cell.l1 {
+  background: color-mix(in srgb, var(--accent) 28%, var(--bg-3));
+}
+.heat-cell.l2 {
+  background: color-mix(in srgb, var(--accent) 50%, var(--bg-3));
+}
+.heat-cell.l3 {
+  background: color-mix(in srgb, var(--accent) 75%, var(--bg-3));
+}
+.heat-cell.l4 {
+  background: var(--accent);
+}
+.heat-cell.on {
+  outline: 1px solid var(--text-2);
+  outline-offset: 1px;
+}
+.heat-key {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 3px;
+  margin-top: 10px;
+  font-size: 10px;
+  color: var(--text-3);
+}
+.heat-key i {
+  width: 10px;
+}
+.heat-key i:first-of-type {
+  margin-left: 4px;
+}
+.heat-key i:last-of-type {
+  margin-right: 4px;
+}
+.stats-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 30px 40px;
+  margin-top: 34px;
+}
+.stats-models {
+  margin-top: 30px;
+}
+.top-models {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+  margin-top: 14px;
+}
+.top-model {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  column-gap: 12px;
+  align-items: start;
+}
+.model-mark {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  color: var(--text-2);
+}
+.model-mark.claude {
+  color: var(--series-claude);
+  stroke: currentColor;
+  stroke-width: 2.3;
+  stroke-linecap: round;
+}
+.model-mark.openai {
+  color: var(--text);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+.top-model-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  line-height: 20px;
+  color: var(--text);
+}
+.top-model-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.top-model-rank {
+  margin-top: -3px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+@container stats (width < 480px) {
+  .top-models {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+}
+.share {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  margin-top: 14px;
+}
+.share-donut {
+  position: relative;
+  flex: none;
+  width: 148px;
+}
+.share-donut svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 50%;
+}
+.share-donut svg:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 4px;
+}
+.share-slice {
+  fill: none;
+  transition:
+    opacity 200ms var(--ease),
+    stroke-dasharray 500ms var(--ease),
+    stroke-dashoffset 500ms var(--ease);
+}
+/* Pointing at a slice, or its row in the key, steps the others back. */
+.share.dim .share-slice:not(.on),
+.share.dim .share-row:not(.on) {
+  opacity: 0.4;
+}
+.share-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  pointer-events: none;
+}
+.share-center b {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--text);
+}
+.share-center span {
+  max-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.share-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.share-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text);
+  transition: opacity 200ms var(--ease);
+}
+.share-row i {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.share-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-pct {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.hours-arc {
+  position: relative;
+  max-width: 340px;
+  margin: 6px auto 0;
+  /* Room for the hour names under the arc's ends. */
+  padding-bottom: 16px;
+}
+.hours-arc svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  border-radius: 6px;
+}
+.hours-arc svg:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 4px;
+}
+/* An hour without prompts keeps the arc's shape as a speck; the busiest is the accent itself. */
+.hours-dot {
+  fill: var(--bg-4);
+  transition: fill 500ms var(--ease);
+}
+.hours-dot.peak {
+  fill: var(--accent);
+}
+.hours-ring {
+  fill: none;
+  stroke: var(--text-2);
+  stroke-width: 1;
+}
+.hours-center {
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, -100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.hours-center b {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--text);
+}
+.hours-center span {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.hours-end {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--text-3);
+  white-space: nowrap;
+  pointer-events: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .tok-stack,
   .tok-stack > div,
-  .tok-gridline {
+  .tok-gridline,
+  .heat-cell,
+  .share-slice,
+  .share-row,
+  .hours-dot {
     animation: none;
     transition: none;
   }

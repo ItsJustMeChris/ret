@@ -28,9 +28,20 @@ function lastDays(): string[] {
   });
 }
 
-function dayLabel(day: string, opts: Intl.DateTimeFormatOptions) {
+export function dayLabel(day: string, opts: Intl.DateTimeFormatOptions) {
   const [y, m, d] = day.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, opts);
+}
+
+/** The enabled providers' usage for the home screen, read when it's shown (again once a minute old). */
+export function useTokenUsage() {
+  const enabled = useEnabledProviders();
+  const usage = useConn(useShallow((s) => enabled.map((p) => s.providers[p].tokenUsage)));
+  const key = enabled.join();
+  useEffect(() => {
+    for (const p of enabled) void loadTokenUsage(p, 60_000);
+  }, [key]);
+  return { enabled, usage, loading: usage.some((u) => u?.loading) };
 }
 
 /**
@@ -41,17 +52,10 @@ function dayLabel(day: string, opts: Intl.DateTimeFormatOptions) {
  * running totals arrive.
  */
 export function TokenUsageChart() {
-  const enabled = useEnabledProviders();
-  const usage = useConn(useShallow((s) => enabled.map((p) => s.providers[p].tokenUsage)));
+  const { enabled, usage, loading } = useTokenUsage();
   const [hover, setHover] = useState<number | null>(null);
 
-  const key = enabled.join();
-  useEffect(() => {
-    for (const p of enabled) void loadTokenUsage(p, 60_000);
-  }, [key]);
-
   const days = lastDays();
-  const loading = usage.some((u) => u?.loading);
   const series = enabled.map((p, i) => ({ p, days: usage[i]?.days })).filter((s) => days.some((d) => s.days?.[d]));
   if (!series.length && !loading) return null;
 

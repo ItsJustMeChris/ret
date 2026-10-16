@@ -24,10 +24,11 @@ import { IMAGE_SCHEME, RUNNABLE, imageType } from "../shared/files";
 import { AppServer, type LaunchTarget } from "./codex/appServer";
 import { CodexUpdater } from "./codex/updater";
 import { AppUpdater } from "./appUpdate";
-import { findSystemCodex, probeVersion } from "./codex/platform";
+import { codexHome, findSystemCodex, probeVersion } from "./codex/platform";
 import { ClaudeEngine } from "./claude/engine";
 import { findSystemClaude, openLoginTerminal, probeClaudeVersion } from "./claude/platform";
 import { ClaudeUpdater } from "./claude/updater";
+import { LocalUsage } from "./usage";
 import { createWorktree, gitInfo, mainCheckouts } from "./git";
 import { AgentMux, RemoteAccess, type HostCalls, type MuxClient } from "./remote";
 import { appInfo } from "./apps";
@@ -137,7 +138,25 @@ const claude = new ClaudeEngine(
   (status) => muxes.claude.setEngineStatus(status),
 );
 
-muxes.codex = new AgentMux((line) => appServer.send(line), true, appServer.status);
+/**
+ * Codex's activity by day (tokens by model, prompts by hour), from its rollouts: Ret's own
+ * `ret/usage/activity`, answered here ahead of the app-server, which doesn't know it.
+ */
+const codexActivity = new LocalUsage("codex", () => [join(codexHome(), "sessions"), join(codexHome(), "archived_sessions")], null, (activity) =>
+  muxes.codex.fromEngine([JSON.stringify({ method: "account/usage/updated", params: { activity } })]),
+);
+const ACTIVITY_REQUEST = /^\{"id":("~\d+"),"method":"ret\/usage\/activity"/;
+
+function toCodex(line: string) {
+  const m = ACTIVITY_REQUEST.exec(line);
+  if (!m) return appServer.send(line);
+  codexActivity.read().then(
+    (result) => muxes.codex.fromEngine([`{"id":${m[1]},"result":${JSON.stringify(result)}}`]),
+    (err) => muxes.codex.fromEngine([JSON.stringify({ id: JSON.parse(m[1]), error: { code: -32603, message: String(err?.message ?? err) } })]),
+  );
+}
+
+muxes.codex = new AgentMux(toCodex, true, appServer.status);
 muxes.claude = new AgentMux((line) => claude.send(line), false, claude.status);
 
 /** This computer's window, as a client of each engine's mux. */

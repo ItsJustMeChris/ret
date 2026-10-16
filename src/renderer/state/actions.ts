@@ -2,9 +2,9 @@ import { bridge } from "../bridge";
 import { appHasFocus, onAppFocus } from "../lib/appFocus";
 import { dropClient, rpcFor } from "../rpc/client";
 import { PROVIDER_IDS, engineId, hostOf, providerOf, type EngineId, type ProviderId, type ProvidersSettings } from "@shared/bridge";
-import type { ServerRequest, Thread, ThreadItem, UserInput } from "@shared/protocol";
+import type { ServerRequest, Thread, ThreadItem, UsageActivity, UserInput } from "@shared/protocol";
 import { PROVIDERS, accessFor, agentOf, pickProvider } from "../agents";
-import { dropProvider, emptyProviderConn, enabledProviders, enabledProvidersOn, patchProvider, signedIn, useConn, type ProviderConn } from "./conn";
+import { dropProvider, emptyProviderConn, enabledProviders, enabledProvidersOn, patchProvider, signedIn, useConn, type ProviderConn, type TokenUsage } from "./conn";
 import { guarded, toast } from "./toasts";
 import { hostOfKey, lineageRoot, normPath, scopedKey, spawnedBy, threadTitle, type Workspace } from "./projects";
 import { projectKeyNow } from "./projectTree";
@@ -190,9 +190,13 @@ function wireEngine(p: EngineId) {
         }));
         return;
       case "account/usage/updated":
-        // Running totals from a read that's still going: the chart fills in as they come. Only
+        // Running totals from a read that's still going: the charts fill in as they come. Only
         // for a read we're waiting on, whose answer ends the loading state.
-        if (usageReads.has(p)) patchProvider(p, (c) => ({ tokenUsage: { at: c.tokenUsage?.at ?? 0, days: usageDays(params.dailyUsageBuckets), loading: true } }));
+        if (usageReads.has(p))
+          patchUsage(p, {
+            ...(params.dailyUsageBuckets ? { days: usageDays(params.dailyUsageBuckets) } : {}),
+            ...(params.activity ? { activity: params.activity as UsageActivity } : {}),
+          });
         return;
       case "fs/changed":
         onFsChanged(params);
@@ -312,27 +316,39 @@ function usageDays(buckets: { startDate: string; tokens: number | bigint }[] | n
   return days;
 }
 
-/** Engines with an `account/usage/read` in flight. */
+/** Streaks as the provider keeps them, when it does (Codex). */
+function usageStreaks(s: { currentStreakDays: number | bigint | null; longestStreakDays: number | bigint | null } | null | undefined): TokenUsage["streaks"] {
+  if (s?.currentStreakDays == null && s?.longestStreakDays == null) return null;
+  return { current: Number(s.currentStreakDays ?? 0), longest: Number(s.longestStreakDays ?? 0) };
+}
+
+function patchUsage(p: EngineId, patch: Partial<TokenUsage>) {
+  patchProvider(p, (c) => ({ tokenUsage: { ...(c.tokenUsage ?? { at: 0, loading: true, days: {}, streaks: null, activity: null }), ...patch } }));
+}
+
+/** Engines with a usage read in flight. */
 const usageReads = new Set<EngineId>();
 
 /**
- * Tokens per day, for the home screen's chart. Reads again once what's held is older than
- * `maxAgeMs`. Engines that take a while (Claude's transcripts) send running totals meanwhile.
+ * Tokens per day and what each day held (models, prompts), for the home screen. Reads again
+ * once what's held is older than `maxAgeMs`. Each part shows as it arrives; engines that take a
+ * while (transcripts to read) send running totals meanwhile.
  */
 export async function loadTokenUsage(p: EngineId, maxAgeMs = 0) {
   const held = useConn.getState().providers[p]?.tokenUsage;
   if (usageReads.has(p) || (held && Date.now() - held.at < maxAgeMs)) return;
   usageReads.add(p);
-  patchProvider(p, (c) => ({ tokenUsage: { at: c.tokenUsage?.at ?? 0, days: c.tokenUsage?.days ?? {}, loading: true } }));
-  try {
-    const res = await rpcFor(p).request("account/usage/read", {});
-    patchProvider(p, { tokenUsage: { at: Date.now(), days: usageDays(res.dailyUsageBuckets), loading: false } });
-  } catch {
-    // Not available for this engine or sign-in.
-    patchProvider(p, { tokenUsage: held?.at ? { ...held, loading: false } : null });
-  } finally {
-    usageReads.delete(p);
-  }
+  patchUsage(p, { loading: true });
+  const rpc = rpcFor(p);
+  const reads = await Promise.allSettled([
+    rpc.request("account/usage/read", {}).then((res) => patchUsage(p, { days: usageDays(res.dailyUsageBuckets), streaks: usageStreaks(res.summary) })),
+    // Ret's own; an engine that doesn't know it (an older Ret on a paired device) just has no activity.
+    rpc.call<UsageActivity>("ret/usage/activity", {}).then((activity) => patchUsage(p, { activity })),
+  ]);
+  usageReads.delete(p);
+  // Neither is available for this engine or sign-in.
+  if (reads.every((r) => r.status === "rejected")) patchProvider(p, { tokenUsage: held?.at ? { ...held, loading: false } : null });
+  else patchUsage(p, { at: Date.now(), loading: false });
 }
 
 /** Values from the provider's own config that new threads inherit, for showing what "no override" means. */

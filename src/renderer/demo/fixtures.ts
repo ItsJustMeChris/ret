@@ -2,7 +2,7 @@ import type { ProviderId } from "@shared/bridge";
 import type { Model, RateLimitSnapshot, RateLimitWindow } from "@shared/protocol/generated/v2";
 import { blankThread, freshUsage, type DemoThread, type ThreadConf, type World } from "./engine";
 import { buildTurns, type TurnSpec } from "./history";
-import type { Turn } from "@shared/protocol";
+import type { Turn, UsageActivity } from "@shared/protocol";
 import { userMessage } from "./items";
 import { notesElsewhere, ORDERS_QUESTION, ordersQuestion, passkeysRetry, rateApproval, respond, viteLive } from "./scripts";
 import * as W from "./workspace";
@@ -99,18 +99,42 @@ function limits(now: number) {
   };
 }
 
-/** A month of tokens per day: busy weekdays, quieter weekends, the odd day off. Same every visit. */
-function tokenHistory(now: number) {
+/** How prompts spread over the day: quiet overnight, building through the afternoon, busiest in the evening. */
+const HOUR_WEIGHTS = [3, 2, 1, 0, 0, 0, 0, 1, 3, 5, 7, 8, 6, 7, 8, 8, 7, 6, 6, 8, 10, 11, 9, 5];
+
+/**
+ * A year of what each day held: use picking up over the months, busy weekdays and quieter
+ * weekends, the odd day off and two weeks away, newer models taking over. Same every visit.
+ */
+function usageHistory(now: number) {
   let seed = 20_261_013;
   const rand = () => (seed = (seed * 48_271) % 2_147_483_647) / 2_147_483_647;
-  const out: Record<ProviderId, { startDate: string; tokens: number }[]> = { codex: [], claude: [] };
-  for (let i = 29; i >= 0; i--) {
-    const day = new Date((now - i * DAY) * 1000);
+  const hourTotal = HOUR_WEIGHTS.reduce((a, b) => a + b, 0);
+  const hour = () => {
+    let r = rand() * hourTotal;
+    return HOUR_WEIGHTS.findIndex((w) => (r -= w) < 0);
+  };
+  // The model mix by days ago: what was current then.
+  const mix = (p: ProviderId, ago: number): [string, number][] =>
+    p === "codex"
+      ? [[ago > 110 ? "gpt-6-sol" : "gpt-6.1-sol", 0.64], ["gpt-6-astra", 0.24], ["gpt-6-luna", 0.12]]
+      : [[ago > 150 ? "claude-opus-5" : "claude-opus-5-5", 0.7], ["claude-sonnet-5-5", 0.2], ["claude-haiku-5-5", 0.1]];
+  const out: Record<ProviderId, UsageActivity> = { codex: { days: {} }, claude: { days: {} } };
+  for (let ago = 370; ago >= 0; ago--) {
+    const day = new Date((now - ago * DAY) * 1000);
     const weekend = day.getDay() === 0 || day.getDay() === 6;
+    const away = (ago >= 196 && ago < 210) || ago === 41;
+    const ramp = Math.min(1, 0.12 + (370 - ago) / 290);
     for (const [p, scale] of [["codex", 140e6], ["claude", 90e6]] as const) {
       const r = rand();
-      if (weekend ? r < 0.45 : r < 0.06) continue;
-      out[p].push({ startDate: localDay(day), tokens: Math.round(scale * (weekend ? 0.3 : 1) * (0.35 + r)) });
+      if (away || r < (weekend ? 0.45 : 0.06) + (1 - ramp) * 0.45) continue;
+      const tokens = Math.round(scale * ramp * (weekend ? 0.3 : 1) * (0.35 + r));
+      const models: Record<string, number> = {};
+      for (const [m, share] of mix(p, ago)) models[m] = Math.round(tokens * share * (0.7 + rand() * 0.6));
+      const prompts = Math.max(1, Math.round((tokens / scale) * 34 * (0.6 + rand() * 0.8)));
+      const hours = new Array<number>(24).fill(0);
+      for (let i = 0; i < prompts; i++) hours[hour()]++;
+      out[p].days[localDay(day)] = { tokens: Object.values(models).reduce((a, b) => a + b, 0), models, prompts, hours };
     }
   }
   return out;
@@ -598,7 +622,7 @@ export function populate(world: World) {
   world.models = MODELS;
   world.defaults = { codex: { model: "gpt-6.1-sol", effort: "medium" }, claude: { model: "default", effort: "high" } };
   world.limits = limits(now);
-  world.tokens = tokenHistory(now);
+  world.usage = usageHistory(now);
   world.respond = respond;
 
   for (const d of defs(world, now)) {

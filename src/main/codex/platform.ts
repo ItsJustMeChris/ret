@@ -23,6 +23,9 @@ export function platformTag(): string {
 
 export const EXE = process.platform === "win32" ? "codex.exe" : "codex";
 
+/** Where Codex keeps its config and rollouts (`CODEX_HOME`, else `~/.codex`). */
+export const codexHome = () => process.env.CODEX_HOME || join(homedir(), ".codex");
+
 /** Layout of an extracted `@openai/codex@<ver>-<platform>` package root. */
 export function vendorPaths(packageRoot: string) {
   const base = join(packageRoot, "vendor", targetTriple());

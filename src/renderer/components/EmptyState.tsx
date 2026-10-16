@@ -8,6 +8,7 @@ import { addProject, newThread, openThread } from "../state/actions";
 import { StatusDot } from "./StatusDot";
 import { ThreadTime } from "./ThreadTime";
 import { TokenUsageChart } from "./TokenUsageChart";
+import { UsageOverview } from "./UsageOverview";
 
 export function EmptyState() {
   const threads = useThreads((s) => s.threads);
@@ -62,6 +63,7 @@ export function EmptyState() {
             </div>
           </div>
         )}
+        <UsageOverview />
         <TokenUsageChart />
       </div>
     </div>

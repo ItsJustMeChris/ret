@@ -1,5 +1,5 @@
 import type { EngineStatus, ProviderId } from "@shared/bridge";
-import type { Model, RateLimitSnapshot, Thread, ThreadStatus, ThreadTokenUsage, Turn, TurnPlanStep, UserInput } from "@shared/protocol";
+import type { Model, RateLimitSnapshot, Thread, ThreadStatus, ThreadTokenUsage, Turn, TurnPlanStep, UsageActivity, UserInput } from "@shared/protocol";
 import { PROVIDERS } from "../agents";
 import { localDay } from "../lib/format";
 import { DemoFs, fromBase64, toBase64 } from "./fs";
@@ -67,8 +67,8 @@ export class World {
   limits = {} as Record<ProviderId, { snapshot: RateLimitSnapshot; byId: Record<string, RateLimitSnapshot> }>;
   models = {} as Record<ProviderId, Model[]>;
   defaults = {} as Record<ProviderId, { model: string; effort: string }>;
-  /** Tokens per day (`account/usage/read`), oldest first. */
-  tokens = {} as Record<ProviderId, { startDate: string; tokens: number }[]>;
+  /** What each day held (`account/usage/read`, `ret/usage/activity`): a year of it, oldest first. */
+  usage = {} as Record<ProviderId, UsageActivity>;
 
   owned(provider: ProviderId) {
     return [...this.threads.values()].filter((t) => t.provider === provider);
@@ -354,10 +354,10 @@ export class DemoEngine {
       last: { ...u.last, inputTokens: Math.floor(Math.min((u.modelContextWindow ?? 200_000) * 0.92, u.last.inputTokens + grow)), outputTokens: Math.floor(grow / 4) },
     };
     this.notify("thread/tokenUsage/updated", { threadId: t.meta.id, turnId: turn.id, tokenUsage: t.usage });
-    const days = this.world.tokens[this.provider];
-    const today = localDay(new Date());
-    if (days.at(-1)?.startDate === today) days.at(-1)!.tokens += grow * 4;
-    else days.push({ startDate: today, tokens: grow * 4 });
+    const today = this.today();
+    today.tokens += grow * 4;
+    const model = this.provider === "codex" ? "gpt-6.1-sol" : "claude-opus-5-5";
+    today.models[model] = (today.models[model] ?? 0) + grow * 4;
     this.notify("turn/completed", { threadId: t.meta.id, turn: { ...turn, items: [], itemsView: "notLoaded" } });
     this.statusChanged(t);
     const lim = this.world.limits[this.provider];
@@ -484,12 +484,14 @@ export class DemoEngine {
         return { rateLimits: lim.snapshot, rateLimitsByLimitId: lim.byId, ordinaryUsageAllowed: true, rateLimitResetCredits: null, accountId: null, rateLimitUpsell: null };
       }
       case "account/usage/read": {
-        const days = this.world.tokens[this.provider];
+        const days = Object.entries(this.world.usage[this.provider].days).map(([startDate, d]) => ({ startDate, tokens: d.tokens }));
         return {
           summary: { lifetimeTokens: null, peakDailyTokens: Math.max(0, ...days.map((d) => d.tokens)), longestRunningTurnSec: null, currentStreakDays: null, longestStreakDays: null },
           dailyUsageBuckets: days,
         };
       }
+      case "ret/usage/activity":
+        return this.world.usage[this.provider];
       case "account/login/start":
       case "account/login/cancel":
       case "account/logout":
@@ -525,8 +527,17 @@ export class DemoEngine {
     return this.settingsResponse(t);
   }
 
+  /** Today's entry in the usage history, started when the first thing happens today. */
+  private today() {
+    const days = this.world.usage[this.provider].days;
+    return (days[localDay(new Date())] ??= { tokens: 0, models: {}, prompts: 0, hours: new Array<number>(24).fill(0) });
+  }
+
   private startTurn(p: any) {
     const t = this.get(p.threadId);
+    const today = this.today();
+    today.prompts++;
+    today.hours[new Date().getHours()]++;
     const before = JSON.stringify(t.conf);
     const c = t.conf;
     if (p.model) c.model = p.model;

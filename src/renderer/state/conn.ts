@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { AppUpdateState, EngineId, EngineStatus, ProviderId, ProvidersSettings, UpdaterState } from "@shared/bridge";
 import { PROVIDER_IDS, engineId } from "@shared/bridge";
-import type { Account, GetAccountRateLimitsResponse, InitializeResponse, Model } from "@shared/protocol";
+import type { Account, GetAccountRateLimitsResponse, InitializeResponse, Model, UsageActivity } from "@shared/protocol";
 
 export interface LoginFlow {
   loginId: string;
@@ -23,6 +23,17 @@ export interface AccountState {
   requiresOpenaiAuth: boolean;
 }
 
+export interface TokenUsage {
+  at: number;
+  loading: boolean;
+  /** Tokens per local day (YYYY-MM-DD → tokens), from `account/usage/read`: Codex's server counts every device. */
+  days: Record<string, number>;
+  /** Streaks the provider keeps itself (Codex), which can reach back past the days it lists. */
+  streaks: { current: number; longest: number } | null;
+  /** Each day's tokens by model and prompts by hour, from transcripts on this computer (`ret/usage/activity`). */
+  activity: UsageActivity | null;
+}
+
 /** Everything Ret knows about one provider's engine and account. */
 export interface ProviderConn {
   status: EngineStatus | null;
@@ -30,8 +41,8 @@ export interface ProviderConn {
   account: AccountState | null;
   accountLoaded: boolean;
   rateLimits: GetAccountRateLimitsResponse | null;
-  /** Tokens per local day (YYYY-MM-DD → tokens), from `account/usage/read`; when it was last read in full, and whether a read is underway. */
-  tokenUsage: { at: number; days: Record<string, number>; loading: boolean } | null;
+  /** Usage for the home screen; when it was last read in full, and whether a read is underway. */
+  tokenUsage: TokenUsage | null;
   models: Model[];
   /** Collaboration mode presets (Plan, Default) with their suggested model/effort. */
   modes: { name: string; mode: "plan" | "default" | null; model: string | null; reasoning_effort: string | null }[];
