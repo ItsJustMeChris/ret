@@ -3,7 +3,8 @@ import { Box, LoaderCircle } from "lucide-react";
 import { PROVIDER_IDS, type ProviderId } from "@shared/bridge";
 import { PROVIDERS } from "../agents";
 import { useConn } from "../state/conn";
-import { useShallow } from "../lib/shallow";
+import { useGatedStore } from "../state/useThread";
+import { shallowEqual } from "../lib/shallow";
 import { compactNumber } from "../lib/format";
 import { bareModel, prettyModel, usageStats, WEEKS, type DayUsage, type ModelMaker, type ModelShare, type UsageStats } from "../lib/usageStats";
 import { dayLabel, useTokenUsage } from "./TokenUsageChart";
@@ -27,7 +28,7 @@ const hourLabel = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString(unde
  */
 export function UsageOverview() {
   const { enabled, usage, loading } = useTokenUsage();
-  const lists = useConn(useShallow((s) => enabled.map((p) => s.providers[p].models)));
+  const lists = useGatedStore(useConn, (s) => enabled.map((p) => s.providers[p].models), shallowEqual);
   const key = enabled.join();
   const stats = useMemo(() => {
     const names = new Map(enabled.flatMap((p, i) => lists[i].map((m) => [`${p}\n${m.id}`, m.displayName] as const)));

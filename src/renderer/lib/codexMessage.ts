@@ -92,7 +92,8 @@ const previews = new Map<string, string>();
 
 /** What you wrote, as plain text: for previews and titles (every thread's, on every render). */
 export function requestText(text: string): string {
-  if (!text.includes("## My request") && !text.includes("<send_user_message_question_reply>") && !hasInline(text)) return text;
+  // A link is only a maybe (most are plain https ones): the cache below answers it after the first look.
+  if (!text.includes("## My request") && !text.includes("<send_user_message_question_reply>") && !text.includes("](")) return text;
   let own = previews.get(text);
   if (own === undefined) {
     const msg = parseCodexMessage(text);

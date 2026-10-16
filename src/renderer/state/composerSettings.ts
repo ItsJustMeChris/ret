@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { engineId, hostOf, providerOf, type EngineId, type ProviderId } from "@shared/bridge";
+import { PROVIDER_IDS, engineId, hostOf, providerOf, type EngineId, type ProviderId } from "@shared/bridge";
 import { PROVIDERS, accessFor, agentOf, pickProvider, type AgentProvider } from "../agents";
+import { useShallow } from "../lib/shallow";
 import { useConn, useEnabledProvidersOn } from "./conn";
 import { hostOfKey } from "./projects";
 import { useThread } from "./useThread";
@@ -113,8 +114,9 @@ export function useComposerSettings(threadId: string): ComposerSettings {
     const st = s.live[threadId]?.settings;
     return st ? (st.serviceTier ?? "default") : undefined;
   });
-  const conns = useConn((s) => s.providers);
-  const modelsOf = (p: ProviderId) => conns[engineId(p, host)]?.models ?? [];
+  // Just each agent's models on this device: the providers map changes with every rate limit and usage total.
+  const modelLists = useConn(useShallow((s) => PROVIDER_IDS.map((p) => s.providers[engineId(p, host)]?.models)));
+  const modelsOf = (p: ProviderId) => modelLists[PROVIDER_IDS.indexOf(p)] ?? [];
   const models = modelsOf(provider);
   const hasModes = useConn((s) => !!s.providers[engine]?.modes.some((m) => m.mode === "plan"));
   const threadMode = useThread(threadId, (s) => s.live[threadId]?.settings?.mode ?? null);

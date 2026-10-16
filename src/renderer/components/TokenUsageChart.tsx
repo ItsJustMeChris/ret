@@ -1,9 +1,10 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { LoaderCircle } from "lucide-react";
-import { useShallow } from "../lib/shallow";
+import { shallowEqual } from "../lib/shallow";
 import { PROVIDERS } from "../agents";
 import { loadTokenUsage } from "../state/actions";
 import { useConn, useEnabledProviders } from "../state/conn";
+import { useGatedStore } from "../state/useThread";
 import { compactNumber, localDay } from "../lib/format";
 
 const DAYS = 30;
@@ -36,7 +37,8 @@ export function dayLabel(day: string, opts: Intl.DateTimeFormatOptions) {
 /** The enabled providers' usage for the home screen, read when it's shown (again once a minute old). */
 export function useTokenUsage() {
   const enabled = useEnabledProviders();
-  const usage = useConn(useShallow((s) => enabled.map((p) => s.providers[p].tokenUsage)));
+  // Held still while the home screen is hidden behind another mode: a first read sends running totals for a while.
+  const usage = useGatedStore(useConn, (s) => enabled.map((p) => s.providers[p].tokenUsage), shallowEqual);
   const key = enabled.join();
   useEffect(() => {
     for (const p of enabled) void loadTokenUsage(p, 60_000);
