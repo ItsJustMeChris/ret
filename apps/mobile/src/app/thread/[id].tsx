@@ -1,7 +1,8 @@
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { CircleAlert, FolderOpen, MessageSquarePlus, RotateCw } from "lucide-react-native";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { hostOf } from "@shared/bridge";
 import { hydrateThread } from "@ret/state/actions";
@@ -24,6 +25,18 @@ export default function ThreadScreen() {
   return isDraft(id) ? <DraftScreen id={id} /> : <ThreadView id={id} />;
 }
 
+/** Reserve system-gesture space before keyboard avoidance measures its overlap. */
+function ThreadKeyboardView({ children }: { children: ReactNode }) {
+  const headerHeight = useHeaderHeight();
+  return (
+    <SafeAreaView edges={["left", "right", "bottom"]} style={{ flex: 1 }}>
+      <KeyboardAvoidingView className="flex-1 bg-bg" behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={headerHeight}>
+        {children}
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
 function ThreadView({ id }: { id: string }) {
   const thread = useThread(id, (s) => s.threads[id]);
   const owner = useThread(id, (s) => s.owner[id]);
@@ -31,7 +44,6 @@ function ThreadView({ id }: { id: string }) {
   const hydrating = useThread(id, (s) => !s.live[id]?.hydrated && !s.live[id]?.error);
   const error = useThread(id, (s) => (!s.live[id]?.hydrated ? (s.live[id]?.error ?? null) : null));
   const notice = useThread(id, (s) => s.live[id]?.notice ?? null);
-  const headerHeight = useHeaderHeight();
   const host = owner ? hostOf(owner) : null;
   const scope = useMemo(() => ({ cwd, host }), [cwd, host]);
 
@@ -56,7 +68,7 @@ function ThreadView({ id }: { id: string }) {
 
   return (
     <FileScopeContext.Provider value={scope}>
-      <KeyboardAvoidingView className="flex-1 bg-bg" behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={headerHeight}>
+      <ThreadKeyboardView>
         <Stack.Screen
           options={{
             headerTitle: () => (
@@ -105,7 +117,7 @@ function ThreadView({ id }: { id: string }) {
         ) : null}
         <Approvals threadId={id} />
         <Composer threadId={id} />
-      </KeyboardAvoidingView>
+      </ThreadKeyboardView>
     </FileScopeContext.Provider>
   );
 }
@@ -117,7 +129,6 @@ function DraftScreen({ id }: { id: string }) {
   const [opened] = useState(() => useUI.getState().drafts[id]);
   const draft = useUI((s) => s.drafts[id]) ?? opened;
   const project = useUI((s) => (draft ? s.projects[draft.projectKey] : undefined));
-  const headerHeight = useHeaderHeight();
   const host = draft ? hostOfKey(draft.projectKey) : null;
   const name = project?.name ?? (draft ? baseName(draft.cwd) : "");
 
@@ -125,7 +136,7 @@ function DraftScreen({ id }: { id: string }) {
   useEffect(() => () => dropDraftIfUnused(id), [id]);
 
   return (
-    <KeyboardAvoidingView className="flex-1 bg-bg" behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={headerHeight}>
+    <ThreadKeyboardView>
       <Stack.Screen
         options={{
           headerTitle: () => (
@@ -151,6 +162,6 @@ function DraftScreen({ id }: { id: string }) {
       ) : (
         <Empty icon={MessageSquarePlus} title="This new thread is gone" />
       )}
-    </KeyboardAvoidingView>
+    </ThreadKeyboardView>
   );
 }
