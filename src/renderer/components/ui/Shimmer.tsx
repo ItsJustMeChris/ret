@@ -4,9 +4,9 @@
  * stands still and only the light moves. Both are transforms, which the compositor animates
  * without repainting: a sweep painted on the main thread would re-layer the whole page every frame.
  */
-export function Shimmer({ text }: { text: string }) {
+export function Shimmer({ text, className }: { text: string; className?: string }) {
   return (
-    <span className="shimmer">
+    <span className={className ? `shimmer ${className}` : "shimmer"}>
       {text}
       <span className="shimmer-light" aria-hidden>
         <span>{text}</span>

@@ -1,6 +1,7 @@
 import { ChevronRight, CircleAlert, FileDiff } from "lucide-react-native";
 import { memo, useMemo, useState } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
+import Animated, { cubicBezier } from "react-native-reanimated";
 import type { ThreadItem } from "@shared/protocol";
 import { activitySummary, isActivity } from "@ret/lib/activity";
 import { diffStats, duration } from "@ret/lib/format";
@@ -10,7 +11,9 @@ import { takesDirectInput } from "@ret/state/projects";
 import { ownerOf } from "@ret/state/threads";
 import { useThread } from "@ret/state/useThread";
 import { agentOf } from "@ret/agents";
+import { useWork } from "@ret/components/thread/useWork";
 import { Badge, Icon, Spinner, useNow } from "../ui/primitives";
+import { RetBot } from "../ui/RetBot";
 import { DiffView, ItemView, type Ctx } from "./Items";
 
 const NO_TURNS: string[] = [];
@@ -129,7 +132,7 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
           ))}
         </View>
       )}
-      {live && !pending && <Working since={turn.startedAt} elsewhere={elsewhere ? agent : null} />}
+      {live && !pending && <Working threadId={ctx.threadId} turnId={turnId} lastItemId={turn.itemIds[turn.itemIds.length - 1]} since={turn.startedAt} elsewhere={elsewhere ? agent : null} />}
       {!live && !pending && turn.status !== "interrupted" && <UnansweredNotice threadId={ctx.threadId} lastItemId={turn.itemIds[turn.itemIds.length - 1]} count={turn.itemIds.length} />}
       {turn.error && (
         <View className="flex-row items-start gap-2 rounded-lg bg-red-soft px-3 py-2">
@@ -178,14 +181,26 @@ function UnansweredNotice({ threadId, lastItemId, count }: { threadId: string; l
   );
 }
 
-/** `elsewhere` names the agent when the turn runs in another of its apps. */
-function Working({ since, elsewhere }: { since: number | null; elsewhere?: string | null }) {
+/** A new verb rolls in from below, as on the desktop (.working-verb). */
+const VERB_IN = { from: { opacity: 0, transform: [{ translateY: 8 }] }, to: { opacity: 1, transform: [{ translateY: 0 }] } };
+
+/**
+ * The live turn's Working row, as the desktop's: the Ret bot in the mood of what the turn's doing
+ * and a verb for it (useWork). `lastItemId`: the turn's latest item; `elsewhere` names the agent
+ * when the turn runs in another of its apps.
+ */
+function Working({ threadId, turnId, lastItemId, since, elsewhere }: { threadId: string; turnId: string; lastItemId: string | undefined; since: number | null; elsewhere?: string | null }) {
   const now = useNow();
   const secs = since ? Math.max(0, Math.floor(now / 1000 - since)) : 0;
+  const work = useWork(threadId, turnId, lastItemId, elsewhere, secs);
   return (
-    <View className="flex-row items-center gap-2.5 px-1.5 py-1">
-      <View className="h-2 w-2 animate-pulse rounded-full bg-green" />
-      <Text className="text-[14px] text-text-2">{elsewhere ? `Working in another ${elsewhere} app` : "Working"}</Text>
+    <View className="flex-row items-center gap-2.5 px-1.5 py-1" accessible accessibilityLabel={`${work.label}, ${duration(secs * 1000)}`}>
+      <RetBot mood={work.mood} />
+      <Animated.View key={work.verb} style={{ flexShrink: 1, animationName: VERB_IN, animationDuration: "0.34s", animationTimingFunction: cubicBezier(0.2, 0.8, 0.2, 1) }}>
+        <Text numberOfLines={1} className="text-[14px] text-text-2">
+          {work.verb}
+        </Text>
+      </Animated.View>
       <Text className="text-[13px] text-text-3">{duration(secs * 1000)}</Text>
     </View>
   );
