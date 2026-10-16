@@ -5,6 +5,7 @@ node_modules
 dist
 release
 promo
+apps
 site/demo
 site/assets/*.mp4
 *.log

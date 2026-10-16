@@ -24,6 +24,7 @@ npm run dist:mac   # macOS dmg + zip → release/ (on a Mac)
 src/main/       Electron main process, the Codex and Claude Code engines, and remote access (remote/)
 src/renderer/   the UI (demo/ is the website's in-browser version)
 src/shared/     what both sides share, including the agent protocol
+apps/mobile/    Ret for iPhone and Android: pairs with a desktop Ret and uses its agents (see its README)
 site/           getret.app
 promo/          the launch video
 ```

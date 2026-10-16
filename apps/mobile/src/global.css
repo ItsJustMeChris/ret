@@ -1,0 +1,5 @@
+@import "tailwindcss";
+@import "uniwind";
+
+/* Ret's colours, from the desktop's stylesheet (scripts/tokens.mjs): bg-bg-2, text-text-3, border-line… */
+@import "./theme.css";

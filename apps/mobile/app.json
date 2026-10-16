@@ -1,0 +1,79 @@
+{
+  "expo": {
+    "name": "Ret",
+    "slug": "ret",
+    "scheme": "ret",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#000000",
+    "ios": {
+      "bundleIdentifier": "app.getret.mobile",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "Ret connects to the computers you pair it with on your network, to use their agents.",
+        "NSBonjourServices": [
+          "_ret._tcp"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "buildNumber": "1"
+    },
+    "android": {
+      "package": "app.getret.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-foreground.png",
+        "backgroundColor": "#F8FAFB"
+      },
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ],
+      "predictiveBackGestureEnabled": false,
+      "versionCode": 1
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Ret sends the pictures you pick to your computer, for its agents to see.",
+          "cameraPermission": "Ret sends the photos you take to your computer, for its agents to see.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#8B9CFF"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "imageWidth": 120,
+          "backgroundColor": "#F6F6F8",
+          "dark": {
+            "image": "./assets/splash.png",
+            "backgroundColor": "#000000"
+          }
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 29
+          }
+        }
+      ],
+      "expo-font",
+      "./plugins/withSceneLifecycle"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
