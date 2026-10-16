@@ -58,6 +58,7 @@ const bridge: RetBridge = {
   files: {
     saveImage: (data, ext, host) => ipcRenderer.invoke(IPC.saveImage, data, ext, host ?? null),
     stat: (p, host) => ipcRenderer.invoke(IPC.stat, p, host ?? null),
+    visualization: (p, title, host) => ipcRenderer.invoke(IPC.visualization, p, title, host ?? null),
     pathFor: (file) => {
       try {
         return webUtils.getPathForFile(file) || null;

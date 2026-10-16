@@ -29,6 +29,7 @@ import { ClaudeEngine } from "./claude/engine";
 import { findSystemClaude, openLoginTerminal, probeClaudeVersion } from "./claude/platform";
 import { ClaudeUpdater } from "./claude/updater";
 import { LocalUsage } from "./usage";
+import { renderVisualization } from "./visualize";
 import { createWorktree, gitInfo, mainCheckouts } from "./git";
 import { AgentMux, RemoteAccess, type HostCalls, type MuxClient } from "./remote";
 import { appInfo } from "./apps";
@@ -550,6 +551,7 @@ const hostCalls: HostCalls = {
   "git.mainCheckouts": (cwds: unknown) => mainCheckouts(Array.isArray(cwds) ? cwds.map(String) : []),
   "git.createWorktree": (cwd: unknown, label: unknown) => createWorktree(join(userData, "worktrees"), String(cwd), String(label)),
   "files.stat": (p: unknown) => statPath(String(p)),
+  "files.visualization": (p: unknown, title: unknown) => renderVisualization(String(p), typeof title === "string" ? title : undefined),
   "files.saveImage": (data: unknown, ext: unknown) => saveImage(Buffer.from(String(data), "base64"), String(ext)),
   "apps.info": (appId: unknown) => appInfo(appId),
   image: async (p: unknown) => {
@@ -641,6 +643,10 @@ function registerIpc() {
   ipcMain.handle(IPC.stat, (_e, p: string, host?: string | null) => {
     const link = linkTo(host);
     return link ? link.call("files.stat", p) : statPath(p);
+  });
+  ipcMain.handle(IPC.visualization, (_e, p: string, title?: string, host?: string | null) => {
+    const link = linkTo(host);
+    return link ? link.call("files.visualization", p, title) : renderVisualization(p, title);
   });
   // VS Code here can't open another device's files.
   ipcMain.handle(IPC.editorAvailable, (_e, host?: string | null) => (host ? false : vscodeInstalled()));

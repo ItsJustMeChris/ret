@@ -201,6 +201,7 @@ export function createDemoBridge(): RetBridge & { world: World } {
         throw new Error(notInDemo("Attaching images"));
       },
       stat: async (path) => world.fs.stat(path),
+      visualization: async () => ({ error: notInDemo("Visualizations") }),
       pathFor: () => null,
     },
     apps: { info: async () => ({ name: null, icon: null }) },

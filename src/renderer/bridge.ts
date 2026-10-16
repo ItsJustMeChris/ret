@@ -155,6 +155,7 @@ function createWebBridge(base: string): RetBridge {
         throw new Error("Image attachments need the desktop app");
       },
       stat: async () => ({ exists: false, isDir: false }),
+      visualization: async () => ({ error: "Visualizations need the desktop app" }),
       pathFor: () => null,
     },
     setTheme: () => {},

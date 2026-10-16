@@ -33,6 +33,8 @@ import { openFrom } from "./Subagents";
 import { changeStats, duration, shortPath, unwrapCommand } from "../../lib/format";
 import { highlight } from "../../lib/markdown";
 import { Markdown } from "../Markdown";
+import { splitContentRefs } from "../../lib/visualize";
+import { Visualization, VisualizationPending } from "./Visualization";
 import { ThreadImage } from "./ThreadImage";
 import { PlanActions, ReplyQuestions } from "./Questions";
 import { Shimmer } from "../ui/Shimmer";
@@ -183,10 +185,28 @@ function ChatRef({ id, title, from, inline }: { id: string; title: string | null
   );
 }
 
-function AgentMessage({ item, streaming, threadId }: { item: Extract<ThreadItem, { type: "agentMessage" }>; streaming: boolean; threadId: string }) {
+function AgentMessage({
+  item,
+  streaming,
+  threadId,
+  host,
+}: {
+  item: Extract<ThreadItem, { type: "agentMessage" }>;
+  streaming: boolean;
+  threadId: string;
+  host: string | null;
+}) {
   return (
     <div className={`msg-agent ${item.phase === "commentary" ? "commentary" : ""} ${streaming ? "streaming" : ""}`}>
-      <Markdown text={item.text} streaming={streaming} />
+      {splitContentRefs(item.text, streaming).map((part, i) =>
+        part.kind === "viz" ? (
+          <Visualization key={i} viz={part.viz} host={host} />
+        ) : part.kind === "pending" ? (
+          <VisualizationPending key={i} />
+        ) : (
+          <Markdown key={i} text={part.text} streaming={streaming} />
+        ),
+      )}
       {!streaming && item.questions?.length ? <ReplyQuestions threadId={threadId} itemId={item.id} text={item.text} questions={item.questions} /> : null}
     </div>
   );
@@ -554,7 +574,7 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
     case "userMessage":
       return <UserMessage item={item} ctx={ctx} />;
     case "agentMessage":
-      return <AgentMessage item={item} streaming={live} threadId={ctx.threadId} />;
+      return <AgentMessage item={item} streaming={live} threadId={ctx.threadId} host={ctx.host} />;
     case "reasoning":
       return <Reasoning item={item} live={live} />;
     case "commandExecution":
