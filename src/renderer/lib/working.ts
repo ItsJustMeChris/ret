@@ -5,10 +5,11 @@ import type { ThreadItem } from "@shared/protocol";
 // and the phone both show them (components/thread/useWork).
 
 /**
- * What the Ret bot's up to: thinking, using a tool, working along, dozing while work it left runs,
- * or waiting on you.
+ * What the Ret bot's up to: thinking, working (any kind of busy: reading, running, editing,
+ * writing…), dozing while work it left runs, or waiting on you. Each has a pool of loops
+ * (lib/retBotMotion).
  */
-export type BotMood = "think" | "tool" | "work" | "doze" | "ask";
+export type BotMood = "think" | "work" | "doze" | "ask";
 
 export type WorkKind = "think" | "plan" | "read" | "run" | "edit" | "web" | "tool" | "agents" | "wait" | "write" | "compact" | "work" | "ask";
 
@@ -53,12 +54,12 @@ export function workKindOf(item: ThreadItem | undefined): WorkKind {
 export const WORK_MOOD: Record<WorkKind, BotMood> = {
   think: "think",
   plan: "think",
-  read: "tool",
-  run: "tool",
-  edit: "tool",
-  web: "tool",
-  tool: "tool",
-  agents: "tool",
+  read: "work",
+  run: "work",
+  edit: "work",
+  web: "work",
+  tool: "work",
+  agents: "work",
   wait: "doze",
   write: "work",
   compact: "work",
@@ -175,7 +176,7 @@ export function workVerb(kind: WorkKind, turnId: string, secs: number): string {
 }
 
 /** FNV-1a. */
-function hash(s: string): number {
+export function hash(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
   return h >>> 0;

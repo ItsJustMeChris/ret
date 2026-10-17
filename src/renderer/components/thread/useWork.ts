@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { useThread } from "../../state/useThread";
 import { useThreadState } from "../StatusDot";
 import { WORK_LABEL, WORK_MOOD, workKindOf, workVerb } from "../../lib/working";
+import { botLoop } from "../../lib/retBotMotion";
 
 /**
  * What a live turn's Working row shows, on the desktop and the phone: the kind of work its latest
- * item (`lastItemId`) is, the Ret bot's mood for it, a verb and the plain label. `elsewhere` names
- * the agent when the turn runs in another of its apps (what it's doing there isn't known); `secs`:
- * how long the turn has run.
+ * item (`lastItemId`) is, the Ret bot's mood for it and the loop it moves in, a verb and the plain
+ * label. The loop and the verb change together. `elsewhere` names the agent when the turn runs in
+ * another of its apps (what it's doing there isn't known); `secs`: how long the turn has run.
  */
 export function useWork(threadId: string, turnId: string, lastItemId: string | undefined, elsewhere: string | null | undefined, secs: number) {
   const asking = useThreadState(threadId) === "attention";
@@ -16,7 +17,8 @@ export function useWork(threadId: string, turnId: string, lastItemId: string | u
   // needing you shows at once.
   const kind = useSettled(asking ? "ask" : doing, asking ? 0 : 2500);
   const verb = elsewhere && kind !== "ask" ? `Working in another ${elsewhere} app` : workVerb(kind, turnId, secs);
-  return { kind, mood: WORK_MOOD[kind], verb, label: WORK_LABEL[kind] };
+  const mood = WORK_MOOD[kind];
+  return { kind, mood, loop: botLoop(mood, turnId + kind, secs).name, verb, label: WORK_LABEL[kind] };
 }
 
 /** `value`, each one shown for `hold` ms at least, so quick back-and-forth doesn't flicker. */

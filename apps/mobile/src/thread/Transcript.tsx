@@ -195,7 +195,7 @@ function Working({ threadId, turnId, lastItemId, since, elsewhere }: { threadId:
   const work = useWork(threadId, turnId, lastItemId, elsewhere, secs);
   return (
     <View className="flex-row items-center gap-2.5 px-1.5 py-1" accessible accessibilityLabel={`${work.label}, ${duration(secs * 1000)}`}>
-      <RetBot mood={work.mood} />
+      <RetBot mood={work.mood} loop={work.loop} />
       <Animated.View key={work.verb} style={{ flexShrink: 1, animationName: VERB_IN, animationDuration: "0.34s", animationTimingFunction: cubicBezier(0.2, 0.8, 0.2, 1) }}>
         <Text numberOfLines={1} className="text-[14px] text-text-2">
           {work.verb}

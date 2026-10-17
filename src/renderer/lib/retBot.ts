@@ -34,8 +34,15 @@ export function botShape(height: number) {
     puff: point(29, 7),
     puffR: [n(0.9), n(1.3), n(1.7)],
     z: `M${x(28)} ${y(4)}h${n(2.6)}l${-n(2.6)} ${n(2.6)}h${n(2.6)}`,
-    stroke: { stalk: n(1.9), puff: n(0.9), z: n(1.1) },
-    /** Where parts turn and grow from: each antenna where it meets the head, the lids from the eyes' tops, the body from its bottom. */
-    pivots: { antL: point(12.5, 9), antR: point(19.5, 9), lids: point(16, 14.1), body: point(16, 27), puff: point(29, 7), z: point(29.3, 5.3) },
+    /** A music note: its head, and the stem with its flag. */
+    note: { head: point(29.5, 8), headR: n(1.1), stem: `M${x(30.6)} ${y(8)}V${y(3.6)}l${n(2)} ${n(0.8)}` },
+    /** A four-pointed spark over the head. */
+    spark: `M${x(16)} ${y(-3.4)}L${x(16.7)} ${y(-1.9)}L${x(18.2)} ${y(-1.2)}L${x(16.7)} ${y(-0.5)}L${x(16)} ${y(1)}L${x(15.3)} ${y(-0.5)}L${x(13.8)} ${y(-1.2)}L${x(15.3)} ${y(-1.9)}Z`,
+    stroke: { stalk: n(1.9), puff: n(0.9), z: n(1.1), ring: n(0.8), note: n(0.8) },
+    /**
+     * Where parts turn and grow from: each antenna where it meets the head, the lids from the eyes'
+     * tops, the body from its bottom, the rest from their middles.
+     */
+    pivots: { antL: point(12.5, 9), antR: point(19.5, 9), lids: point(16, 14.1), body: point(16, 27), puff: point(29, 7), z: point(29.3, 5.3), note: point(30.6, 6), spark: point(16, -1.2) },
   };
 }

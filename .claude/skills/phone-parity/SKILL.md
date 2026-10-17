@@ -32,8 +32,8 @@ The skill lives in `.agents/skills/phone-parity/`. This file is also at
      and port what a person sees or does. If the component holds logic (working out a state,
      choosing words), move that logic into a hook or lib module both sides import, and port only
      the drawing. RetBot is the pattern: `lib/working.ts` (kinds, moods, verbs, labels),
-     `components/thread/useWork.ts` (the hook), `lib/retBot.ts` (shapes), and a component on each
-     side.
+     `components/thread/useWork.ts` (the hook), `lib/retBot.ts` (shapes), `lib/retBotMotion.ts`
+     (every loop's keyframes, as data), and a component on each side that draws them.
    - **Styles** (`src/renderer/styles/app.css`): a palette change → `npm run tokens` in apps/mobile
      (`npm test` fails while `src/theme.css` is stale). Spacing, sizes and motion don't carry over by
      themselves: port them to the counterpart.
@@ -51,7 +51,8 @@ The skill lives in `.agents/skills/phone-parity/`. This file is also at
    - **Motion**: the desktop animates `transform` and `opacity` only, on the compositor (perf-review
      rules 3.2). On the phone, use Reanimated 4's CSS animations (`animationName` keyframe objects
      on an `Animated.View`, run on the UI thread) with the same keyframes, durations and easings.
-     Keyframes in percentages of a glyph become pixels from its known size. Reduced motion: the
+     Better still, write the keyframes once as data both sides turn into animations, as
+     `lib/retBotMotion.ts` does (CSS on the desktop, Reanimated on the phone): then they can't drift. Reduced motion: the
      desktop's media query, the phone's `useReducedMotion()`; both keep resting poses.
    - **Size**: phone text is larger (14 px body and 13 px muted, where the desktop has 12.5 and 12),
      so scale glyphs to match (RetBot: 18 px on the desktop, 20 on the phone).
@@ -91,7 +92,7 @@ The skill lives in `.agents/skills/phone-parity/`. This file is also at
 | components/thread/Composer.tsx | thread/Composer.tsx |
 | components/thread/ModelTuner.tsx + app.css `.tuner-*` (logic in lib/effortMeter) | thread/ModelTuner.tsx |
 | components/thread/Approvals.tsx, Questions | thread/Approvals.tsx |
-| components/ui/RetBot.tsx + app.css `.retbot` | ui/RetBot.tsx |
+| components/ui/RetBot.tsx (loops in lib/retBotMotion, shapes in lib/retBot) | ui/RetBot.tsx |
 | components/StatusDot.tsx (state logic shared) | ui/StatusDot.tsx |
 | components/inbox/InboxView.tsx | app/(tabs)/index.tsx |
 | components/Sidebar.tsx (projects) | app/(tabs)/projects.tsx |

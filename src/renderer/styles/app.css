@@ -2239,21 +2239,27 @@ body.resizing .transcript {
     transform: translateY(60%);
   }
 }
-/* Just left (its rendering skipped), its verbs keep changing: what starts then waits too. */
+/* Just left (its rendering skipped), its verbs and loops keep changing: what starts then waits
+   too. Important: the bot's own animation rules are more specific, and reset the play state. */
 .kept[data-away] .working * {
-  animation-play-state: paused;
+  animation-play-state: paused !important;
 }
 
-/* The Ret bot (RetBot): each part an SVG layer the size of the glyph, drawn on a 36×32 grid
-   (lib/retBot). All motion is transform and opacity keyframes the compositor runs, in percentages
-   of the glyph (one grid unit is 2.78% across, 3.125% down). The phone's bot
-   (apps/mobile/src/ui/RetBot) has the same moods and keyframes: change both. */
+/* The Ret bot (RetBot): each part an SVG layer the size of the glyph. How it moves (where parts
+   turn from, rest and every loop's keyframes) is written into the page from lib/retBotMotion, the
+   same loops the phone runs; this is only how it's laid out and colored. */
 .retbot {
   position: relative;
   flex: none;
   width: 20.25px;
   height: 18px;
   color: var(--accent);
+}
+.retbot.doze {
+  color: var(--green);
+}
+.retbot.ask {
+  color: var(--amber);
 }
 .retbot svg,
 .rb-body,
@@ -2265,257 +2271,24 @@ body.resizing .transcript {
   overflow: visible;
   fill: currentColor;
 }
-.rb-ant path {
+.rb-ant path,
+.rb-note path {
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
 }
-/* Each antenna turns about where it meets the head. */
-.rb-ant.left {
-  transform-origin: 34.72% 40.63%;
-}
-.rb-ant.right {
-  transform-origin: 54.17% 40.63%;
-}
 .retbot .rb-led {
   fill: color-mix(in srgb, currentColor 35%, #fff);
-  opacity: 0;
 }
-.rb-pupils {
-  transform: translate(1.67%, -0.94%);
-}
-/* Lids come down over the eyes from their tops. */
-.rb-lids {
-  transform-origin: 50% 56.56%;
-  transform: scaleY(0);
-  animation: rb-blink 4.4s infinite;
-}
+.retbot .rb-ring,
 .retbot .rb-puff,
 .retbot .rb-z {
   fill: none;
   stroke: currentColor;
-  opacity: 0;
-}
-.retbot .rb-puff {
-  transform-origin: 80.56% 34.38%;
 }
 .retbot .rb-z {
   stroke-linecap: round;
   stroke-linejoin: round;
-  transform-origin: 81.4% 29.06%;
-}
-/* Working along: bobbing, antennae swaying, the tip lights blinking in turn. */
-.retbot.work .rb-body {
-  animation: rb-bob 0.45s ease-in-out infinite alternate;
-}
-.retbot.work .rb-ant.left {
-  animation: rb-sway-l 0.9s ease-in-out infinite alternate;
-}
-.retbot.work .rb-ant.right {
-  animation: rb-sway-r 0.9s ease-in-out infinite alternate;
-}
-.retbot.work .rb-led {
-  animation: rb-led 0.9s linear infinite;
-}
-.retbot.work .right .rb-led {
-  animation-delay: -0.45s;
-}
-/* Thinking: eyes up and wandering, scratching its head with an antenna, thoughts rising. */
-.retbot.think .rb-pupils {
-  animation: rb-ponder 4s ease-in-out infinite;
-}
-.retbot.think .rb-ant.left {
-  animation: rb-sway-l 3s ease-in-out infinite alternate;
-}
-.retbot.think .rb-ant.right {
-  animation: rb-scratch 1.4s ease-in-out infinite alternate;
-}
-.retbot.think .rb-puff {
-  animation: rb-rise 2.4s ease-out infinite;
-}
-/* Using a tool: reading along, line by line. */
-.retbot.tool .rb-pupils {
-  animation: rb-read 2.2s linear infinite;
-}
-.retbot.tool .rb-ant.left {
-  animation: rb-sway-l 2.4s ease-in-out infinite alternate;
-}
-.retbot.tool .rb-ant.right {
-  animation: rb-sway-r 2.4s ease-in-out infinite alternate;
-}
-/* Waiting on work it left running (or sleeping on purpose): dozing, antennae drooped. */
-.retbot.doze {
-  color: var(--green);
-}
-.retbot.doze .rb-body {
-  transform-origin: 44.4% 96.9%;
-  animation: rb-breathe 3.2s ease-in-out infinite;
-}
-.retbot.doze .rb-lids {
-  animation: none;
-  transform: scaleY(0.78);
-}
-.retbot.doze .rb-ant.left {
-  transform: rotate(-20deg);
-}
-.retbot.doze .rb-ant.right {
-  transform: rotate(20deg);
-}
-.retbot.doze .rb-z {
-  animation: rb-rise 3s ease-out infinite;
-}
-.retbot.doze .rb-z:nth-of-type(2) {
-  animation-delay: -1s;
-}
-.retbot.doze .rb-z:nth-of-type(3) {
-  animation-delay: -2s;
-}
-.retbot.think .rb-puff:nth-of-type(2) {
-  animation-delay: -0.8s;
-}
-.retbot.think .rb-puff:nth-of-type(3) {
-  animation-delay: -1.6s;
-}
-/* Needs you: looking right at you, hopping, antennae perking up. */
-.retbot.ask {
-  color: var(--amber);
-}
-.retbot.ask .rb-body {
-  animation: rb-hop 2.4s cubic-bezier(0.3, 0.7, 0.4, 1) infinite;
-}
-.retbot.ask .rb-ant {
-  animation: rb-perk 2.4s ease-in-out infinite;
-}
-.retbot.ask .rb-pupils {
-  transform: translate(0, 2.81%);
-}
-.retbot.ask .rb-led {
-  animation: rb-led 1.2s linear infinite;
-}
-@keyframes rb-blink {
-  0%,
-  94%,
-  100% {
-    transform: scaleY(0);
-  }
-  97% {
-    transform: scaleY(1);
-  }
-}
-@keyframes rb-sway-l {
-  from {
-    transform: rotate(-8deg);
-  }
-  to {
-    transform: rotate(6deg);
-  }
-}
-@keyframes rb-sway-r {
-  from {
-    transform: rotate(8deg);
-  }
-  to {
-    transform: rotate(-6deg);
-  }
-}
-@keyframes rb-scratch {
-  from {
-    transform: rotate(-16deg);
-  }
-  to {
-    transform: rotate(-5deg);
-  }
-}
-@keyframes rb-led {
-  0%,
-  49% {
-    opacity: 0;
-  }
-  50%,
-  100% {
-    opacity: 1;
-  }
-}
-@keyframes rb-bob {
-  to {
-    transform: translateY(-5%);
-  }
-}
-@keyframes rb-ponder {
-  0%,
-  45%,
-  100% {
-    transform: translate(3.06%, -4.06%);
-  }
-  55%,
-  90% {
-    transform: translate(-2.5%, -4.38%);
-  }
-}
-@keyframes rb-read {
-  0%,
-  100% {
-    transform: translate(-3.89%, -1.88%);
-  }
-  40% {
-    transform: translate(3.89%, -1.88%);
-  }
-  50% {
-    transform: translate(-3.89%, 1.25%);
-  }
-  90% {
-    transform: translate(3.89%, 1.25%);
-  }
-}
-@keyframes rb-rise {
-  0% {
-    opacity: 0;
-    transform: translate(0, 9.4%) scale(0.5);
-  }
-  25% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-    transform: translate(8.3%, -18.75%) scale(1);
-  }
-}
-@keyframes rb-breathe {
-  50% {
-    transform: scale(1.04);
-  }
-}
-@keyframes rb-hop {
-  0%,
-  62%,
-  78%,
-  90%,
-  100% {
-    transform: translateY(0);
-  }
-  70% {
-    transform: translateY(-7.8%);
-  }
-  84% {
-    transform: translateY(-3.1%);
-  }
-}
-@keyframes rb-perk {
-  0%,
-  64%,
-  88%,
-  100% {
-    transform: rotate(0);
-  }
-  70% {
-    transform: rotate(-12deg);
-  }
-  76% {
-    transform: rotate(10deg);
-  }
-  82% {
-    transform: rotate(-5deg);
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .retbot *,

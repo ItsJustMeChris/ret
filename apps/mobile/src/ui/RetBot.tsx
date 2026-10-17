@@ -4,69 +4,95 @@ import Animated, { cubicBezier, useReducedMotion } from "react-native-reanimated
 import Svg, { Circle, Path } from "react-native-svg";
 import { useCSSVariable } from "uniwind";
 import { botShape } from "@ret/lib/retBot";
+import {
+  BLINK,
+  BLINK_TWICE,
+  BOT_LOOPS,
+  LOOP_BY_NAME,
+  REST,
+  blinks,
+  leadOf,
+  stepsOf,
+  usesPart,
+  type BotPart,
+  type Easing,
+  type Loop,
+  type Move,
+  type Pose,
+  type TransformStep,
+} from "@ret/lib/retBotMotion";
 import type { BotMood } from "@ret/lib/working";
 
 /** 20 px tall, beside 14 px text (the desktop's is 18 beside 12.5). */
 const S = botShape(20);
-const u = S.unit;
 const fill = StyleSheet.absoluteFill;
-const origin = (p: { x: number; y: number }): [number, number, number] => [p.x, p.y, 0];
-/** A move by grid units. */
-const by = (x: number, y: number) => ({ transform: [{ translateX: x * u }, { translateY: y * u }] });
-const turn = (deg: number) => ({ transform: [{ rotate: `${deg}deg` }] });
 
-// The desktop's keyframes (app.css, .retbot), in pixels: the bot moves the same on both.
-const SWAY_L = { from: turn(-8), to: turn(6) };
-const SWAY_R = { from: turn(8), to: turn(-6) };
-const SCRATCH = { from: turn(-16), to: turn(-5) };
-const LED = { "0%": { opacity: 0 }, "49%": { opacity: 0 }, "50%": { opacity: 1 }, "100%": { opacity: 1 } };
-const BOB = { from: by(0, 0), to: by(0, -1.6) };
-const BLINK = { "0%": { transform: [{ scaleY: 0 }] }, "94%": { transform: [{ scaleY: 0 }] }, "97%": { transform: [{ scaleY: 1 }] }, "100%": { transform: [{ scaleY: 0 }] } };
-const PONDER = { "0%": by(1.1, -1.3), "45%": by(1.1, -1.3), "55%": by(-0.9, -1.4), "90%": by(-0.9, -1.4), "100%": by(1.1, -1.3) };
-const READ = { "0%": by(-1.4, -0.6), "40%": by(1.4, -0.6), "50%": by(-1.4, 0.4), "90%": by(1.4, 0.4), "100%": by(-1.4, -0.6) };
-const RISE = {
-  "0%": { opacity: 0, transform: [{ translateX: 0 }, { translateY: 3 * u }, { scale: 0.5 }] },
-  "25%": { opacity: 1 },
-  "100%": { opacity: 0, transform: [{ translateX: 3 * u }, { translateY: -6 * u }, { scale: 1 }] },
-};
-const BREATHE = { "0%": { transform: [{ scale: 1 }] }, "50%": { transform: [{ scale: 1.04 }] }, "100%": { transform: [{ scale: 1 }] } };
-const HOP = { "0%": by(0, 0), "62%": by(0, 0), "70%": by(0, -2.5), "78%": by(0, 0), "84%": by(0, -1), "90%": by(0, 0), "100%": by(0, 0) };
-const PERK = { "0%": turn(0), "64%": turn(0), "70%": turn(-12), "76%": turn(10), "82%": turn(-5), "88%": turn(0), "100%": turn(0) };
+// The loops (lib/retBotMotion) as Reanimated's CSS animations, which run on the UI thread: the
+// same keyframes, durations and easings as the desktop's, in this size's pixels.
 
-type Timing = "ease" | "ease-in-out" | "ease-out" | "linear" | ReturnType<typeof cubicBezier>;
-function loop(name: object, duration: string, timing: Timing, alternate = false, delay = "0s") {
+const moved = (p: Pose) => p.x !== undefined || p.y !== undefined || p.rotate !== undefined || p.sx !== undefined || p.sy !== undefined;
+
+function styleOf(p: Pose, steps: TransformStep[]) {
+  const out: { transform?: object[]; opacity?: number } = {};
+  if (steps.length && moved(p)) {
+    out.transform = steps.flatMap((s): object[] =>
+      s === "translate" ? [{ translateX: (p.x ?? 0) * S.unit }, { translateY: (p.y ?? 0) * S.unit }] : s === "rotate" ? [{ rotate: `${p.rotate ?? 0}deg` }] : [{ scaleX: p.sx ?? 1 }, { scaleY: p.sy ?? 1 }],
+    );
+  }
+  if (p.opacity !== undefined) out.opacity = p.opacity;
+  return out;
+}
+
+const timing = (e: Easing) => (typeof e === "string" ? e : cubicBezier(e[0], e[1], e[2], e[3]));
+
+/** Each move's keyframes, made once: Reanimated starts an animation over when they're a new object. */
+const made = new WeakMap<Move, object>();
+function keyframesOf(move: Move): object {
+  let k = made.get(move);
+  if (!k) {
+    const steps = stepsOf(Object.values(move.frames));
+    k = Object.fromEntries(Object.entries(move.frames).map(([at, pose]) => [`${at}%`, styleOf(pose, steps)]));
+    made.set(move, k);
+  }
+  return k;
+}
+
+function animation(move: Move, lead: number, duration = move.duration) {
   return {
-    animationName: name,
-    animationDuration: duration,
-    animationTimingFunction: timing,
+    animationName: keyframesOf(move),
+    animationDuration: `${duration}s`,
+    animationTimingFunction: timing(move.easing),
     animationIterationCount: "infinite" as const,
-    animationDirection: alternate ? ("alternate" as const) : ("normal" as const),
-    animationDelay: delay,
+    animationDirection: move.alternate ? ("alternate" as const) : ("normal" as const),
+    animationDelay: `${-lead}s`,
   };
 }
 
-type Part = "body" | "antL" | "antR" | "ledL" | "ledR" | "pupils" | "lids" | "puff" | "z";
-
-/** Each part's motion in a mood (`beat`: when its blinks fall), as the desktop's .retbot rules. */
-function motion(mood: BotMood, beat: string): Partial<Record<Part, object>> {
-  const lids = loop(BLINK, "4.4s", "ease", false, beat);
-  switch (mood) {
-    case "work":
-      return { body: loop(BOB, "0.45s", "ease-in-out", true), antL: loop(SWAY_L, "0.9s", "ease-in-out", true), antR: loop(SWAY_R, "0.9s", "ease-in-out", true), ledL: loop(LED, "0.9s", "linear"), ledR: loop(LED, "0.9s", "linear", false, "0.45s"), lids };
-    case "think":
-      return { antL: loop(SWAY_L, "3s", "ease-in-out", true), antR: loop(SCRATCH, "1.4s", "ease-in-out", true), pupils: loop(PONDER, "4s", "ease-in-out"), puff: loop(RISE, "2.4s", "ease-out"), lids };
-    case "tool":
-      return { antL: loop(SWAY_L, "2.4s", "ease-in-out", true), antR: loop(SWAY_R, "2.4s", "ease-in-out", true), pupils: loop(READ, "2.2s", "linear"), lids };
-    case "doze":
-      return { body: loop(BREATHE, "3.2s", "ease-in-out"), antL: turn(-20), antR: turn(20), lids: { transform: [{ scaleY: 0.78 }] }, z: loop(RISE, "3s", "ease-out") };
-    case "ask":
-      return { body: loop(HOP, "2.4s", cubicBezier(0.3, 0.7, 0.4, 1)), antL: loop(PERK, "2.4s", "ease-in-out"), antR: loop(PERK, "2.4s", "ease-in-out"), pupils: by(0, 0.9), ledL: loop(LED, "1.2s", "linear"), ledR: loop(LED, "1.2s", "linear"), lids };
-  }
+function origin(part: BotPart, copy: number): [number, number, number] | undefined {
+  const p = part === "led" || part === "ring" ? S.tips[copy] : part === "pupils" ? undefined : S.pivots[part as keyof typeof S.pivots];
+  return p && [p.x, p.y, 0];
 }
 
-/** Without motion: only where parts rest (drooped antennae, lids half down). */
-const still = (m: Partial<Record<Part, object>>) =>
-  Object.fromEntries(Object.entries(m).map(([k, v]) => [k, "animationName" in v ? {} : v])) as Partial<Record<Part, object>>;
+/** This bot's place in its cycles and its own blink: a list of them never moves in step. */
+interface Own {
+  phase: number;
+  blink: number;
+  twice: boolean;
+}
+
+/** A part's style in a loop: where it turns from, where it rests, and how it moves (not with motion turned down). */
+function partStyle(loop: Loop, part: BotPart, copy: number, own: Own, still: boolean) {
+  const style: object[] = [fill];
+  const o = origin(part, copy);
+  if (o) style.push({ transformOrigin: o });
+  const rest = loop.rest?.[part] ?? REST[part];
+  if (rest) style.push(styleOf(rest, stepsOf([rest])));
+  if (still) return style;
+  const blink = part === "lids" && !loop.moves.lids && blinks(loop);
+  const move = blink ? (own.twice ? BLINK_TWICE : BLINK) : loop.moves[part];
+  if (move) style.push(animation(move, leadOf(move, own.phase, copy), blink ? own.blink : undefined));
+  return style;
+}
 
 /** `hex` mixed with white, as the desktop's `color-mix(in srgb, currentColor 35%, #fff)`. */
 function lighter(hex: string | undefined, amount = 0.65): string {
@@ -86,44 +112,55 @@ function Layer({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * The desktop's Ret bot (components/ui/RetBot), drawn from the same shapes and moving the same way:
- * each moving part a layer of its own, animated on the UI thread by Reanimated's CSS animations.
+ * The desktop's Ret bot (components/ui/RetBot): drawn from the same shapes, in the mood of what the
+ * thread's doing, moving in the same loop (`loop`, see botLoop). Each moving part is a layer of its
+ * own.
  */
-export const RetBot = memo(function RetBot({ mood }: { mood: BotMood }) {
+export const RetBot = memo(function RetBot({ mood, loop }: { mood: BotMood; loop: string }) {
+  const l = LOOP_BY_NAME[loop] ?? BOT_LOOPS[mood][0];
   const [accent, green, amber] = useCSSVariable(["--color-accent", "--color-green", "--color-amber"]) as string[];
   const color = mood === "doze" ? green : mood === "ask" ? amber : accent;
-  // Each one blinks on its own beat.
-  const [beat] = useState(() => `${(Math.random() * 4.4).toFixed(2)}s`);
-  const reduce = useReducedMotion();
-  const m = reduce ? still(motion(mood, beat)) : motion(mood, beat);
   const lit = lighter(color);
+  const [own] = useState<Own>(() => ({ phase: Math.random() * 3, blink: 3.6 + Math.random() * 2.8, twice: Math.random() < 0.4 }));
+  const still = useReducedMotion();
+  const at = (part: BotPart, copy = 0) => partStyle(l, part, copy, own, still);
+  const has = (part: BotPart) => usesPart(l, part);
   return (
     <View style={{ width: S.width, height: S.height }} pointerEvents="none">
-      <Animated.View style={[fill, { transformOrigin: origin(S.pivots.body) }, m.body]}>
-        {[0, 1].map((i) => (
-          <Animated.View key={i} style={[fill, { transformOrigin: origin(i ? S.pivots.antR : S.pivots.antL) }, i ? m.antR : m.antL]}>
+      <Animated.View style={at("body")}>
+        {(["antL", "antR"] as const).map((part, i) => (
+          <Animated.View key={part} style={at(part)}>
             <Layer>
               <Path d={S.stalks[i]} fill="none" stroke={color} strokeWidth={S.stroke.stalk} strokeLinecap="round" />
               <Circle cx={S.tips[i].x} cy={S.tips[i].y} r={S.tipR} fill={color} />
             </Layer>
-            <Animated.View style={[fill, { opacity: 0 }, i ? m.ledR : m.ledL]}>
-              <Layer>
-                <Circle cx={S.tips[i].x} cy={S.tips[i].y} r={S.ledR} fill={lit} />
-              </Layer>
-            </Animated.View>
+            {has("led") && (
+              <Animated.View style={at("led", i)}>
+                <Layer>
+                  <Circle cx={S.tips[i].x} cy={S.tips[i].y} r={S.ledR} fill={lit} />
+                </Layer>
+              </Animated.View>
+            )}
+            {has("ring") && (
+              <Animated.View style={at("ring", i)}>
+                <Layer>
+                  <Circle cx={S.tips[i].x} cy={S.tips[i].y} r={S.tipR} fill="none" stroke={color} strokeWidth={S.stroke.ring} />
+                </Layer>
+              </Animated.View>
+            )}
           </Animated.View>
         ))}
         <Layer>
           <Path d={S.head} fill={color} fillRule="evenodd" />
         </Layer>
-        <Animated.View style={[fill, by(0.6, -0.3), m.pupils]}>
+        <Animated.View style={at("pupils")}>
           <Layer>
             {S.eyes.map((e, i) => (
               <Circle key={i} cx={e.x} cy={e.y} r={S.pupilR} fill={color} />
             ))}
           </Layer>
         </Animated.View>
-        <Animated.View style={[fill, { transformOrigin: origin(S.pivots.lids), transform: [{ scaleY: 0 }] }, m.lids]}>
+        <Animated.View style={at("lids")}>
           <Layer>
             {S.eyes.map((e, i) => (
               <Circle key={i} cx={e.x} cy={e.y} r={S.lidR} fill={color} />
@@ -131,22 +168,38 @@ export const RetBot = memo(function RetBot({ mood }: { mood: BotMood }) {
           </Layer>
         </Animated.View>
       </Animated.View>
-      {mood === "think" &&
+      {has("puff") &&
         S.puffR.map((r, i) => (
-          <Animated.View key={r} style={[fill, { opacity: 0, transformOrigin: origin(S.pivots.puff) }, m.puff, m.puff && "animationName" in m.puff && { animationDelay: `${i * 0.8}s` }]}>
+          <Animated.View key={r} style={at("puff", i)}>
             <Layer>
               <Circle cx={S.puff.x} cy={S.puff.y} r={r} fill="none" stroke={color} strokeWidth={S.stroke.puff} />
             </Layer>
           </Animated.View>
         ))}
-      {mood === "doze" &&
+      {has("z") &&
         [0, 1, 2].map((i) => (
-          <Animated.View key={i} style={[fill, { opacity: 0, transformOrigin: origin(S.pivots.z) }, m.z, m.z && "animationName" in m.z && { animationDelay: `${i}s` }]}>
+          <Animated.View key={i} style={at("z", i)}>
             <Layer>
               <Path d={S.z} fill="none" stroke={color} strokeWidth={S.stroke.z} strokeLinecap="round" strokeLinejoin="round" />
             </Layer>
           </Animated.View>
         ))}
+      {has("note") &&
+        [0, 1].map((i) => (
+          <Animated.View key={i} style={at("note", i)}>
+            <Layer>
+              <Circle cx={S.note.head.x} cy={S.note.head.y} r={S.note.headR} fill={color} />
+              <Path d={S.note.stem} fill="none" stroke={color} strokeWidth={S.stroke.note} strokeLinecap="round" />
+            </Layer>
+          </Animated.View>
+        ))}
+      {has("spark") && (
+        <Animated.View style={at("spark")}>
+          <Layer>
+            <Path d={S.spark} fill={color} />
+          </Layer>
+        </Animated.View>
+      )}
     </View>
   );
 });

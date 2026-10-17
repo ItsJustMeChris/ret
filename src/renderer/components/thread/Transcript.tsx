@@ -19,6 +19,7 @@ import { TurnRail } from "./TurnRail";
 import { Shimmer } from "../ui/Shimmer";
 import { RetBot } from "../ui/RetBot";
 import { useWork } from "./useWork";
+import { botLoop } from "../../lib/retBotMotion";
 import { hostOfView } from "../../state/projectTree";
 import { appKey, computerUseOf, useAppInfosFor, useScreen, type Shot } from "../../state/computerUse";
 
@@ -214,7 +215,7 @@ function Working({ threadId, turnId, lastItemId, since, elsewhere }: { threadId:
   const work = useWork(threadId, turnId, lastItemId, elsewhere, secs);
   return (
     <div className="working" title={work.label}>
-      <RetBot mood={work.mood} />
+      <RetBot mood={work.mood} loop={work.loop} />
       <Shimmer key={work.verb} className="working-verb" text={work.verb} />
       <span className="muted">{secs >= 1 ? duration(secs * 1000) : ""}</span>
     </div>
@@ -241,7 +242,7 @@ function BackgroundWork({ threadId }: { threadId: string }) {
   return (
     <section className="background-work">
       <div className="working">
-        <RetBot mood="doze" />
+        <RetBot mood="doze" loop={botLoop("doze", threadId, Math.floor(Date.now() / 1000)).name} />
         <span>{backgroundLabel(count)}</span>
         <span className="muted">{agent} picks this up again when it's done</span>
       </div>
