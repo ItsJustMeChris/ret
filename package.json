@@ -58,7 +58,7 @@
       "dist/**",
       "package.json",
       "!node_modules/node-pty/{src,deps,third_party,scripts,typings}/**",
-      "!node_modules/node-pty/**/*.pdb"
+      "!node_modules/node-pty/prebuilds/!(${platform}-*)/**"
     ],
     "asarUnpack": [
       "node_modules/node-pty/**"
@@ -66,10 +66,7 @@
     "npmRebuild": false,
     "win": {
       "target": "nsis",
-      "icon": "build/icon.ico",
-      "files": [
-        "!node_modules/node-pty/prebuilds/darwin-*/**"
-      ]
+      "icon": "build/icon.ico"
     },
     "mac": {
       "target": [
@@ -89,9 +86,6 @@
         }
       ],
       "category": "public.app-category.developer-tools",
-      "files": [
-        "!node_modules/node-pty/prebuilds/win32-*/**"
-      ],
       "icon": "build/icon.icns",
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
