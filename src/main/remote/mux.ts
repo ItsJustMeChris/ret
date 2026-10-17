@@ -14,6 +14,8 @@ interface Attached {
   epoch: number;
   /** Threads this client subscribed to (thread/start, fork, resume). */
   subs: Set<string>;
+  /** Terminals it started (process/spawn handles): their output goes to it alone, and they end when it goes. */
+  procs: Set<string>;
 }
 
 interface Pending {
@@ -24,6 +26,8 @@ interface Pending {
   id: string;
   method: string;
   threadId: string | null;
+  /** A process/spawn's handle: taken back if the spawn fails. */
+  handle?: string;
 }
 
 interface InitState {
@@ -38,6 +42,8 @@ interface InitState {
 const REQUEST = /^\{"id":(-?\d+|"(?:[^"\\]|\\.)*"),"method":"((?:[^"\\]|\\.)*)"/;
 const RESPONSE = /^\{"id":"~(\d+)"(?=,(?!"method"))/;
 const MUX_ID = /^~(\d+)$/;
+const PROCESS_NOTIFICATION = /^\{"method":"process\/(\w+)"/;
+const PROCESS_HANDLE = /"processHandle":"((?:[^"\\]|\\.)*)"/;
 
 const SUBSCRIBES = new Set(["thread/start", "thread/fork", "thread/resume"]);
 
@@ -50,6 +56,8 @@ const SUBSCRIBES = new Set(["thread/start", "thread/fork", "thread/resume"]);
  * `serverRequest/resolved`. Codex takes one `initialize` per connection, so the mux makes it once
  * and hands later clients the cached reply, plus whatever is still waiting on an answer. Thread
  * subscriptions are counted, so one client unsubscribing doesn't cut the stream off for another.
+ * Terminals (`process/*`) belong to the client that started them: their output goes to it alone,
+ * and they're ended when it leaves or reloads.
  */
 export class AgentMux {
   private clients = new Map<MuxClient, Attached>();
@@ -61,6 +69,8 @@ export class AgentMux {
   /** Server requests already answered (or settled by the engine): later answers are dropped. */
   private answered = new Set<string>();
   private init: InitState = freshInit();
+  /** Who started each running terminal, by handle. */
+  private procOwners = new Map<string, Attached>();
 
   constructor(
     private readonly send: (line: string) => void,
@@ -72,7 +82,7 @@ export class AgentMux {
   }
 
   attach(client: MuxClient) {
-    const a: Attached = { client, epoch: 0, subs: new Set() };
+    const a: Attached = { client, epoch: 0, subs: new Set(), procs: new Set() };
     this.clients.set(client, a);
     client.status(this.view(a));
   }
@@ -171,8 +181,18 @@ export class AgentMux {
       a.subs.delete(threadId);
       if (this.heldByOthers(threadId, a)) return this.reply(a, id, { result: { status: "unsubscribed" } });
     }
+    // Owned from the start: its first output can come before the reply.
+    let handle: string | undefined;
+    if (method === "process/spawn") {
+      const h = safeParams(params)?.processHandle;
+      if (typeof h === "string" && !this.procOwners.has(h)) {
+        handle = h;
+        this.procOwners.set(h, a);
+        a.procs.add(h);
+      }
+    }
     const n = this.nextId++;
-    this.pending.set(n, { owner: a, epoch: a.epoch, id, method, threadId });
+    this.pending.set(n, { owner: a, epoch: a.epoch, id, method, threadId, handle });
     this.send(rewrite(n));
   }
 
@@ -207,8 +227,13 @@ export class AgentMux {
     return false;
   }
 
-  /** A client left or reset: unsubscribe what only it was watching. */
+  /** A client left or reset: unsubscribe what only it was watching, and end its terminals. */
   private release(a: Attached) {
+    for (const handle of a.procs) {
+      this.procOwners.delete(handle);
+      this.kill(handle);
+    }
+    a.procs.clear();
     for (const threadId of a.subs) {
       if (this.heldByOthers(threadId, a)) continue;
       const n = this.nextId++;
@@ -216,6 +241,12 @@ export class AgentMux {
       this.send(JSON.stringify({ id: `~${n}`, method: "thread/unsubscribe", params: { threadId } }));
     }
     a.subs.clear();
+  }
+
+  private kill(handle: string) {
+    const n = this.nextId++;
+    this.pending.set(n, { owner: null, epoch: 0, id: "", method: "process/kill", threadId: null });
+    this.send(JSON.stringify({ id: `~${n}`, method: "process/kill", params: { processHandle: handle } }));
   }
 
   private live(a: Attached) {
@@ -240,6 +271,18 @@ export class AgentMux {
       const r = RESPONSE.exec(line);
       if (r) {
         this.response(Number(r[1]), line, (orig) => `{"id":${orig}${line.slice(r[0].length)}`, to);
+        continue;
+      }
+      const proc = PROCESS_NOTIFICATION.exec(line);
+      if (proc) {
+        const handle = PROCESS_HANDLE.exec(line)?.[1];
+        const owner = handle !== undefined ? this.procOwners.get(handle) : undefined;
+        if (owner && proc[1] === "exited") {
+          this.procOwners.delete(handle!);
+          owner.procs.delete(handle!);
+        }
+        if (owner) to(owner, line);
+        else all(line);
         continue;
       }
       if (line.startsWith('{"method":"') && !line.startsWith('{"method":"serverRequest/resolved"')) {
@@ -281,7 +324,16 @@ export class AgentMux {
       return;
     }
     const a = p.owner;
-    if (!this.live(a) || a.epoch !== p.epoch) return;
+    const gone = !this.live(a) || a.epoch !== p.epoch;
+    if (p.handle) {
+      if (isError(line, parsed)) {
+        if (this.procOwners.get(p.handle) === a) {
+          this.procOwners.delete(p.handle);
+          a.procs.delete(p.handle);
+        }
+      } else if (gone) this.kill(p.handle); // it started after its window left: nobody would ever see it
+    }
+    if (gone) return;
     if (SUBSCRIBES.has(p.method) && !isError(line, parsed)) {
       const threadId = p.method === "thread/resume" ? p.threadId : msg()?.result?.thread?.id;
       if (typeof threadId === "string") a.subs.add(threadId);
@@ -305,6 +357,14 @@ export class AgentMux {
 
 function freshInit(): InitState {
   return { inFlight: false, waiters: [], initializedSent: false };
+}
+
+function safeParams(params: () => any): any {
+  try {
+    return params();
+  } catch {
+    return null;
+  }
 }
 
 function safeParse(line: string): any {

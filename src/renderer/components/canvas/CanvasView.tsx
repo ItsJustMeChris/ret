@@ -1,9 +1,10 @@
 import { startTransition, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
-import { Check, ChevronDown, Command, Copy, Folder, GitFork, LayoutGrid, MessageSquarePlus, Minus, Pencil, Plus, Scan, SquareDashed, Trash2, X, Code2, Inbox } from "lucide-react";
+import { Check, ChevronDown, Command, Copy, Folder, GitFork, LayoutGrid, MessageSquarePlus, Minus, Pencil, Plus, Scan, SquareDashed, SquareTerminal, Trash2, X, Code2, Inbox } from "lucide-react";
 import { activeBoard, appId, newId, updateBoard, useUI, type AppKind, type Board, type CanvasWin } from "../../state/ui";
 import { DRAG_APP } from "../Titlebar";
 import { closeWindow, focusWindow, newThread, openThread } from "../../state/actions";
 import { useThreads } from "../../state/threads";
+import { newTerminalWindow } from "../../state/terminals";
 import type { ProjectNode } from "../../state/projects";
 import { projectKeyNow, projectTreeNow } from "../../state/projectTree";
 import { Links } from "./Links";
@@ -739,7 +740,10 @@ function canvasMenu(at: { x: number; y: number }, x: number, y: number, setMenu:
   const create = (p: ProjectNode) => newThread(p.key, p.path, { mode: "canvas", at });
   return [
     ...(here
-      ? [{ label: `New thread in ${here.name}`, icon: <MessageSquarePlus size={14} />, hint: "here", onClick: () => create(here) }]
+      ? [
+          { label: `New thread in ${here.name}`, icon: <MessageSquarePlus size={14} />, hint: "here", onClick: () => create(here) },
+          { label: `Terminal in ${here.name}`, icon: <SquareTerminal size={14} />, hint: "here", onClick: () => newTerminalWindow({ cwd: here.path, host: here.host }, at) },
+        ]
       : []),
     {
       label: "New thread in…",

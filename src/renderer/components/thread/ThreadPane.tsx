@@ -15,6 +15,7 @@ import {
   Pencil,
   PanelRight,
   Paperclip,
+  SquareTerminal,
 } from "lucide-react";
 import { NO_AGENTS, hostOfThread, useThreads, markAttended, markVisible } from "../../state/threads";
 import { useThread } from "../../state/useThread";
@@ -41,6 +42,8 @@ import { diffStats, compactNumber, plainText } from "../../lib/format";
 import { Markdown } from "../Markdown";
 import { Select, type SelectOption } from "../ui/Select";
 import { useShown, useVisibility } from "../ui/Kept";
+import { TerminalDock } from "../terminal/TerminalDock";
+import { openThreadTerminalWindow, toggleDock, useThreadTerminalRunning } from "../../state/terminals";
 
 interface Props {
   threadId: string;
@@ -51,6 +54,8 @@ interface Props {
   windowControls?: React.ReactNode;
   /** The size class it'll most likely have, when it's built before it's shown (a canvas window off screen). */
   initialSize?: SizeClass;
+  /** Its terminal panel goes elsewhere (Code mode puts it under the editor). */
+  dockless?: boolean;
 }
 
 export const ThreadPane = memo(function ThreadPane(props: Props) {
@@ -175,6 +180,8 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
           {size === "wide" && showDetails && <SidePanel threadId={threadId} />}
         </div>
       )}
+      {/* On the canvas a thread's terminal is a window of its own. */}
+      {props.chrome === "focus" && !props.dockless && size !== "glance" && <TerminalDock threadId={threadId} />}
     </div>
   );
 });
@@ -314,6 +321,7 @@ function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, wi
             {size === "wide" && <span>{ctxPct}%</span>}
           </span>
         )}
+        {size !== "glance" && <TerminalButton threadId={threadId} chrome={chrome} />}
         {!draft && (
           <button className="icon-btn" title="Fork" onClick={forkMenu}>
             <GitFork size={14} />
@@ -329,6 +337,25 @@ function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, wi
       </div>
       {menu && <Menu {...menu} onClose={() => setMenu(null)} />}
     </div>
+  );
+}
+
+/**
+ * The thread's terminal: its panel, below (Focus, Code, the Inbox), or its window beside it (canvas).
+ * A dot says one is running while it's out of sight.
+ */
+function TerminalButton({ threadId, chrome }: { threadId: string; chrome: Props["chrome"] }) {
+  const open = useUI((s) => chrome === "focus" && !!s.termDocks[threadId]?.open);
+  const running = useThreadTerminalRunning(threadId);
+  return (
+    <button
+      className={`icon-btn term-btn ${open ? "on" : ""}`}
+      title={chrome === "focus" ? `${open ? "Hide" : "Show"} terminal (Ctrl+\`)` : "Open its terminal beside it (Ctrl+`)"}
+      onClick={() => (chrome === "focus" ? toggleDock(threadId) : openThreadTerminalWindow(threadId))}
+    >
+      <SquareTerminal size={14} />
+      {running && !open && <span className="term-btn-dot" />}
+    </button>
   );
 }
 

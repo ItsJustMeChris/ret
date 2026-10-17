@@ -117,6 +117,8 @@ function SettingsInner() {
                 ["Ctrl W", "Close tab / window"],
                 ["Ctrl 1–9", "Jump to tab / window"],
                 ["Ctrl Tab", "Next tab / window"],
+                ["Ctrl `", "Show / hide the thread's terminal"],
+                ["Ctrl Shift `", "New terminal"],
                 ["Ctrl 0", "Canvas: fit all"],
                 ["Ctrl ± / Ctrl+scroll", "Canvas: zoom"],
                 ["Space + drag", "Canvas: pan"],

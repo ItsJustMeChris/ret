@@ -29,6 +29,7 @@ import { ClaudeEngine } from "./claude/engine";
 import { findSystemClaude, openLoginTerminal, probeClaudeVersion } from "./claude/platform";
 import { ClaudeUpdater } from "./claude/updater";
 import { LocalUsage } from "./usage";
+import { PtyService } from "./pty";
 import { renderVisualization } from "./visualize";
 import { createWorktree, gitInfo, mainCheckouts } from "./git";
 import { AgentMux, RemoteAccess, type HostCalls, type MuxClient } from "./remote";
@@ -148,7 +149,22 @@ const codexActivity = new LocalUsage("codex", () => [join(codexHome(), "sessions
 );
 const ACTIVITY_REQUEST = /^\{"id":("~\d+"),"method":"ret\/usage\/activity"/;
 
+/**
+ * Terminals on the Codex connection: Ret runs them itself (as the Claude engine does), so they work
+ * the same whichever agents are on, and keep running while Codex restarts or updates.
+ */
+const codexPty = new PtyService((method, params) => muxes.codex.fromEngine([JSON.stringify({ method, params })]));
+const PROCESS_REQUEST = /^\{"id":("~\d+"),"method":"process\//;
+
 function toCodex(line: string) {
+  if (PROCESS_REQUEST.test(line)) {
+    const msg = JSON.parse(line);
+    codexPty.call(msg.method, msg.params).then(
+      (result) => muxes.codex.fromEngine([JSON.stringify({ id: msg.id, result })]),
+      (err) => muxes.codex.fromEngine([JSON.stringify({ id: msg.id, error: { code: err?.code ?? -32603, message: String(err?.message ?? err) } })]),
+    );
+    return;
+  }
   const m = ACTIVITY_REQUEST.exec(line);
   if (!m) return appServer.send(line);
   codexActivity.read().then(
@@ -787,5 +803,6 @@ app.on("before-quit", (e) => {
   e.preventDefault();
   claudeUpdater.stop();
   claude.stop();
+  codexPty.dispose();
   void Promise.all([appServer.stop(), remote?.shutdown()]).finally(() => app.quit());
 });

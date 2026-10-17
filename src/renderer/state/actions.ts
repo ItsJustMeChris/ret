@@ -37,6 +37,7 @@ import { activeBoard, appId, appKind, fileId, isApp, isDraft, isFile, isThread, 
 import { onFsChanged, useFiles } from "./files";
 import { captureLive, captureTurns, noteAppRequest, screenTurnEnded } from "./computerUse";
 import { turnFinished } from "./finished";
+import { closeThreadTerminals, moveTerminals, terminalWindowClosed } from "./terminals";
 
 // ---------------------------------------------------------------------------
 // Boot: wire the transport into the stores.
@@ -1114,6 +1115,7 @@ async function renameThreadImpl(threadId: string, name: string) {
 async function archiveThreadImpl(threadId: string) {
   await rpcFor(ownerOf(threadId)).request("thread/archive", { threadId });
   closeEverywhere(threadId);
+  closeThreadTerminals(threadId);
   useThreads.setState((s) => {
     const threads = { ...s.threads };
     delete threads[threadId];
@@ -1273,6 +1275,9 @@ export function openFile(path: string, opts: { line?: number; col?: number; from
   openThread(id, { side: true, besideThread: from ?? (ui.activeTab && !isFile(ui.activeTab) ? ui.activeTab : undefined) });
 }
 
+/** A new window's size for each of Ret's own views on the canvas. */
+const APP_SIZE = { code: { w: 1240, h: 760 }, inbox: { w: 980, h: 680 }, terminal: { w: 760, h: 440 } } as const;
+
 export function openThread(threadId: string, opts: OpenOptions = {}) {
   const ui = useUI.getState();
   const mode = opts.mode ?? ui.mode;
@@ -1306,21 +1311,16 @@ export function openThread(threadId: string, opts: OpenOptions = {}) {
   }
   const z = Math.max(0, ...board.windows.map((w) => w.z)) + 1;
   const besideWin = opts.besideThread ? board.windows.find((w) => w.threadId === opts.besideThread) : undefined;
-  const size = isApp(threadId) ? (appKind(threadId) === "code" ? { w: 1240, h: 760 } : { w: 980, h: 680 }) : { w: 560, h: 640 };
+  const size = isApp(threadId) ? APP_SIZE[appKind(threadId)] : { w: 560, h: 640 };
+  // A thread beside another takes its size; an app has its own.
+  const w = isApp(threadId) ? size.w : (besideWin?.w ?? size.w);
+  const h = isApp(threadId) ? size.h : (besideWin?.h ?? size.h);
   const pos = opts.at
-    ? clampToView(opts.at, isApp(threadId) ? size.w : (besideWin?.w ?? size.w), isApp(threadId) ? size.h : (besideWin?.h ?? size.h), board.viewport)
+    ? clampToView(opts.at, w, h, board.viewport)
     : besideWin
-      ? freeSpot(board.windows, besideWin.x + besideWin.w + 24, besideWin.y, besideWin.w, besideWin.h)
+      ? freeSpot(board.windows, besideWin.x + besideWin.w + 24, besideWin.y, w, h)
       : freeSpotInView(board.windows, board.viewport, size.w, size.h);
-  const win: CanvasWin = {
-    id: newId(),
-    threadId,
-    x: pos.x,
-    y: pos.y,
-    w: isApp(threadId) ? size.w : (besideWin?.w ?? size.w),
-    h: isApp(threadId) ? size.h : (besideWin?.h ?? size.h),
-    z,
-  };
+  const win: CanvasWin = { id: newId(), threadId, x: pos.x, y: pos.y, w, h, z };
   updateBoard((b) => ({ ...b, windows: [...b.windows, win] }));
   useUI.setState({ focusedWindow: win.id });
   window.dispatchEvent(new CustomEvent("ret:reveal-window", { detail: win.id }));
@@ -1451,9 +1451,11 @@ export function focusWindow(winId: string, reveal = false) {
 }
 
 export function closeWindow(winId: string) {
+  const win = activeBoard().windows.find((w) => w.id === winId);
   updateBoard((b) => ({ ...b, windows: b.windows.filter((w) => w.id !== winId) }));
   useUI.setState((s) => ({ focusedWindow: s.focusedWindow === winId ? null : s.focusedWindow }));
   gcDrafts();
+  if (win) terminalWindowClosed(win.threadId);
 }
 
 export function closeTab(threadId: string) {
@@ -1489,6 +1491,7 @@ function replaceDraft(draftId: string, threadId: string) {
         Object.entries(s.splits).map(([k, v]) => [k === draftId ? threadId : k, v.right === draftId ? { ...v, right: threadId } : v]),
       ),
       boards: s.boards.map((b) => ({ ...b, windows: b.windows.map((w) => (w.threadId === draftId ? { ...w, threadId } : w)) })),
+      ...moveTerminals(s, draftId, threadId),
     };
   });
 }

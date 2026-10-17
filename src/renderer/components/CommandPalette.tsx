@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AppWindow, FolderPlus, GitFork, LayoutGrid, MessageSquarePlus, PanelLeft, RefreshCw, Rows3, Scan, Settings, FolderGit2, Code2, Inbox } from "lucide-react";
-import { useUI, activeBoard, isThread } from "../state/ui";
+import { AppWindow, FolderPlus, GitFork, LayoutGrid, MessageSquarePlus, PanelLeft, RefreshCw, Rows3, Scan, Settings, FolderGit2, Code2, Inbox, SquareTerminal } from "lucide-react";
+import { useUI, activeBoard, isFile, isThread } from "../state/ui";
+import { newTerminalWindow, toggleTerminal } from "../state/terminals";
 import { useThreads } from "../state/threads";
 import { useConn } from "../state/conn";
 import { flattenNode, spawnedBy, threadTitle } from "../state/projects";
@@ -77,6 +78,20 @@ function PaletteInner() {
         run: () => newThread(p.key, p.path),
       })),
       { id: "add", kind: "command", title: "Add project folder…", icon: <FolderPlus size={14} />, run: () => void addProject() },
+      // On the canvas a terminal can be a window of its own, in any project.
+      ...(useUI.getState().mode === "canvas"
+        ? tree.slice(0, 30).map((p) => ({
+            id: `term:${p.key}`,
+            kind: "command" as const,
+            title: `Terminal in ${p.name}${p.host ? ` on ${hostName(p.host)}` : ""}`,
+            sub: p.path,
+            icon: <SquareTerminal size={14} />,
+            run: () => newTerminalWindow({ cwd: p.path, host: p.host }),
+          }))
+        : []),
+      ...(cur && !isFile(cur)
+        ? [{ id: "terminal", kind: "command" as const, title: "Terminal for current thread", sub: "Ctrl+`", icon: <SquareTerminal size={14} />, run: () => toggleTerminal(cur) }]
+        : []),
       ...(curReal
         ? [
             { id: "fork", kind: "command" as const, title: "Fork current thread", icon: <GitFork size={14} />, run: () => void forkThread(curReal) },
@@ -119,7 +134,7 @@ function PaletteInner() {
   const results = useMemo(() => {
     const query = q.trim().toLowerCase();
     if (!query) {
-      return [...entries.filter((e) => e.kind === "thread").slice(0, 8), ...entries.filter((e) => e.kind === "command" && !e.id.startsWith("new:")).slice(0, 12)];
+      return [...entries.filter((e) => e.kind === "thread").slice(0, 8), ...entries.filter((e) => e.kind === "command" && !e.id.startsWith("new:") && !e.id.startsWith("term:")).slice(0, 12)];
     }
     return entries
       .map((e) => ({ e, s: Math.max(score(query, e.title), e.sub ? score(query, e.sub) - 20 : -1) }))

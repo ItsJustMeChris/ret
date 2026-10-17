@@ -12,6 +12,7 @@ import { timeAgo } from "../../lib/format";
 import { ThreadPane } from "../thread/ThreadPane";
 import { FilePane } from "./FilePane";
 import { Select } from "../ui/Select";
+import { TerminalDock } from "../terminal/TerminalDock";
 
 type Change = "add" | "update" | "delete";
 type Entry = { name: string; dir: boolean };
@@ -123,11 +124,13 @@ export function CodeView() {
             <span>…or click one the agent mentions in the chat. Files reload as it edits them.</span>
           </div>
         )}
+        {/* The chat thread's terminal, under the editor rather than in the narrow chat. */}
+        {code.chat && <TerminalDock threadId={code.chat} />}
       </section>
       <Gutter onDrag={(dx) => setWidth("chatWidth", Math.max(320, Math.min(900, useUI.getState().code.chatWidth - dx)))} />
       <aside className="code-chat">
         <ChatHead project={project} chat={code.chat} />
-        {code.chat ? <ThreadPane key={code.chat} threadId={code.chat} chrome="focus" focused /> : <div className="code-empty">No thread yet.</div>}
+        {code.chat ? <ThreadPane key={code.chat} threadId={code.chat} chrome="focus" focused dockless /> : <div className="code-empty">No thread yet.</div>}
       </aside>
     </div>
   );

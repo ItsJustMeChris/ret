@@ -3,6 +3,7 @@ import { useUI, activeBoard, isThread, type ViewMode } from "./state/ui";
 import { useConn } from "./state/conn";
 import { useThreads } from "./state/threads";
 import { closeCodeTab, closePane, closeTab, closeWindow, focusWindow, forkThread, newThreadNear } from "./state/actions";
+import { toggleTerminal } from "./state/terminals";
 import { Titlebar } from "./components/Titlebar";
 import { SidebarShell } from "./components/SidebarShell";
 import { FocusView } from "./components/FocusView";
@@ -83,6 +84,13 @@ function useShortcuts() {
       }
       if (!mod) return;
       const k = e.key.toLowerCase();
+      // Ctrl+`: the current thread's terminal (Ctrl+Shift+`: another one). By key position, so it's the
+      // key left of 1 whatever the layout.
+      if (e.code === "Backquote" && !e.altKey) {
+        e.preventDefault();
+        toggleTerminal(currentThreadId(), { fresh: e.shiftKey });
+        return;
+      }
       if (k === "k") {
         e.preventDefault();
         useUI.setState({ paletteOpen: !ui.paletteOpen });

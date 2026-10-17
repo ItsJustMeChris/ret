@@ -9,7 +9,8 @@ const common = {
   format: "cjs",
   target: "node22",
   // ws optionally loads native accelerators; they are not installed and ws falls back to JS.
-  external: ["electron", "bufferutil", "utf-8-validate"],
+  // node-pty is native: loaded from node_modules (unpacked from the asar in a build).
+  external: ["electron", "bufferutil", "utf-8-validate", "node-pty"],
   sourcemap: watch ? "inline" : false,
   minify: !watch,
   logLevel: "info",

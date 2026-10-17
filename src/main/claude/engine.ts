@@ -17,6 +17,7 @@ import type { EngineStatus } from "../../shared/bridge";
 import type { BackgroundTask, Model, RateLimitSnapshot, Thread, TurnWithPlan } from "../../shared/protocol";
 import type { RateLimitWindow } from "../../shared/protocol/generated/v2";
 import { FsService } from "../fsService";
+import { PtyService } from "../pty";
 import { gitInfo } from "../git";
 import { dailyBuckets, LocalUsage } from "../usage";
 import { sameTasks, TranscriptBackground } from "./background";
@@ -102,6 +103,8 @@ export class ClaudeEngine {
   private state: EngineState = { archived: [], lineage: {}, settings: {} };
   private saveTimer: NodeJS.Timeout | null = null;
   private fs = new FsService((m, p) => this.notify(m, p));
+  /** Terminals: Ret runs them itself, so a Claude-only setup has them too. */
+  private pty = new PtyService((m, p) => this.notify(m, p));
   private models: { at: number; list: Model[] } | null = null;
   private probing: Promise<void> | null = null;
   /** Plan usage: the 5-hour/7-day windows, plus per-model weekly buckets (Fable, Opus…) by limit id. */
@@ -200,6 +203,7 @@ export class ClaudeEngine {
   stop() {
     this.closeAll();
     this.fs.dispose();
+    this.pty.dispose();
     void this.saveNow();
   }
 
@@ -304,6 +308,7 @@ export class ClaudeEngine {
 
   private async call(method: string, p: any): Promise<unknown> {
     if (this.fs.handles(method)) return this.fs.call(method, p);
+    if (this.pty.handles(method)) return this.pty.call(method, p);
     if (method !== "initialize" && this.status.state !== "running") throw rpcError(this.status.error ?? "Claude Code is not available");
     switch (method) {
       case "initialize":

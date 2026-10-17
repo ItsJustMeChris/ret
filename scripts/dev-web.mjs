@@ -12,7 +12,6 @@ import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import net from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { build } from "esbuild";
 import { createServer } from "vite";
@@ -70,7 +69,8 @@ server.printUrls();
 
 /** Bundle the Claude engine for Node and serve it to one browser tab at a time. */
 async function startClaude() {
-  const dir = join(tmpdir(), "ret-dev-web");
+  // Inside the repo's node_modules, so the bundle finds node-pty (native, so not bundled) from there.
+  const dir = join(process.cwd(), "node_modules", ".cache", "ret-dev-web");
   mkdirSync(dir, { recursive: true });
   const out = join(dir, "claude-engine.cjs");
   try {
@@ -85,6 +85,7 @@ async function startClaude() {
       format: "cjs",
       target: "node22",
       outfile: out,
+      external: ["node-pty"],
       define: { "import.meta.url": "__ret_import_meta_url" },
       banner: { js: 'var __ret_import_meta_url = require("url").pathToFileURL(__filename).href;' },
       logLevel: "warning",

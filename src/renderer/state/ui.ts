@@ -83,6 +83,23 @@ export interface Draft {
   createdAt: number;
 }
 
+/** A terminal: a shell in a folder, on this computer or a paired device (its process lives only while Ret runs). */
+export interface TermConf {
+  cwd: string;
+  /** The paired device it runs on; null for this computer. */
+  host: string | null;
+  /** The thread (or draft) it was opened for: it's listed in that thread's terminal panel. */
+  thread: string | null;
+  createdAt: number;
+}
+
+/** A thread's terminal panel (Focus, Code, Inbox). */
+export interface TermDock {
+  open: boolean;
+  /** Its terminal showing. */
+  active: string | null;
+}
+
 export interface WorktreeInfo {
   path: string;
   branch: string;
@@ -130,6 +147,12 @@ export interface UIState {
   lastAgent?: ProviderId;
   code: CodeLayout;
   inbox: InboxState;
+  /** Terminals, by id: listed in their thread's panel, or shown as windows on the canvas. */
+  terminals: Record<string, TermConf>;
+  /** Each thread's terminal panel, by thread id. */
+  termDocks: Record<string, TermDock>;
+  /** Height of the terminal panel, in px. */
+  termHeight: number;
   paletteOpen: boolean;
   settingsOpen: boolean;
 }
@@ -167,6 +190,9 @@ export const useUI = create<UIState>()(
       composer: { model: null, effort: null, access: "config" },
       code: { project: null, tabs: [], active: null, chat: null, expanded: {}, explorerWidth: 260, chatWidth: 420 },
       inbox: { selected: null },
+      terminals: {},
+      termDocks: {},
+      termHeight: 260,
       paletteOpen: false,
       settingsOpen: false,
     }),
@@ -189,11 +215,16 @@ export const fileId = (path: string, host?: string | null) => `file:${scopedKey(
 export const filePath = (id: string) => pathOfKey(id.slice(5));
 /** The paired device a file view's file is on; null for this computer. */
 export const fileHost = (id: string) => hostOfKey(id.slice(5));
-/** One of Ret's own views (Inbox, Code) living as a window on the canvas desktop. */
-export type AppKind = "inbox" | "code";
+/**
+ * One of Ret's own views living as a window on the canvas desktop: Inbox and Code (one of each), or
+ * a terminal (`app:terminal:<terminal id>`, as many as you like).
+ */
+export type AppKind = "inbox" | "code" | "terminal";
 export const isApp = (id: string) => id.startsWith("app:");
-export const appId = (kind: AppKind) => `app:${kind}`;
-export const appKind = (id: string) => id.slice(4) as AppKind;
+export const appId = (kind: AppKind, instance?: string) => (instance ? `app:${kind}:${instance}` : `app:${kind}`);
+export const appKind = (id: string) => id.slice(4).split(":")[0] as AppKind;
+/** The terminal a canvas window shows, if it's a terminal's. */
+export const terminalOf = (id: string | null | undefined) => (id?.startsWith("app:terminal:") ? id.slice(13) : null);
 /** A real agent thread (not a draft, a file view, or an app window). */
 export const isThread = (id: string) => !isDraft(id) && !isFile(id) && !isApp(id);
 export const newId = uid;

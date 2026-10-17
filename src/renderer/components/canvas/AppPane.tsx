@@ -5,24 +5,25 @@ import { InboxView } from "../inbox/InboxView";
 import { useInboxCount } from "../../state/inbox";
 import { CodeView } from "../code/CodeView";
 import { filePath } from "../../state/ui";
+import { TerminalPane, TerminalTile } from "../terminal/TerminalWindow";
 
 const NAMES = { inbox: "Inbox", code: "Code" } as const;
 
-/** Inbox or Code as a window on the canvas desktop: the same view as its mode, framed. */
-export const AppPane = memo(function AppPane({
-  id,
-  focused,
-  onHeaderPointerDown,
-  onHeaderDoubleClick,
-  windowControls,
-}: {
+type PaneProps = {
   id: string;
   focused: boolean;
   onHeaderPointerDown: (e: React.PointerEvent) => void;
   onHeaderDoubleClick: () => void;
   windowControls: React.ReactNode;
-}) {
-  const kind = appKind(id);
+};
+
+/** One of Ret's views as a window on the canvas desktop: Inbox or Code (the same view as its mode, framed), or a terminal. */
+export const AppPane = memo(function AppPane(props: PaneProps) {
+  return appKind(props.id) === "terminal" ? <TerminalPane {...props} /> : <ModePane {...props} />;
+});
+
+function ModePane({ id, focused, onHeaderPointerDown, onHeaderDoubleClick, windowControls }: PaneProps) {
+  const kind = appKind(id) as "inbox" | "code";
   const count = useInboxCount();
   return (
     <div className={`thread-pane app-pane app-${kind} chrome-window ${focused ? "focused" : ""}`}>
@@ -50,11 +51,17 @@ export const AppPane = memo(function AppPane({
       <div className="app-win-body">{kind === "inbox" ? <InboxView active={focused} /> : <CodeView />}</div>
     </div>
   );
-});
+}
+
+type TileProps = { id: string; onPointerDown: (e: React.PointerEvent) => void; onDoubleClick: () => void };
 
 /** Zoomed out: what the app is up to, at a glance. */
-export function AppTile({ id, onPointerDown, onDoubleClick }: { id: string; onPointerDown: (e: React.PointerEvent) => void; onDoubleClick: () => void }) {
-  const kind = appKind(id);
+export function AppTile(props: TileProps) {
+  return appKind(props.id) === "terminal" ? <TerminalTile {...props} /> : <ModeTile {...props} />;
+}
+
+function ModeTile({ id, onPointerDown, onDoubleClick }: TileProps) {
+  const kind = appKind(id) as "inbox" | "code";
   const count = useInboxCount();
   const active = useUI((s) => s.code.active);
   const tabs = useUI((s) => s.code.tabs.length);

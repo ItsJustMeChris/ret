@@ -13,7 +13,8 @@ export class RpcError extends Error {
   }
 }
 
-type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; method: string };
+/** `kept`: answered whatever the engine's state, so a restart doesn't fail it (see `direct`). */
+type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; method: string; kept?: boolean };
 export type NotificationHandler = (method: string, params: any) => void;
 export type ServerRequestHandler = (req: ServerRequest) => void;
 
@@ -64,7 +65,7 @@ export class RpcClient {
     this.disposed = true;
     this.unsubscribe.forEach((off) => off());
     this.info = null;
-    this.failAll(new Error(`${describe(this.engine)} is gone`));
+    this.failAll(new Error(`${describe(this.engine)} is gone`), true);
   }
 
   private onStatus(s: EngineStatus) {
@@ -119,10 +120,10 @@ export class RpcClient {
     bridge.agents.send(this.engine, JSON.stringify(msg));
   }
 
-  private rawRequest<T>(method: string, params: unknown): Promise<T> {
+  private rawRequest<T>(method: string, params: unknown, kept = false): Promise<T> {
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, method });
+      this.pending.set(id, { resolve, reject, method, kept });
       this.write({ id, method, params });
     });
   }
@@ -142,6 +143,15 @@ export class RpcClient {
       }
     }
     return this.rawRequest<ResultOf<M>>(method, params);
+  }
+
+  /**
+   * A request Ret's main process answers on this connection itself, whatever state the engine is in
+   * (terminals: `process/*`): sent straight away rather than after the engine's handshake, and not
+   * failed by an engine restart.
+   */
+  direct<T = unknown>(method: string, params: unknown): Promise<T> {
+    return this.rawRequest<T>(method, params, true);
   }
 
   /** A request outside the typed protocol (provider extensions, or methods Ret doesn't type). */
@@ -166,9 +176,12 @@ export class RpcClient {
     this.serverRequestHandler = handler;
   }
 
-  private failAll(err: Error) {
-    for (const p of this.pending.values()) p.reject(err);
-    this.pending.clear();
+  private failAll(err: Error, kept = false) {
+    for (const [id, p] of this.pending) {
+      if (p.kept && !kept) continue;
+      p.reject(err);
+      this.pending.delete(id);
+    }
   }
 
   private handleLines(lines: string[]) {

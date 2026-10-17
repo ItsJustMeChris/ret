@@ -1,7 +1,8 @@
 import { memo, startTransition, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Maximize2, Minimize2, X, GitFork, FolderGit2, Copy, Bot } from "lucide-react";
-import { activeBoard, updateBoard, useUI, isApp, isDraft, isFile, isThread, filePath, type CanvasWin } from "../../state/ui";
+import { Maximize2, Minimize2, X, GitFork, FolderGit2, Copy, Bot, RotateCcw, Trash2 } from "lucide-react";
+import { activeBoard, updateBoard, useUI, isApp, isDraft, isFile, isThread, filePath, terminalOf, type CanvasWin } from "../../state/ui";
+import { closeTerminal, restartTerminal } from "../../state/terminals";
 import { FilePane, FileTile } from "../code/FilePane";
 import { AppPane, AppTile } from "./AppPane";
 import { copyText } from "../../lib/files";
@@ -359,8 +360,15 @@ export const CanvasWindow = memo(function CanvasWindow({ win, focused }: { win: 
       );
     };
     const thread = useThreads.getState().threads[id];
+    const term = terminalOf(id);
     const items: MenuItem[] = [
-      ...(isApp(id)
+      ...(term
+        ? [
+            { label: "New shell", icon: <RotateCcw size={14} />, onClick: () => restartTerminal(term) },
+            { label: "End terminal", icon: <Trash2 size={14} />, danger: true, onClick: () => closeTerminal(term) },
+            { separator: true as const },
+          ]
+        : isApp(id)
         ? []
         : isFile(id)
         ? [{ label: "Copy path", icon: <Copy size={14} />, onClick: () => copyText(filePath(id), "Path copied") }, { separator: true as const }]

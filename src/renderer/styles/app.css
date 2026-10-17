@@ -36,6 +36,7 @@
   --shadow-lg: 0 30px 80px -20px rgba(0, 0, 0, 1), 0 10px 24px rgba(0, 0, 0, 0.75);
   --grid-dot: rgba(255, 255, 255, 0.085);
   --code-bg: #0a0a0a;
+  --term-bg: #0a0a0a;
   /* Chart series, one per provider (checked for color-blind separation against --bg). */
   --series-codex: #7383f7;
   --series-claude: #d95926;
@@ -66,6 +67,7 @@
   --shadow-lg: 0 30px 80px -20px rgba(20, 20, 50, 0.35), 0 8px 20px rgba(20, 20, 50, 0.1);
   --grid-dot: rgba(10, 10, 40, 0.11);
   --code-bg: #f3f3f7;
+  --term-bg: #ffffff;
   --series-codex: #4f5fe8;
   --series-claude: #d95926;
 }
@@ -7771,6 +7773,205 @@ body.resizing .sidebar-dock {
 }
 .app-pane .pane-header .inbox-keys + .pane-header-actions {
   margin-left: 0;
+}
+
+/* ==========================================================================
+   Terminals: a thread's panel (Focus, Code, the Inbox) and terminal windows on the canvas
+   ========================================================================== */
+.term-dock {
+  flex: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 110px;
+  /* What the thread (or the editor) keeps above it, however tall it was made elsewhere. */
+  max-height: calc(100% - 140px);
+  border-top: 1px solid var(--line);
+  background: var(--term-bg);
+}
+.term-grip {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  top: -4px;
+  height: 7px;
+  cursor: row-resize;
+}
+.term-grip::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 3px;
+  height: 1px;
+  transition: background-color 0.15s;
+}
+.term-grip:hover::after {
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.term-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 6px 0 8px;
+}
+.term-tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.term-tab {
+  flex: 0 1 180px;
+  min-width: 84px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  border-radius: 6px;
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: pointer;
+}
+.term-tab:hover {
+  color: var(--text-2);
+  background: var(--bg-2);
+}
+.term-tab.active {
+  color: var(--text);
+  background: var(--bg-3);
+}
+.term-tab.done .term-tab-title {
+  color: var(--text-3);
+}
+.term-tab-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.term-tab-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  color: var(--text-3);
+  opacity: 0;
+}
+.term-tab:hover .term-tab-close,
+.term-tab.active .term-tab-close {
+  opacity: 1;
+}
+.term-tab-close:hover {
+  background: var(--bg-4);
+  color: var(--text);
+}
+.term-bar-actions {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+.term-dock-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.term-view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  background: var(--term-bg);
+  cursor: text;
+}
+/* xterm's parent, which it fits itself to. */
+.term-surface {
+  position: absolute;
+  inset: 2px 4px 4px 12px;
+}
+.term-surface .xterm {
+  height: 100%;
+}
+/* xterm's own default (black) shows below the last whole row. */
+.term-surface .xterm .xterm-viewport {
+  background-color: var(--term-bg);
+}
+.term-elsewhere {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--term-bg);
+  color: var(--text-3);
+  font-size: 12.5px;
+  cursor: default;
+}
+.term-gone {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+/* The thread header's terminal button: a dot while one runs out of sight. */
+.term-btn {
+  position: relative;
+}
+.term-btn-dot {
+  position: absolute;
+  top: 4px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.app-terminal .app-win-body {
+  background: var(--term-bg);
+}
+.app-terminal .pane-header {
+  gap: 7px;
+}
+.term-owner {
+  flex: 0 1 auto;
+  min-width: 0;
+  cursor: pointer;
+}
+.term-owner span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.term-owner:hover {
+  background: var(--bg-4);
+  color: var(--text);
+}
+@container pane (width < 560px) {
+  .app-terminal .path-chip,
+  .app-terminal .term-owner span {
+    display: none;
+  }
+}
+.app-tile .term-tile-path {
+  font-family: var(--mono);
+  font-size: calc(11.5px * var(--s));
+  color: var(--text-2);
+  word-break: break-all;
 }
 
 /* Subagents: the ones at work in the parent's Dynamic Island, and a bar in place of their own composer */
