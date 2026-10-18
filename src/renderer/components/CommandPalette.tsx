@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AppWindow, FolderPlus, GitFork, LayoutGrid, MessageSquarePlus, PanelLeft, RefreshCw, Rows3, Scan, Settings, FolderGit2, Code2, Inbox, SquareTerminal } from "lucide-react";
+import { AppWindow, FolderPlus, GitFork, LayoutGrid, MessageSquarePlus, PanelLeft, PanelRight, RefreshCw, Rows3, Scan, Settings, FolderGit2, Code2, Inbox, SquareTerminal } from "lucide-react";
 import { useUI, activeBoard, isFile, isThread } from "../state/ui";
 import { newTerminalWindow, toggleTerminal } from "../state/terminals";
 import { useThreads } from "../state/threads";
@@ -12,6 +12,7 @@ import { StatusDot } from "./StatusDot";
 import { bridge, isDesktop } from "../bridge";
 import { fitAll, tidy } from "./canvas/viewport";
 import { hostName } from "../state/hosts";
+import { toggleDetails } from "./thread/Details";
 
 interface Entry {
   id: string;
@@ -94,6 +95,7 @@ function PaletteInner() {
         : []),
       ...(curReal
         ? [
+            { id: "details", kind: "command" as const, title: "Details for current thread", sub: "Ctrl+Alt+B", icon: <PanelRight size={14} />, run: () => toggleDetails(curReal) },
             { id: "fork", kind: "command" as const, title: "Fork current thread", icon: <GitFork size={14} />, run: () => void forkThread(curReal) },
             ...(isDesktop && threads[curReal]?.gitInfo
               ? [{ id: "forkwt", kind: "command" as const, title: "Fork current thread into new worktree", icon: <FolderGit2 size={14} />, run: () => void forkThread(curReal, { worktree: true }) }]

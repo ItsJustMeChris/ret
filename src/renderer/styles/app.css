@@ -2953,20 +2953,169 @@ body.resizing .transcript {
   color: var(--text-3);
 }
 
-/* Side panel (wide panes) */
-.side-panel {
+/* A thread's details (Details): docked beside the transcript in a wide pane, else a peek over it. */
+.pane-body {
+  position: relative;
+}
+.details {
   flex: none;
-  width: 300px;
-  border-left: 1px solid var(--line);
-  padding: 16px;
+  width: 296px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  gap: 18px;
   background: var(--bg-1);
   user-select: text;
 }
-.side-panel h4,
+.details.docked {
+  border-left: 1px solid var(--line);
+}
+/* Closing, it's out of the flow at once (the transcript takes its room back) and slides away over it. */
+.details.docked.out {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  bottom: 0;
+}
+.details.docked.in {
+  animation: details-dock-in 0.28s var(--ease) both;
+}
+.details.docked.out {
+  animation: details-dock-out 0.2s cubic-bezier(0.4, 0, 0.9, 0.6) both;
+}
+@keyframes details-dock-in {
+  from {
+    transform: translateX(28px);
+    opacity: 0;
+  }
+}
+@keyframes details-dock-out {
+  to {
+    transform: translateX(36px);
+    opacity: 0;
+  }
+}
+/* Narrower: a card hung from the header's button over the transcript, as tall as what it shows. */
+.details.peek {
+  position: absolute;
+  z-index: 20;
+  top: 6px;
+  right: 8px;
+  width: min(296px, calc(100% - 24px));
+  max-height: calc(100% - 12px);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  transform-origin: calc(100% - 40px) 0;
+}
+.details.peek.in {
+  animation: details-peek-in 0.24s var(--ease) both;
+}
+.details.peek.out {
+  animation: details-peek-out 0.14s ease-in both;
+}
+@keyframes details-peek-in {
+  from {
+    transform: translateY(-8px) scale(0.95);
+    opacity: 0;
+  }
+}
+@keyframes details-peek-out {
+  to {
+    transform: translateY(-6px) scale(0.97);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .details.in,
+  .details.out {
+    animation-duration: 1ms; /* still ends, so a closed one goes */
+  }
+}
+.details-sec {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px 16px;
+}
+.details-sec + .details-sec {
+  border-top: 1px solid var(--line);
+}
+.details-sec h4 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.details-meta {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+.details .md-muted {
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.details-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.details .plan-step {
+  align-items: flex-start;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.details .plan-dot {
+  margin-top: 4px;
+}
+/* The transcript's file rows, edge to edge, each opening its diff. */
+.details-files {
+  margin: 0 -16px;
+}
+.details-files .file-head {
+  padding: 0 16px;
+}
+.details-files .diff {
+  max-height: 360px;
+  font-size: 11px;
+}
+.details-bar {
+  height: 4px;
+  margin: 2px 0 6px;
+  border-radius: 2px;
+  background: var(--bg-4);
+  overflow: hidden;
+}
+.details-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: 0 50%;
+  transition: transform 0.4s var(--ease);
+}
+.details .kv-row {
+  gap: 12px;
+  line-height: 1.6;
+}
+.details .kv-row > :first-child {
+  flex: none;
+  color: var(--text-3);
+}
+.details .kv-row > :last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.details .lineage {
+  margin-top: 2px;
+}
+.details-sec h4,
 .empty-grid h4,
 .tok h4,
 .stats h4,
@@ -2978,22 +3127,6 @@ body.resizing .transcript {
   letter-spacing: 0.06em;
   color: var(--text-3);
 }
-.side-panel section {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.side-file {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
-}
-.side-file .path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .kv-row {
   display: flex;
   justify-content: space-between;
@@ -3001,10 +3134,6 @@ body.resizing .transcript {
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
-.side-empty {
-  font-size: 12px;
-}
-
 /* Glance (tiny windows) */
 .glance {
   flex: 1;
@@ -3305,7 +3434,7 @@ html.autoscrolling[data-autoscroll="down"] * {
 }
 /* The canvas is a scroller (CanvasView), so a scroll that runs out in a window's outermost scrolling
    parts mustn't carry on into it and pan the canvas (keys; the wheel is guarded in CanvasView too). */
-.cwin :is(.transcript, .side-panel, .pane-body.draft, .glance, .queue-tray, .goal-detail, .ask-dock, .tree-rows, .inbox-list, .code-tabs, textarea) {
+.cwin :is(.transcript, .details, .pane-body.draft, .glance, .queue-tray, .goal-detail, .ask-dock, .tree-rows, .inbox-list, .code-tabs, textarea) {
   overscroll-behavior: contain;
 }
 /* The full view's host (CanvasWindow): there only while the full view shows, and no box of its own. */
@@ -4839,9 +4968,6 @@ html.autoscrolling[data-autoscroll="down"] * {
   white-space: nowrap;
   color: var(--text);
 }
-.side-panel h4.sub-h {
-  margin-top: 8px;
-}
 .ellipsis {
   min-width: 0;
   overflow: hidden;
@@ -6285,8 +6411,7 @@ body.resizing .sidebar-dock {
 .approval-cmd,
 .cmd-full,
 .glance-text,
-.hook,
-.side-panel .path {
+.hook {
   cursor: text;
 }
 .cwin .thread-pane,
@@ -6296,7 +6421,8 @@ body.resizing .sidebar-dock {
   cursor: grab;
 }
 .cwin .composer,
-.cwin .approval {
+.cwin .approval,
+.cwin .details {
   cursor: auto;
 }
 .cwin :is(.md, .user-text, .output, .diff, .approval-cmd, .cmd-full, .glance-text, .hook) {

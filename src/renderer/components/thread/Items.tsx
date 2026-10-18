@@ -332,7 +332,7 @@ export function DiffView({ diff, path, whole }: { diff: string; path?: string; w
   );
 }
 
-function FileRow({ change, cwd }: { change: FileUpdateChange; cwd: string | null }) {
+export function FileRow({ change, cwd }: { change: FileUpdateChange; cwd: string | null }) {
   const [open, setOpen] = useState(false);
   const { add, del } = changeStats(change);
   const kind = change.kind.type;

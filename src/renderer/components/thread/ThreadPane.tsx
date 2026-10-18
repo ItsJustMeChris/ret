@@ -1,9 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { useShallow } from "../../lib/shallow";
 import {
   Archive,
   ChevronDown,
-  CornerLeftUp,
   FolderGit2,
   Folder,
   FolderOpen,
@@ -17,29 +15,29 @@ import {
   Paperclip,
   SquareTerminal,
 } from "lucide-react";
-import { NO_AGENTS, hostOfThread, useThreads, markAttended, markVisible } from "../../state/threads";
+import { hostOfThread, useThreads, markAttended, markVisible } from "../../state/threads";
 import { useThread } from "../../state/useThread";
 import { addFilesToThread } from "../../state/attach";
 import { viewFile } from "../../lib/viewFile";
 import { openFileRef, resolvePath } from "../../lib/files";
 import { useUI, isDraft } from "../../state/ui";
-import { addProject, archiveThread, compactThread, forkThread, hydrateThread, openThread, renameThread, retargetDraft } from "../../state/actions";
-import { baseName, spawnedBy, takesDirectInput, threadTitle } from "../../state/projects";
+import { addProject, archiveThread, compactThread, forkThread, hydrateThread, renameThread, retargetDraft } from "../../state/actions";
+import { baseName, takesDirectInput, threadTitle } from "../../state/projects";
 import { useProjectTree } from "../../state/projectTree";
 import { hostOfView } from "../../state/projectTree";
-import { engineName, hostName, useHosts } from "../../state/hosts";
+import { hostName, useHosts } from "../../state/hosts";
 import { useSizeClass, type SizeClass } from "../../lib/useSize";
 import { Transcript } from "./Transcript";
 import { Composer } from "./Composer";
-import { DiffView } from "./Items";
-import { SubagentBar, openFrom } from "./Subagents";
+import { SubagentBar } from "./Subagents";
+import { Details, useDetails } from "./Details";
+import { DETAILS } from "../../lib/threadDetails";
 import { RequestCard } from "./Approvals";
 import { ScreenGlance, useLiveScreen } from "./ComputerUse";
 import { bridge, isDesktop } from "../../bridge";
 import { Menu, type MenuItem } from "../Menu";
 import { StatusDot } from "../StatusDot";
-import { diffStats, compactNumber, plainText } from "../../lib/format";
-import { Markdown } from "../Markdown";
+import { compactNumber, plainText } from "../../lib/format";
 import { Select, type SelectOption } from "../ui/Select";
 import { useShown, useVisibility } from "../ui/Kept";
 import { TerminalDock } from "../terminal/TerminalDock";
@@ -62,7 +60,7 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
   const { threadId } = props;
   const ref = useRef<HTMLDivElement>(null);
   const size = useSizeClass(ref, props.initialSize);
-  const showDetails = useUI((s) => s.showDetails);
+  const details = useDetails(threadId, size, ref);
   // A subagent that asks you something still gets the composer, which is where questions are answered.
   const directInput = useThread(
     threadId,
@@ -121,12 +119,13 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
     },
   };
 
-  // A file path anywhere in the transcript (tool steps, edits, attachments, paths written as code)
-  // opens in Ret's viewer; Ctrl+click opens it in VS Code or its app, Alt+click reveals it. Runs
-  // before the path's row would fold or unfold. File links in replies handle themselves.
+  // A file path anywhere in the transcript (tool steps, edits, attachments, paths written as code),
+  // or in the details' changes, opens in Ret's viewer; Ctrl+click opens it in VS Code or its app,
+  // Alt+click reveals it. Runs before the path's row would fold or unfold. File links in replies
+  // handle themselves.
   const onPathClick = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
-    const el = (e.target as Element).closest<HTMLElement>(".transcript [data-path]");
+    const el = (e.target as Element).closest<HTMLElement>(":is(.transcript, .details-files) [data-path]");
     if (!el?.dataset.path || el.closest("a.file-link, .thread-img")) return;
     if (!window.getSelection()?.isCollapsed) return; // finishing a text selection, not a click
     e.preventDefault();
@@ -156,7 +155,7 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
           </div>
         </div>
       )}
-      <Header {...props} size={size} />
+      <Header {...props} size={size} details={details} />
       {isDraft(threadId) ? (
         <DraftBody threadId={threadId} size={size} />
       ) : size === "glance" ? (
@@ -170,14 +169,15 @@ export const ThreadPane = memo(function ThreadPane(props: Props) {
                 threadId={threadId}
                 compact={size === "compact"}
                 autoFocus={props.focused && props.chrome === "focus"}
-                // The details panel lists the subagents; the Dynamic Island keeps its room for the rest.
-                agentsListed={size === "wide" && showDetails}
+                // The docked details list the subagents; the Dynamic Island keeps its room for the rest.
+                agentsListed={details.docked && details.open}
               />
             ) : (
               <SubagentBar threadId={threadId} />
             )}
           </div>
-          {size === "wide" && showDetails && <SidePanel threadId={threadId} />}
+          {/* Docked and peeking are different panels: going from one to the other, neither animates. */}
+          <Details key={details.docked ? "docked" : "peek"} threadId={threadId} docked={details.docked} open={details.open} />
         </div>
       )}
       {/* On the canvas a thread's terminal is a window of its own. */}
@@ -194,12 +194,6 @@ export function threadMoreItems(threadId: string, rename: () => void): MenuItem[
     { label: "Rename", icon: <Pencil size={14} />, onClick: rename },
     // Compacting starts a turn: a subagent only takes those from the agent that spawned it.
     ...(takesDirectInput(thread) ? [{ label: "Compact context", icon: <Layers size={14} />, onClick: () => void compactThread(threadId) }] : []),
-    {
-      label: useUI.getState().showDetails ? "Hide details panel" : "Show details panel",
-      icon: <PanelRight size={14} />,
-      hint: "wide panes",
-      onClick: () => useUI.setState((s) => ({ showDetails: !s.showDetails })),
-    },
     // A paired device's folder can't be opened here.
     ...(isDesktop && cwd && !hostOfView(threadId) ? [{ label: "Open folder", icon: <FolderOpen size={14} />, onClick: () => void bridge.shell.openPath(cwd) }] : []),
     { label: "Archive", icon: <Archive size={14} />, onClick: () => void archiveThread(threadId), danger: true },
@@ -211,7 +205,15 @@ function TranscriptFor({ threadId }: { threadId: string }) {
   return <Transcript threadId={threadId} cwd={cwd} />;
 }
 
-function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, windowControls, size }: Props & { size: SizeClass }) {
+function Header({
+  threadId,
+  chrome,
+  onHeaderPointerDown,
+  onHeaderDoubleClick,
+  windowControls,
+  size,
+  details,
+}: Props & { size: SizeClass; details: { open: boolean; toggle: () => void } }) {
   const thread = useThread(threadId, (s) => s.threads[threadId]);
   const draft = useUI((s) => s.drafts[threadId]);
   const worktree = useUI((s) => s.worktrees[threadId]);
@@ -322,6 +324,16 @@ function Header({ threadId, chrome, onHeaderPointerDown, onHeaderDoubleClick, wi
           </span>
         )}
         {size !== "glance" && <TerminalButton threadId={threadId} chrome={chrome} />}
+        {!draft && size !== "glance" && (
+          <button
+            className={`icon-btn details-btn ${details.open ? "on" : ""}`}
+            title={`${details.open ? DETAILS.hide : DETAILS.show} (Ctrl+Alt+B)`}
+            aria-pressed={details.open}
+            onClick={details.toggle}
+          >
+            <PanelRight size={14} />
+          </button>
+        )}
         {!draft && (
           <button className="icon-btn" title="Fork" onClick={forkMenu}>
             <GitFork size={14} />
@@ -387,178 +399,6 @@ function Glance({ threadId }: { threadId: string }) {
       )}
     </div>
   );
-}
-
-function SidePanel({ threadId }: { threadId: string }) {
-  const lastTurn = useThread(threadId, (s) => {
-    const lt = s.live[threadId];
-    if (!lt) return null;
-    for (let i = lt.turnOrder.length - 1; i >= 0; i--) {
-      const t = lt.turns[lt.turnOrder[i]];
-      if (t.plan || t.diff) return t;
-    }
-    return null;
-  });
-  const usage = useThread(threadId, (s) => s.live[threadId]?.tokenUsage);
-  const [openDiff, setOpenDiff] = useState(false);
-  const files = lastTurn?.diff ? splitDiff(lastTurn.diff) : [];
-  return (
-    <aside className="side-panel">
-      {lastTurn?.plan && (
-        <section>
-          <h4>Plan</h4>
-          {lastTurn.plan.explanation && <Markdown text={lastTurn.plan.explanation} className="md-muted" />}
-          {lastTurn.plan.steps.map((s, i) => (
-            <div key={i} className={`plan-step ${s.status}`}>
-              <span className="plan-dot" />
-              {s.step}
-            </div>
-          ))}
-        </section>
-      )}
-      {files.length > 0 && (
-        <section>
-          <h4>
-            Changes <span className="muted">· last turn</span>
-          </h4>
-          {files.map((f) => {
-            const st = diffStats(f.diff);
-            return (
-              <div key={f.path} className="side-file">
-                <span className="path">{f.path}</span>
-                <span className="stat">
-                  <span className="add">+{st.add}</span>
-                  <span className="del">−{st.del}</span>
-                </span>
-              </div>
-            );
-          })}
-          <button className="link" onClick={() => setOpenDiff(!openDiff)}>
-            {openDiff ? "Hide diff" : "Show full diff"}
-          </button>
-          {openDiff && lastTurn?.diff && <DiffView diff={lastTurn.diff} />}
-        </section>
-      )}
-      {usage && (
-        <section>
-          <h4>Tokens</h4>
-          <div className="kv-row">
-            <span>Total</span>
-            <span>{compactNumber(usage.total.totalTokens)}</span>
-          </div>
-          <div className="kv-row">
-            <span>Cached input</span>
-            <span>{compactNumber(usage.total.cachedInputTokens)}</span>
-          </div>
-          <div className="kv-row">
-            <span>Reasoning</span>
-            <span>{compactNumber(usage.total.reasoningOutputTokens)}</span>
-          </div>
-        </section>
-      )}
-      <ThreadInfo threadId={threadId} />
-    </aside>
-  );
-}
-
-function AgentLineage({ agentId, from }: { agentId: string; from: string }) {
-  const title = useThread(agentId, (s) => threadTitle(s.threads[agentId]));
-  return (
-    <button className="lineage" onClick={(e) => openFrom(e, agentId, from)}>
-      <StatusDot threadId={agentId} />
-      <span>{title}</span>
-    </button>
-  );
-}
-
-/** Thread facts plus lineage: jump to the parent, any fork or any subagent without hunting in the sidebar. */
-function ThreadInfo({ threadId }: { threadId: string }) {
-  const thread = useThread(threadId, (s) => s.threads[threadId]);
-  const spawner = spawnedBy(thread);
-  const parent = useThreads((s) => (thread?.forkedFromId ? s.threads[thread.forkedFromId] : undefined));
-  const spawnerThread = useThread(spawner ?? "", (s) => (spawner ? s.threads[spawner] : undefined));
-  // A subagent is forked from its parent too (it starts from the parent's history); it isn't a fork.
-  const forks = useThreads(
-    useShallow((s) =>
-      Object.values(s.threads)
-        .filter((t) => t.forkedFromId === threadId && !spawnedBy(t))
-        .sort((a, b) => a.createdAt - b.createdAt),
-    ),
-  );
-  const agents = useThread(threadId, (s) => s.agents[threadId] ?? NO_AGENTS);
-  const worktree = useUI((s) => s.worktrees[threadId]);
-  const owner = useThread(threadId, (s) => s.owner[threadId] ?? "codex");
-  if (!thread) return null;
-  return (
-    <section>
-      <h4>Thread</h4>
-      <div className="kv-row">
-        <span>Agent</span>
-        <span>{engineName(owner)}</span>
-      </div>
-      <div className="kv-row">
-        <span>Model</span>
-        <span>
-          {thread.model ?? "—"}
-          {thread.reasoningEffort ? ` · ${thread.reasoningEffort}` : ""}
-        </span>
-      </div>
-      <div className="kv-row">
-        <span>Started</span>
-        <span>{new Date(thread.createdAt * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</span>
-      </div>
-      {(worktree?.branch ?? thread.gitInfo?.branch) && (
-        <div className="kv-row">
-          <span>Branch</span>
-          <span className="mono">{worktree?.branch ?? thread.gitInfo?.branch}</span>
-        </div>
-      )}
-      <div className="kv-row">
-        <span>Folder</span>
-        <span className="mono ellipsis" title={thread.cwd} data-path={thread.cwd}>
-          {baseName(thread.cwd)}
-        </span>
-      </div>
-      {spawner ? (
-        <button className="lineage" onClick={() => openThread(spawner)} disabled={!spawnerThread}>
-          <CornerLeftUp size={12} /> Spawned by <span>{spawnerThread ? threadTitle(spawnerThread) : "an unavailable thread"}</span>
-        </button>
-      ) : thread.forkedFromId && (
-        <button className="lineage" onClick={() => openThread(thread.forkedFromId!)} disabled={!parent}>
-          <CornerLeftUp size={12} /> Forked from <span>{parent ? threadTitle(parent) : "an unavailable thread"}</span>
-        </button>
-      )}
-      {forks.length > 0 && (
-        <>
-          <h4 className="sub-h">Forks · {forks.length}</h4>
-          {forks.map((f, i) => (
-            <button key={f.id} className="lineage" onClick={() => openThread(f.id)}>
-              <StatusDot threadId={f.id} />
-              <span>{f.name && f.name !== thread.name ? f.name : `Fork ${i + 1}`}</span>
-            </button>
-          ))}
-        </>
-      )}
-      {agents.length > 0 && (
-        <>
-          <h4 className="sub-h">Subagents · {agents.length}</h4>
-          {agents.map((id) => (
-            <AgentLineage key={id} agentId={id} from={threadId} />
-          ))}
-        </>
-      )}
-    </section>
-  );
-}
-
-function splitDiff(diff: string): { path: string; diff: string }[] {
-  const out: { path: string; diff: string }[] = [];
-  const chunks = diff.split(/^(?=diff --git )/m);
-  for (const c of chunks) {
-    const m = /^diff --git a\/(.+?) b\/(.+)$/m.exec(c);
-    if (m) out.push({ path: m[2], diff: c });
-  }
-  return out;
 }
 
 /** A thread that hasn't started yet: pick the project, write the first message. */

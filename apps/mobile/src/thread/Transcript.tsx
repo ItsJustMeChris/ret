@@ -8,7 +8,7 @@ import { diffStats, duration } from "@ret/lib/format";
 import { shallowEqual } from "@ret/lib/shallow";
 import { loadOlder, resendUnanswered } from "@ret/state/actions";
 import { takesDirectInput } from "@ret/state/projects";
-import { noticesAt, ownerOf, type ThreadNotice } from "@ret/state/threads";
+import { noticesAt, ownerOf, type ThreadNotice, type TurnState } from "@ret/state/threads";
 import { useThread } from "@ret/state/useThread";
 import { agentOf } from "@ret/agents";
 import { useWork } from "@ret/components/thread/useWork";
@@ -119,18 +119,7 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
           <ItemView key={seg.ids[0]} itemId={seg.ids[0]} ctx={ctx} live={live && i === newest} />
         ),
       )}
-      {turn.plan && turn.plan.steps.length > 0 && (
-        <View className="gap-1.5 px-1.5 py-1">
-          {turn.plan.steps.map((s, i) => (
-            <View key={i} className="flex-row items-center gap-2.5">
-              <View
-                className={`h-2.5 w-2.5 rounded-full border-[1.5px] ${s.status === "completed" ? "border-green bg-green" : s.status === "inProgress" ? "border-accent bg-accent-soft" : "border-text-3"}`}
-              />
-              <Text className={`flex-1 text-[14px] ${s.status === "completed" ? "text-text-3 line-through" : s.status === "inProgress" ? "text-text" : "text-text-2"}`}>{s.step}</Text>
-            </View>
-          ))}
-        </View>
-      )}
+      {turn.plan && turn.plan.steps.length > 0 && <PlanSteps steps={turn.plan.steps} className="px-1.5 py-1" />}
       {live && !pending && <Working threadId={ctx.threadId} turnId={turnId} lastItemId={turn.itemIds[turn.itemIds.length - 1]} since={turn.startedAt} elsewhere={elsewhere ? agent : null} />}
       {!live && !pending && turn.status !== "interrupted" && <UnansweredNotice threadId={ctx.threadId} lastItemId={turn.itemIds[turn.itemIds.length - 1]} count={turn.itemIds.length} />}
       {turn.error && (
@@ -166,6 +155,22 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
     </View>
   );
 });
+
+/** A plan's steps, each with its dot: under the turn that made it, and in the details sheet (the desktop's .plan-step). */
+export function PlanSteps({ steps, className }: { steps: NonNullable<TurnState["plan"]>["steps"]; className?: string }) {
+  return (
+    <View className={`gap-1.5 ${className ?? ""}`}>
+      {steps.map((s, i) => (
+        <View key={i} className="flex-row items-start gap-2.5">
+          <View
+            className={`mt-[5px] h-2.5 w-2.5 rounded-full border-[1.5px] ${s.status === "completed" ? "border-green bg-green" : s.status === "inProgress" ? "border-accent bg-accent-soft" : "border-text-3"}`}
+          />
+          <Text className={`flex-1 text-[14px] leading-5 ${s.status === "completed" ? "text-text-3 line-through" : s.status === "inProgress" ? "text-text" : "text-text-2"}`}>{s.step}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
 
 /** Something that happened along the way (a retry, a warning, a failed send), where it happened: as the desktop's NoticeRow. */
 function NoticeRow({ notice }: { notice: ThreadNotice }) {

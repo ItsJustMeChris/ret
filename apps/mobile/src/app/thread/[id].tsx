@@ -1,5 +1,5 @@
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { CircleAlert, FolderOpen, MessageSquarePlus, RotateCw } from "lucide-react-native";
+import { CircleAlert, FolderOpen, Info, MessageSquarePlus, RotateCw } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -12,12 +12,14 @@ import { markAttended, markVisible, patchLive } from "@ret/state/threads";
 import { isDraft, useUI } from "@ret/state/ui";
 import { useThread } from "@ret/state/useThread";
 import { agentOf } from "@ret/agents";
+import { DETAILS } from "@ret/lib/threadDetails";
 import { dropDraftIfUnused } from "../../drafts";
 import { FileScopeContext, openFolder } from "../../files";
 import { Empty, Icon, Spinner } from "../../ui/primitives";
 import { StatusDot } from "../../ui/StatusDot";
 import { Approvals } from "../../thread/Approvals";
 import { Composer } from "../../thread/Composer";
+import { DetailsSheet } from "../../thread/Details";
 import { Transcript } from "../../thread/Transcript";
 
 export default function ThreadScreen() {
@@ -45,6 +47,7 @@ function ThreadView({ id }: { id: string }) {
   const error = useThread(id, (s) => (!s.live[id]?.hydrated ? (s.live[id]?.error ?? null) : null));
   const host = owner ? hostOf(owner) : null;
   const scope = useMemo(() => ({ cwd, host }), [cwd, host]);
+  const [details, setDetails] = useState(false);
 
   // On screen: kept subscribed and fresh, loaded on first sight (as a desktop pane).
   useEffect(() => {
@@ -83,12 +86,19 @@ function ThreadView({ id }: { id: string }) {
                 </Text>
               </View>
             ),
-            headerRight: () =>
-              cwd && host ? (
-                <Pressable hitSlop={10} onPress={() => openFolder(cwd, host)} accessibilityLabel="Browse the thread's folder">
-                  <Icon icon={FolderOpen} size={19} colorClassName="accent-text-2" />
+            headerRight: () => (
+              <View className="flex-row items-center gap-5">
+                {cwd && host ? (
+                  <Pressable hitSlop={10} onPress={() => openFolder(cwd, host)} accessibilityLabel="Browse the thread's folder">
+                    <Icon icon={FolderOpen} size={19} colorClassName="accent-text-2" />
+                  </Pressable>
+                ) : null}
+                {/* The desktop's details button (its header's, beside the terminal's). */}
+                <Pressable hitSlop={10} onPress={() => setDetails(true)} accessibilityLabel={DETAILS.show}>
+                  <Icon icon={Info} size={19} colorClassName="accent-text-2" />
                 </Pressable>
-              ) : null,
+              </View>
+            ),
           }}
         />
         <View className="flex-1">
@@ -111,6 +121,7 @@ function ThreadView({ id }: { id: string }) {
         </View>
         <Approvals threadId={id} />
         <Composer threadId={id} />
+        <DetailsSheet ctx={{ threadId: id, cwd, host }} open={details} onClose={() => setDetails(false)} />
       </ThreadKeyboardView>
     </FileScopeContext.Provider>
   );

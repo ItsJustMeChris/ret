@@ -82,6 +82,8 @@ const NOT_BACKGROUND = [
   "[role=option]",
   "[contenteditable]",
   ".composer",
+  // a thread's details: text to select and rows to open
+  ".details",
   ".rz",
   ".approval",
   ".sel-menu",

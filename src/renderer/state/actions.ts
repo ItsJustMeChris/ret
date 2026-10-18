@@ -34,7 +34,7 @@ import {
   type QueuedMessage,
   type ThreadSettings,
 } from "./threads";
-import { activeBoard, appId, appKind, fileId, isApp, isDraft, isFile, isThread, newId, updateBoard, useUI, type CanvasWin, type FocusSplit, type UIState, type ViewMode } from "./ui";
+import { activeBoard, appId, appKind, fileId, isApp, isDraft, isFile, isThread, newId, setDetails, updateBoard, useUI, type CanvasWin, type FocusSplit, type UIState, type ViewMode } from "./ui";
 import { onFsChanged, useFiles } from "./files";
 import { captureLive, captureTurns, noteAppRequest, screenTurnEnded } from "./computerUse";
 import { turnFinished } from "./finished";
@@ -1118,6 +1118,7 @@ async function archiveThreadImpl(threadId: string) {
   await rpcFor(ownerOf(threadId)).request("thread/archive", { threadId });
   closeEverywhere(threadId);
   closeThreadTerminals(threadId);
+  setDetails(threadId, false);
   useThreads.setState((s) => {
     const threads = { ...s.threads };
     delete threads[threadId];

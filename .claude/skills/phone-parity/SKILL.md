@@ -92,6 +92,7 @@ The skill lives in `.agents/skills/phone-parity/`. This file is also at
 | components/thread/Composer.tsx | thread/Composer.tsx |
 | components/thread/ModelTuner.tsx + app.css `.tuner-*` (logic in lib/effortMeter) | thread/ModelTuner.tsx |
 | components/thread/Approvals.tsx, Questions | thread/Approvals.tsx |
+| components/thread/Details.tsx (logic and words in lib/threadDetails) | thread/Details.tsx (a sheet from app/thread/[id].tsx's header) |
 | components/ui/RetBot.tsx (loops in lib/retBotMotion, shapes in lib/retBot) | ui/RetBot.tsx |
 | components/StatusDot.tsx (state logic shared) | ui/StatusDot.tsx |
 | components/inbox/InboxView.tsx | app/(tabs)/index.tsx |
@@ -120,6 +121,10 @@ closes or a new one is chosen on purpose.
 - Text shimmers on the desktop (the Working verb, "Thinking"); the phone pulses "Thinking" and
   shows the Working verb plainly (it has no masked view for a shimmer).
 - The phone has no canvas, Code-mode editor, command palette or keyboard shortcuts, by design.
+- Thread details: the desktop docks them beside the transcript in a wide pane (open per thread, kept
+  in `useUI.details`) or peeks at them as a card in a narrower one, behind a panel-right button and
+  Ctrl+Alt+B; the phone opens the same sections in a bottom sheet from an info button in the
+  thread's header, and keeps nothing. Its context bar doesn't animate a change.
 - The model tuner: the desktop previews an effort while the pointer hovers its bars, and swaps its
   popover to the model list in place; the phone has no hover (a tap or drag sets it, with a haptic
   tick per step), and its model list is a sheet of its own that hands back to the tuner.

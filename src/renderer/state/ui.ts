@@ -132,8 +132,11 @@ export interface UIState {
   focusedSide: "left" | "right";
   /** Canvas: draw lines from each thread to its forks. */
   showLinks: boolean;
-  /** Wide panes: plan / changes / tokens / lineage panel on the right. Off unless asked for. */
-  showDetails: boolean;
+  /**
+   * Threads whose details panel is open, by thread id: a column beside the transcript in a pane wide
+   * enough for it. (A narrower pane opens it as a card for as long as you look, kept by the pane.)
+   */
+  details: Record<string, true>;
   boards: Board[];
   activeBoard: string;
   focusedWindow: string | null;
@@ -182,7 +185,7 @@ export const useUI = create<UIState>()(
       splits: {},
       focusedSide: "left",
       showLinks: true,
-      showDetails: false,
+      details: {},
       boards: [initialBoard],
       activeBoard: initialBoard.id,
       focusedWindow: null,
@@ -200,7 +203,8 @@ export const useUI = create<UIState>()(
       name: "ret-ui",
       version: 1,
       partialize: (s) => {
-        const { paletteOpen: _p, settingsOpen: _s, selectedWindows: _w, ...rest } = s;
+        // (showDetails: the one switch every thread's details panel used to share.)
+        const { paletteOpen: _p, settingsOpen: _s, selectedWindows: _w, showDetails: _d, ...rest } = s as UIState & { showDetails?: boolean };
         return rest;
       },
     },
@@ -231,6 +235,17 @@ export const newId = uid;
 
 export function activeBoard(s: UIState = useUI.getState()): Board {
   return s.boards.find((b) => b.id === s.activeBoard) ?? s.boards[0];
+}
+
+/** Open or close a thread's details panel (the column a wide pane shows). */
+export function setDetails(threadId: string, open: boolean) {
+  useUI.setState((s) => {
+    if (!!s.details[threadId] === open) return s;
+    const details = { ...s.details };
+    if (open) details[threadId] = true;
+    else delete details[threadId];
+    return { details };
+  });
 }
 
 export function updateBoard(fn: (b: Board) => Board) {

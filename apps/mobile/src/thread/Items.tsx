@@ -418,7 +418,7 @@ export function DiffView({ diff, whole }: { diff: string; whole?: "add" | "delet
   );
 }
 
-function FileRow({ change, cwd, host }: { change: FileUpdateChange; cwd: string | null; host: string | null }) {
+export function FileRow({ change, cwd, host }: { change: FileUpdateChange; cwd: string | null; host: string | null }) {
   const [open, setOpen] = useState(false);
   const { add, del } = changeStats(change);
   const kind = change.kind.type;

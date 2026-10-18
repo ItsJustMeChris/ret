@@ -11,6 +11,7 @@ import { CanvasView } from "./components/canvas/CanvasView";
 import { CodeView } from "./components/code/CodeView";
 import { InboxView } from "./components/inbox/InboxView";
 import { CommandPalette, currentThreadId } from "./components/CommandPalette";
+import { toggleDetails } from "./components/thread/Details";
 import { SettingsModal } from "./components/Settings";
 import { LoginGate } from "./components/LoginGate";
 import { Toasts } from "./components/Toasts";
@@ -89,6 +90,12 @@ function useShortcuts() {
       if (e.code === "Backquote" && !e.altKey) {
         e.preventDefault();
         toggleTerminal(currentThreadId(), { fresh: e.shiftKey });
+        return;
+      }
+      // Ctrl+Alt+B: the current thread's details, on the right (as Ctrl+B is the sidebar, on the left).
+      if (e.code === "KeyB" && e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        toggleDetails(currentThreadId());
         return;
       }
       if (k === "k") {

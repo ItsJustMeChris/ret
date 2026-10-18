@@ -49,7 +49,7 @@ export function seedUI(mode: ViewMode, theme: "dark" | "light", sidebarPinned: b
     splits: { [T.rate]: { right: T.redis, ratio: 0.52 } },
     focusedSide: "left",
     showLinks: true,
-    showDetails: false,
+    details: {},
     boards: [structuredClone(BOARD)],
     activeBoard: BOARD.id,
     focusedWindow: null,
