@@ -1,7 +1,7 @@
-import type { FileUpdateChange, Thread, ThreadTokenUsage } from "@shared/protocol";
+import type { FileUpdateChange, Model, Thread, ThreadTokenUsage } from "@shared/protocol";
 import type { LiveThread, TurnState } from "../state/threads";
 import { spawnedBy } from "../state/projects";
-import { changeStats } from "./format";
+import { changeStats, compactNumber } from "./format";
 
 /**
  * A thread's details, worked out once for the desktop's details panel (components/thread/Details)
@@ -98,9 +98,22 @@ export function contextUse(usage: ThreadTokenUsage): { used: number; size: numbe
   return { used, size, pct: Math.min(100, Math.round((used / size) * 100)) };
 }
 
-/** "gpt-5 · high": the model and its reasoning effort. */
-export function modelLabel(thread: Thread): string {
-  return `${thread.model ?? "—"}${thread.reasoningEffort ? ` · ${thread.reasoningEffort}` : ""}`;
+/**
+ * "Opus 5.5 · high": the model a thread runs (as its settings say once it's open, else as its
+ * record does), by the name its agent's model list gives it, and its reasoning effort.
+ */
+export function modelLabel(model: string | null, effort: string | null, models: readonly Model[] | undefined): string {
+  const info = model ? models?.find((m) => m.id === model || m.model === model) : undefined;
+  return `${info?.displayName || model || "—"}${effort ? ` · ${effort}` : ""}`;
+}
+
+/** The thread's token totals, as rows; reasoning only from an agent that counts it apart (Claude doesn't). */
+export function usageRows(usage: ThreadTokenUsage): { label: string; value: string }[] {
+  return [
+    { label: DETAILS.allTurns, value: compactNumber(usage.total.totalTokens) },
+    { label: DETAILS.cached, value: compactNumber(usage.total.cachedInputTokens) },
+    ...(usage.total.reasoningOutputTokens ? [{ label: DETAILS.reasoning, value: compactNumber(usage.total.reasoningOutputTokens) }] : []),
+  ];
 }
 
 /** When the thread started, as a date and a time. */

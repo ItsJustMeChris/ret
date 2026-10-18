@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   forkSession,
   getSessionInfo,
   getSessionMessages,
+  getSubagentMessages,
   listSessions,
   query,
   renameSession,
@@ -21,7 +22,8 @@ import { PtyService } from "../pty";
 import { gitInfo } from "../git";
 import { dailyBuckets, LocalUsage } from "../usage";
 import { sameTasks, TranscriptBackground } from "./background";
-import { buildTurns, type HistoryTurn, type StoredMessage } from "./history";
+import { AgentIndex, agentIdsOf, agentThread, agentThreadId, firstRunId, type AgentRecord } from "./agents";
+import { addUsage, buildTurns, readEditResults, settledTurn, type HistoryTurn, type StoredMessage } from "./history";
 import { claudeAuthStatus, claudeConfigDir, claudeEnv } from "./platform";
 import { ClaudeSession, type ClaudeAccess, type SessionHost, type ThreadConfig } from "./session";
 
@@ -38,6 +40,8 @@ interface EngineState {
   lineage: Record<string, string>;
   /** Per-thread choices made in Ret (model, effort, speed, access, plan). */
   settings: Record<string, ThreadChoices>;
+  /** Names given in Ret to subagents' threads (a session's name is Claude Code's own). */
+  agentNames?: Record<string, string>;
 }
 
 interface ThreadChoices {
@@ -96,6 +100,8 @@ export class ClaudeEngine {
   private pending = new Map<string, PendingThread>();
   private infos = new Map<string, SDKSessionInfo>();
   private historyCache = new Map<string, { stamp: string; turns: HistoryTurn[] }>();
+  /** Subagents on disk, as threads of their own (agents.ts). */
+  private agentIndex = new AgentIndex(() => join(claudeConfigDir(), "projects"));
   private outbox: string[] = [];
   private flushScheduled = false;
   private nextRequestId = 1;
@@ -299,6 +305,7 @@ export class ClaudeEngine {
     rateLimit: (info) => this.noteRateLimit(info),
     log: (text) => this.log(text),
     changed: (s) => this.sessionChanged(s),
+    turnEnded: (s) => void this.refreshName(s.config.id),
     };
   }
 
@@ -310,13 +317,15 @@ export class ClaudeEngine {
     if (this.fs.handles(method)) return this.fs.call(method, p);
     if (this.pty.handles(method)) return this.pty.call(method, p);
     if (method !== "initialize" && this.status.state !== "running") throw rpcError(this.status.error ?? "Claude Code is not available");
+    const agent = typeof p?.threadId === "string" ? agentIdsOf(p.threadId) : null;
+    if (agent) return this.callAgent(method, p, agent);
     switch (method) {
       case "initialize":
         // A new connection: anything still waiting on the old one is asked again, and it hears what
         // runs in the background (here now; elsewhere at the next look).
         setImmediate(() => {
           for (const [id, r] of this.requests) this.write({ id, method: r.method, params: r.params });
-          for (const s of this.sessions.values()) if (s.background.length) this.notify("thread/backgroundTasks/updated", { threadId: s.config.id, tasks: s.background });
+          for (const s of this.sessions.values()) if (s.shownBackground().length) this.notify("thread/backgroundTasks/updated", { threadId: s.config.id, tasks: s.shownBackground() });
         });
         this.reportedElsewhere = new Map();
         void this.probe();
@@ -332,8 +341,9 @@ export class ClaudeEngine {
       case "thread/resume":
         return this.resumeThread(p.threadId);
       case "thread/unsubscribe": {
+        // Not while it has work going in the background (its subagents among it): closing would end that.
         const s = this.sessions.get(p.threadId);
-        if (s && !s.running) s.close();
+        if (s && !s.running && !s.background.length) s.close();
         return {};
       }
       case "thread/fork":
@@ -426,7 +436,7 @@ export class ClaudeEngine {
       projectId: null,
       historyMode: "paginated",
       modelProvider: "anthropic",
-      model: set?.model ?? s?.runningModel ?? null,
+      model: set?.model ?? s?.config.model ?? s?.runningModel ?? null,
       reasoningEffort: set?.effort ?? null,
       createdAt: sec(info.createdAt ?? info.lastModified),
       updatedAt: sec(info.lastModified),
@@ -449,6 +459,8 @@ export class ClaudeEngine {
   }
 
   private async listThreads(p: any) {
+    // Subagents, which a plain list leaves out, as Codex's spawned agents: asked for by source, or by ancestor.
+    if (p?.ancestorThreadId || p?.sourceKinds?.includes?.("subAgentThreadSpawn")) return this.listAgents(p);
     void this.lookElsewhere();
     const all = (await listSessions({})).filter((i) => !this.state.archived.includes(i.sessionId));
     for (const i of all) this.infos.set(i.sessionId, i);
@@ -483,6 +495,133 @@ export class ClaudeEngine {
     throw rpcError(`No Claude Code session ${threadId}`);
   }
 
+  // ---- subagents: threads of their own (agents.ts) --------------------------
+
+  /** A method on a subagent's thread: it can be read, renamed, archived and stopped; it takes no messages of its own. */
+  private async callAgent(method: string, p: any, ids: { sessionId: string; agentId: string }): Promise<unknown> {
+    switch (method) {
+      case "thread/read":
+        return { thread: await this.agentThreadOf(ids) };
+      case "thread/turns/list": {
+        const live = this.sessions.get(ids.sessionId)?.agents.get(ids.agentId);
+        return this.pageOf(await this.agentHistory(ids), p, live?.running ? live.turnId : undefined);
+      }
+      case "thread/resume": {
+        const thread = await this.agentThreadOf(ids);
+        return this.settingsResponse(thread, { config: { model: thread.model, effort: null, fast: false, plan: false, access: "config", cwd: thread.cwd } });
+      }
+      case "thread/unsubscribe":
+        return {};
+      case "thread/name/set": {
+        const name = String(p.name ?? "").trim();
+        const names = { ...this.state.agentNames };
+        if (name) names[p.threadId] = name;
+        else delete names[p.threadId];
+        this.state.agentNames = names;
+        this.save();
+        this.notify("thread/name/updated", { threadId: p.threadId, threadName: name || null });
+        return {};
+      }
+      case "thread/archive":
+        if (!this.state.archived.includes(p.threadId)) this.state.archived.push(p.threadId);
+        this.save();
+        this.notify("thread/archived", { threadId: p.threadId });
+        return {};
+      case "turn/interrupt":
+        await this.sessions.get(ids.sessionId)?.stopAgent(ids.agentId);
+        return {};
+      default:
+        throw rpcError("A subagent takes its instructions from the agent that spawned it", -32601);
+    }
+  }
+
+  /** A session's subagents: those on disk, with what's live of those it has going here. */
+  private async agentsOf(sessionId: string): Promise<{ record: AgentRecord; running: boolean; live: boolean }[]> {
+    const out = new Map<string, { record: AgentRecord; running: boolean; live: boolean }>();
+    for (const record of await this.agentIndex.of(sessionId)) out.set(record.agentId, { record, running: false, live: false });
+    for (const a of this.sessions.get(sessionId)?.agents.values() ?? []) {
+      const disk = out.get(a.record.agentId)?.record;
+      // Live knows how it's doing; the disk, what Claude Code wrote down about it (its worktree…).
+      const record: AgentRecord = { ...a.record };
+      if (disk) for (const k of Object.keys(record) as (keyof AgentRecord)[]) if (record[k] == null || record[k] === "") (record as any)[k] = disk[k];
+      out.set(a.record.agentId, { record, running: a.running, live: true });
+    }
+    return [...out.values()];
+  }
+
+  /** The Agent calls in a transcript (the session's own, or an agent's: `parentAgentId`), each to its agent's thread. */
+  private async agentCalls(sessionId: string, parentAgentId: string | null): Promise<Map<string, string>> {
+    const calls = new Map<string, string>();
+    for (const { record } of await this.agentsOf(sessionId))
+      if (record.toolUseId && record.parentAgentId === parentAgentId) calls.set(record.toolUseId, agentThreadId(sessionId, record.agentId));
+    return calls;
+  }
+
+  private agentThreadFrom(a: { record: AgentRecord; running: boolean; live: boolean }): Thread {
+    const id = agentThreadId(a.record.sessionId, a.record.agentId);
+    const cwd = this.infos.get(a.record.sessionId)?.cwd ?? this.sessions.get(a.record.sessionId)?.config.cwd ?? "";
+    // One not met here may be at work in another Claude Code process: as Codex's, not loaded.
+    const status = a.running ? { type: "active" as const, activeFlags: [] } : a.live ? { type: "idle" as const } : { type: "notLoaded" as const };
+    return agentThread(a.record, cwd, status, this.state.agentNames?.[id] ?? null);
+  }
+
+  private async agentThreadOf(ids: { sessionId: string; agentId: string }): Promise<Thread> {
+    const a = (await this.agentsOf(ids.sessionId)).find((x) => x.record.agentId === ids.agentId);
+    if (!a) throw rpcError(`No subagent ${ids.agentId} in Claude Code session ${ids.sessionId}`);
+    return this.agentThreadFrom(a);
+  }
+
+  /** Subagents' threads: all of them (by source), or those under one thread (by ancestor), newest first. */
+  private async listAgents(p: any) {
+    const ancestor: string | null = typeof p.ancestorThreadId === "string" ? p.ancestorThreadId : null;
+    const under = ancestor ? agentIdsOf(ancestor) : null;
+    const sessions = ancestor
+      ? [under?.sessionId ?? ancestor]
+      : [...new Set([...(await this.agentIndex.all()).keys(), ...[...this.sessions.values()].filter((s) => s.agents.size).map((s) => s.config.id)])];
+    const threads: Thread[] = [];
+    for (const sid of sessions) {
+      if (this.state.archived.includes(sid)) continue;
+      const agents = await this.agentsOf(sid);
+      const parentOf = new Map(agents.map((a) => [a.record.agentId, a.record.parentAgentId]));
+      // Under an agent: those it spawned, and theirs.
+      const descends = (id: string) => {
+        for (let at = parentOf.get(id); at; at = parentOf.get(at)) if (at === under!.agentId) return true;
+        return false;
+      };
+      for (const a of agents) {
+        if (under && !descends(a.record.agentId)) continue;
+        const t = this.agentThreadFrom(a);
+        if (!this.state.archived.includes(t.id)) threads.push(t);
+      }
+    }
+    threads.sort((a, b) => b.updatedAt - a.updatedAt);
+    const offset = Number(p.cursor ?? 0) || 0;
+    const limit = Math.max(1, Number(p.limit ?? 100));
+    return { data: threads.slice(offset, offset + limit), nextCursor: offset + limit < threads.length ? String(offset + limit) : null, backwardsCursor: null };
+  }
+
+  /** A subagent's transcript as turns (cached until it changes); its first run has the id it had live. */
+  private async agentHistory(ids: { sessionId: string; agentId: string }): Promise<HistoryTurn[]> {
+    const id = agentThreadId(ids.sessionId, ids.agentId);
+    const path = await this.agentIndex.transcript(ids.sessionId, ids.agentId);
+    const st = path ? await stat(path).catch(() => null) : null;
+    if (!st) return [];
+    const stamp = `${st.mtimeMs}:${st.size}`;
+    const hit = this.historyCache.get(id);
+    if (hit?.stamp === stamp) return hit.turns;
+    const messages = (await getSubagentMessages(ids.sessionId, ids.agentId)) as unknown as StoredMessage[];
+    const thread = await this.agentThreadOf(ids);
+    const turns = buildTurns(messages, thread.cwd, {
+      thread: id,
+      agent: { firstTurnId: firstRunId(id) },
+      agents: await this.agentCalls(ids.sessionId, ids.agentId),
+      structured: await readEditResults(path!).catch(() => undefined),
+    });
+    this.historyCache.set(id, { stamp, turns });
+    if (this.historyCache.size > 40) this.historyCache.delete(this.historyCache.keys().next().value!);
+    return turns;
+  }
+
   /** The session's transcript as turns (cached until the file changes). */
   private async history(threadId: string): Promise<HistoryTurn[]> {
     const pend = this.pending.get(threadId);
@@ -492,7 +631,12 @@ export class ClaudeEngine {
     const hit = this.historyCache.get(threadId);
     if (hit?.stamp === stamp) return hit.turns;
     const messages = (await getSessionMessages(threadId, { includeSystemMessages: true })) as unknown as StoredMessage[];
-    const turns = buildTurns(messages, info.cwd ?? this.sessions.get(threadId)?.config.cwd ?? "");
+    const file = await this.agentIndex.sessionFile(threadId);
+    const turns = buildTurns(messages, info.cwd ?? this.sessions.get(threadId)?.config.cwd ?? "", {
+      thread: threadId,
+      agents: await this.agentCalls(threadId, null),
+      structured: file ? await readEditResults(file).catch(() => undefined) : undefined,
+    });
     this.historyCache.set(threadId, { stamp, turns });
     if (this.historyCache.size > 40) this.historyCache.delete(this.historyCache.keys().next().value!);
     return turns;
@@ -500,15 +644,23 @@ export class ClaudeEngine {
 
   private async listTurns(p: any) {
     const turns = await this.history(p.threadId);
+    // The transcript can't tell a turn that's still running from a finished one; the live session
+    // can (ours), or the session registry (another Claude Code process busy with it).
+    const live = this.sessions.get(p.threadId)?.turn?.id ?? ((await this.busyElsewhere()).has(p.threadId) ? turns.at(-1)?.turn.id : undefined);
+    return this.pageOf(turns, p, live);
+  }
+
+  private pageOf(turns: HistoryTurn[], p: any, live: string | undefined) {
     const desc = p.sortDirection !== "asc";
     const ordered = desc ? turns.slice().reverse() : turns;
     const offset = Number(p.cursor ?? 0) || 0;
     const limit = Math.max(1, Number(p.limit ?? 20));
-    // The transcript can't tell a turn that's still running from a finished one; the live session
-    // can (ours), or the session registry (another Claude Code process busy with it).
-    const live = this.sessions.get(p.threadId)?.turn?.id ?? ((await this.busyElsewhere()).has(p.threadId) ? turns.at(-1)?.turn.id : undefined);
     const page = ordered.slice(offset, offset + limit).map((t) => {
-      const turn: TurnWithPlan = { ...t.turn, plan: t.plan, ...(t.turn.id === live ? { status: "inProgress" as const, completedAt: null, durationMs: null } : {}) };
+      // A finished turn's tools that never got a result failed with it; a running one's may still be going.
+      const turn: TurnWithPlan =
+        t.turn.id === live
+          ? { ...t.turn, plan: t.plan, diff: t.diff, status: "inProgress" as const, completedAt: null, durationMs: null }
+          : { ...settledTurn(t), plan: t.plan, diff: t.diff };
       return p.itemsView === "notLoaded" ? { ...turn, items: [], itemsView: "notLoaded" as const } : turn;
     });
     return { data: page, nextCursor: offset + limit < ordered.length ? String(offset + limit) : null, backwardsCursor: null };
@@ -583,7 +735,7 @@ export class ClaudeEngine {
   }
 
   /** Thread settings as the app-server reports them on start/resume/fork. */
-  private settingsResponse(thread: Thread, s: ClaudeSession) {
+  private settingsResponse(thread: Thread, s: { config: Pick<ThreadConfig, "model" | "effort" | "fast" | "plan" | "access" | "cwd"> }) {
     return {
       thread,
       model: s.config.model ?? "default",
@@ -627,7 +779,7 @@ export class ClaudeEngine {
     const set = this.state.settings[threadId] ?? {};
     // A session Ret didn't choose a model for (started in the CLI, the desktop app…) keeps the one
     // its transcript says last answered, rather than falling back to the default.
-    const model = set.model !== undefined ? set.model : info ? await this.lastModel(threadId) : null;
+    const model = set.model ?? (info ? await this.lastModel(threadId) : null);
     const config: ThreadConfig = {
       id: threadId,
       cwd: info?.cwd ?? pend?.thread.cwd ?? cwdHint ?? "",
@@ -688,7 +840,27 @@ export class ClaudeEngine {
   private async resumeThread(threadId: string) {
     const s = await this.session(threadId);
     const thread = await this.readThread(threadId);
+    // What it has used so far, from its transcript, for the context ring and the details.
+    const turns = await this.history(threadId).catch(() => [] as HistoryTurn[]);
+    const last = turns.findLast((t) => t.usage.last)?.usage.last ?? null;
+    if (last) s.resumeUsage(turns.map((t) => t.usage.total).reduce(addUsage), last);
     return this.settingsResponse(thread, s);
+  }
+
+  /** Names last told the renderer, so Claude Code's titles go out once each. */
+  private named = new Map<string, string>();
+
+  /**
+   * Claude Code titles a session itself (its ai-title, which the SDK reports as the custom title
+   * when there's no other), during its first turns: tell the renderer when one appears.
+   */
+  private async refreshName(id: string) {
+    const info = await getSessionInfo(id).catch(() => undefined);
+    const name = info?.customTitle?.trim();
+    if (!info || !name || this.named.get(id) === name) return;
+    this.infos.set(id, info);
+    this.named.set(id, name);
+    this.notify("thread/name/updated", { threadId: id, threadName: name });
   }
 
   private async forkThread(p: any) {
@@ -722,8 +894,11 @@ export class ClaudeEngine {
 
   private rememberSettings(threadId: string, p: any) {
     const cur = { ...this.state.settings[threadId] };
-    if (p.model !== undefined) cur.model = p.model;
-    if (p.effort !== undefined) cur.effort = p.effort;
+    // A null model or effort is the composer's "as it is" (an existing thread whose chip wasn't
+    // touched), as it is for Codex: it keeps what the thread runs, never resets it to the default.
+    // Choosing Default sends "default".
+    if (p.model != null) cur.model = p.model;
+    if (p.effort != null) cur.effort = p.effort;
     if (p.serviceTier !== undefined) cur.speed = p.serviceTier;
     if (typeof p.access === "string") cur.access = p.access as ClaudeAccess;
     if (p.collaborationMode?.mode) cur.plan = p.collaborationMode.mode === "plan";
@@ -735,8 +910,12 @@ export class ClaudeEngine {
   private async startTurn(p: any) {
     const s = await this.session(p.threadId);
     const set = this.rememberSettings(p.threadId, p);
-    const fast = await this.fastFor({ ...set, model: set.model !== undefined ? set.model : s.config.model });
-    await s.reconfigure({ model: set.model ?? null, effort: set.effort ?? null, fast, access: set.access ?? "config", plan: set.plan ?? false });
+    // Never chosen here (a CLI session, or one from before this was kept): what the session runs,
+    // its transcript's last model (makeSession). (A null kept by older versions means the same.)
+    const model = set.model ?? s.config.model;
+    const effort = set.effort ?? s.config.effort;
+    const fast = await this.fastFor({ ...set, model });
+    await s.reconfigure({ model, effort, fast, access: set.access ?? "config", plan: set.plan ?? false });
     const turn = await s.startTurn(p.input ?? [], p.clientUserMessageId ?? null);
     this.historyCache.delete(p.threadId);
     // A new thread's first message becomes its preview (and title) right away.
@@ -758,6 +937,12 @@ export class ClaudeEngine {
   private sessionChanged(s: ClaudeSession) {
     const id = s.config.id;
     if (this.sessions.get(id) !== s) return;
+    // Claude Code goes in and out of plan mode by itself too: the thread keeps what it's doing.
+    const set = this.state.settings[id];
+    if ((set?.plan ?? false) !== s.config.plan) {
+      this.state.settings[id] = { ...set, plan: s.config.plan };
+      this.save();
+    }
     this.refreshUsage(s);
     const sig = JSON.stringify([s.config.cwd, s.config.model, s.runningModel, s.config.effort, s.config.fast, s.config.plan, s.config.access]);
     if (this.reported.get(id) === sig) return this.settleFork(s);

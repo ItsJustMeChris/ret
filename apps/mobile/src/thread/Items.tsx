@@ -568,11 +568,18 @@ function Collab({ item }: { item: Extract<ThreadItem, { type: "collabAgentToolCa
   const ids = item.receiverThreadIds;
   const first = useAgentName(ids[0] ?? "");
   const who = item.tool === "listAgents" ? "" : !ids.length ? "agents" : ids.length === 1 ? first : `${ids.length} agents`;
+  // What the agents said back, as the desktop's Collab shows it.
+  const reports = ids.map((id) => item.agentsStates[id]?.message).filter((m): m is string => !!m?.trim());
   return (
     <Disclosure icon={glyph(Bot)} label={`${verb[item.tool] ?? item.tool}${who ? ` ${who}` : ""}`} meta={<Status status={item.status as string} />}>
       {item.prompt ? <Markdown text={item.prompt} muted size={14} /> : null}
       {ids.map((id) => (
         <AgentLink key={id} threadId={id} />
+      ))}
+      {reports.map((r, i) => (
+        <View key={i} className="mt-1.5 border-t border-line pt-2.5">
+          <Markdown text={r} size={14} />
+        </View>
       ))}
     </Disclosure>
   );

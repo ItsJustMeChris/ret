@@ -255,7 +255,8 @@ export function turnStateFrom(turn: TurnWithPlan, prev?: TurnState): TurnState {
     startedAt: turn.startedAt,
     completedAt: turn.completedAt,
     durationMs: turn.durationMs,
-    diff: prev?.diff ?? null,
+    // (History has it only from Ret's Claude engine: Codex sends it only while the turn runs.)
+    diff: turn.diff ?? prev?.diff ?? null,
     plan: planFrom(turn.plan, prev?.plan),
   };
 }

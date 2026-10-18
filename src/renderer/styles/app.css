@@ -1905,6 +1905,12 @@ body.resizing .transcript {
   gap: 4px;
   margin-top: 6px;
 }
+/* What an agent reported back, under the link to its thread. */
+.agent-report {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
 .agent-link {
   display: inline-flex;
   align-items: center;

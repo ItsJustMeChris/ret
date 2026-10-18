@@ -44,9 +44,9 @@ export interface AgentProvider {
   /** Ret titles its threads (Codex leaves that to each client; Claude Code titles its own sessions). */
   autoTitle: boolean;
   /**
-   * Subagents run as threads of their own (Codex's spawned agents), which a plain `thread/list`
-   * leaves out: older ones turn up when asked for by source, newer ones only by ancestor. Claude
-   * Code's subagents live inside their session.
+   * Subagents run as threads of their own (Codex's spawned agents; Claude Code's, as its engine
+   * presents them), which a plain `thread/list` leaves out: older ones turn up when asked for by
+   * source, newer ones only by ancestor.
    */
   subagentThreads: boolean;
   /** Where the provider's own settings live, for "inherit" labels. */
@@ -129,7 +129,7 @@ const claude: AgentProvider = {
   workspaces: false,
   goals: false,
   autoTitle: false,
-  subagentThreads: false,
+  subagentThreads: true,
   configName: "Claude Code settings",
 };
 

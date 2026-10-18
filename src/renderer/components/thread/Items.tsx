@@ -566,6 +566,8 @@ function Collab({ item, from }: { item: Extract<ThreadItem, { type: "collabAgent
   const first = useAgentName(ids[0] ?? "");
   const who = item.tool === "listAgents" ? "" : !ids.length ? "agents" : ids.length === 1 ? first : `${ids.length} agents`;
   const label = `${verb[item.tool] ?? item.tool}${who ? ` ${who}` : ""}`;
+  // What the agents said back (a Claude Code agent's report; Codex's last message, on a wait).
+  const reports = ids.map((id) => item.agentsStates[id]?.message).filter((m): m is string => !!m?.trim());
   return (
     <Disclosure icon={<Bot size={13} />} label={label} meta={<Status status={item.status as string} />}>
       {(item.prompt || ids.length > 0) && (
@@ -578,6 +580,9 @@ function Collab({ item, from }: { item: Extract<ThreadItem, { type: "collabAgent
               ))}
             </div>
           )}
+          {reports.map((r, i) => (
+            <Markdown key={i} text={r} className="agent-report" />
+          ))}
         </>
       )}
     </Disclosure>

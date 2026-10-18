@@ -715,7 +715,11 @@ export function mergeTurns(
   const owner = st.owner[threadId] ?? "codex";
   if (agentOf(owner).subagentThreads) {
     const unknown = new Set<string>();
-    for (const t of turnsDesc) for (const it of t.items ?? []) if (it.type === "subAgentActivity" && !st.threads[it.agentThreadId]) unknown.add(it.agentThreadId);
+    for (const t of turnsDesc)
+      for (const it of t.items ?? []) {
+        if (it.type === "subAgentActivity" && !st.threads[it.agentThreadId]) unknown.add(it.agentThreadId);
+        if (it.type === "collabAgentToolCall") for (const id of it.receiverThreadIds) if (!st.threads[id]) unknown.add(id);
+      }
     for (const id of unknown) discoverThread(owner, id);
   }
   patchLive(threadId, (prev) => {

@@ -21,7 +21,9 @@ import {
   originOf,
   planProgress,
   startedLabel,
+  usageRows,
 } from "../../lib/threadDetails";
+import { useConn } from "../../state/conn";
 import type { SizeClass } from "../../lib/useSize";
 import { Markdown } from "../Markdown";
 import { StatusDot } from "../StatusDot";
@@ -234,9 +236,11 @@ function ContextSection({ threadId }: { threadId: string }) {
           </Row>
         </>
       )}
-      <Row label={DETAILS.allTurns}>{compactNumber(usage.total.totalTokens)}</Row>
-      <Row label={DETAILS.cached}>{compactNumber(usage.total.cachedInputTokens)}</Row>
-      <Row label={DETAILS.reasoning}>{compactNumber(usage.total.reasoningOutputTokens)}</Row>
+      {usageRows(usage).map((r) => (
+        <Row key={r.label} label={r.label}>
+          {r.value}
+        </Row>
+      ))}
     </Section>
   );
 }
@@ -256,6 +260,10 @@ function Row({ label, children, title, path, mono }: { label: string; children: 
 function ThreadSection({ threadId }: { threadId: string }) {
   const thread = useThread(threadId, (s) => s.threads[threadId]);
   const owner = useThread(threadId, (s) => s.owner[threadId] ?? "codex");
+  // What it runs as its settings say once it's open (a reloaded thread's record may not know).
+  const model = useThread(threadId, (s) => s.live[threadId]?.settings?.model ?? s.threads[threadId]?.model ?? null);
+  const effort = useThread(threadId, (s) => s.live[threadId]?.settings?.effort ?? s.threads[threadId]?.reasoningEffort ?? null);
+  const models = useConn((s) => s.providers[owner]?.models);
   const worktree = useUI((s) => s.worktrees[threadId]);
   const origin = originOf(thread);
   const source = useThread(origin?.id ?? "", (s) => (origin ? s.threads[origin.id] : undefined));
@@ -264,7 +272,7 @@ function ThreadSection({ threadId }: { threadId: string }) {
   return (
     <Section title={DETAILS.thread}>
       <Row label={DETAILS.agent}>{engineName(owner)}</Row>
-      <Row label={DETAILS.model}>{modelLabel(thread)}</Row>
+      <Row label={DETAILS.model}>{modelLabel(model, effort, models)}</Row>
       <Row label={DETAILS.started}>{startedLabel(thread)}</Row>
       {branch && (
         <Row label={DETAILS.branch} mono>

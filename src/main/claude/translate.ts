@@ -1,5 +1,8 @@
 import { basename } from "node:path";
 import type { ThreadItem, TurnPlanStep, UserInput } from "../../shared/protocol";
+import type { CollabAgentState } from "../../shared/protocol/generated/v2";
+import { agentReport, launchedAgent } from "./agents";
+import { editScript, fileEdit, hunksText } from "./diff";
 
 /**
  * Claude Code → Ret protocol: the content blocks of Claude's messages become the app-server's
@@ -25,6 +28,16 @@ export interface ToolContext {
   /** File contents before a Write ran (live turns only), for a real diff instead of "whole file". */
   before?: string | null;
   durationMs?: number | null;
+  /** The thread the call is in: an Agent call's sender. */
+  thread?: string;
+  /**
+   * An Agent call's subagent, as a thread: the agent it spawned (see agents.ts), or null while
+   * that isn't known yet. Left out, the call is a plain tool row (a transcript from before Claude
+   * Code kept its agents' records).
+   */
+  agent?: string | null;
+  /** The tool's own account of its result (`tool_use_result`): an edit's real hunks (see diff.ts). */
+  structured?: unknown;
 }
 
 const OUTPUT_CAP = 200_000;
@@ -63,6 +76,9 @@ export function mcpName(name: string): { server: string; tool: string } | null {
 const CCD_PLAN = "mcp__ccd_turn__update_plan";
 /** Closes a Claude desktop turn, checking off the step still in progress. */
 const CCD_WRAP_UP = "mcp__ccd_turn__wrap_up";
+
+/** The tool that spawns a subagent (Task before Claude Code renamed it). */
+export const isAgentTool = (name: string) => name === "Agent" || name === "Task";
 
 /** Tools whose only job is the turn's checklist. */
 export function isPlanTool(name: string): boolean {
@@ -179,6 +195,13 @@ export function toolItem(use: ToolUse, result: ToolResult | undefined, ctx: Tool
 
   if (name === "Edit" || name === "MultiEdit" || name === "Write" || name === "NotebookEdit") {
     const path = String(input.file_path ?? input.notebook_path ?? "");
+    // Done, Claude Code says what it changed: hunks with real line numbers and context.
+    const edit = result && !result.isError ? fileEdit(ctx.structured) : null;
+    if (edit) {
+      const diff = edit.created ? (edit.after ?? null) : edit.hunks?.length ? hunksText(edit.hunks) : null;
+      if (diff != null)
+        return { type: "fileChange", id, changes: [{ path, kind: edit.created ? { type: "add" } : { type: "update", move_path: null }, diff }], status };
+    }
     let diff: string;
     let kind: "add" | "update" = "update";
     if (name === "Edit") diff = lineDiff(String(input.old_string ?? ""), String(input.new_string ?? ""));
@@ -245,13 +268,37 @@ export function toolItem(use: ToolUse, result: ToolResult | undefined, ctx: Tool
     };
   }
 
-  const label = name === "Agent" || name === "Task" ? `Agent${input.subagent_type ? ` (${input.subagent_type})` : ""}${input.description ? ` · ${input.description}` : ""}` : name;
+  // Spawning a subagent, as Codex's agents spawn theirs: a link to its thread, and its report.
+  if (isAgentTool(name) && ctx.agent !== undefined) {
+    const receivers = ctx.agent ? [ctx.agent] : [];
+    const state: CollabAgentState = !result
+      ? { status: "running", message: null }
+      : result.isError
+        ? { status: "errored", message: out }
+        : launchedAgent(out)
+          ? { status: "running", message: null }
+          : { status: "completed", message: agentReport(out) };
+    return {
+      type: "collabAgentToolCall",
+      id,
+      tool: "spawnAgent",
+      status: status === "inProgress" ? "inProgress" : status === "completed" ? "completed" : "failed",
+      senderThreadId: ctx.thread ?? "",
+      receiverThreadIds: receivers,
+      prompt: typeof input.prompt === "string" ? input.prompt : null,
+      model: typeof input.model === "string" ? input.model : null,
+      reasoningEffort: null,
+      agentsStates: ctx.agent ? { [ctx.agent]: state } : {},
+    };
+  }
+
+  const label = isAgentTool(name) ? `Agent${input.subagent_type ? ` (${input.subagent_type})` : ""}${input.description ? ` · ${input.description}` : ""}` : name;
   return {
     type: "dynamicToolCall",
     id,
     namespace: null,
     tool: label,
-    arguments: name === "Agent" || name === "Task" ? (input.prompt ?? input) : input,
+    arguments: isAgentTool(name) ? (input.prompt ?? input) : input,
     status: done,
     contentItems: out ? [{ type: "inputText", text: cap(out) }] : null,
     success: result ? !result.isError : null,
@@ -308,31 +355,6 @@ export function lineDiff(a: string, b: string, fullFile = false): string {
   const newLen = body.filter((l) => l[0] !== "-").length;
   const start = fullFile ? head + 1 : 1;
   return `@@ -${start},${oldLen} +${start},${newLen} @@\n${body.join("\n")}`;
-}
-
-/** LCS-based line edit script; big inputs fall back to remove-all/add-all. */
-function editScript(A: string[], B: string[]): string[] {
-  if (!A.length) return B.map((l) => `+${l}`);
-  if (!B.length) return A.map((l) => `-${l}`);
-  if (A.length * B.length > 4_000_000) return [...A.map((l) => `-${l}`), ...B.map((l) => `+${l}`)];
-  const n = A.length;
-  const m = B.length;
-  const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
-  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-  const out: string[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (A[i] === B[j]) {
-      out.push(` ${A[i]}`);
-      i++;
-      j++;
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) out.push(`-${A[i++]}`);
-    else out.push(`+${B[j++]}`);
-  }
-  while (i < n) out.push(`-${A[i++]}`);
-  while (j < m) out.push(`+${B[j++]}`);
-  return out;
 }
 
 const WRAPPERS = /<(?:command-message|command-name|command-args|local-command-stdout|local-command-stderr|system-reminder)>[\s\S]*?<\/(?:command-message|command-name|command-args|local-command-stdout|local-command-stderr|system-reminder)>/g;

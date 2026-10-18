@@ -17,7 +17,9 @@ import {
   originOf,
   planProgress,
   startedLabel,
+  usageRows,
 } from "@ret/lib/threadDetails";
+import { useConn } from "@ret/state/conn";
 import { engineName } from "@ret/state/hosts";
 import { baseName, threadTitle } from "@ret/state/projects";
 import { NO_AGENTS, useThreads } from "@ret/state/threads";
@@ -148,9 +150,11 @@ function ContextSection({ threadId }: { threadId: string }) {
           </Row>
         </>
       )}
-      <Row label={DETAILS.allTurns}>{compactNumber(usage.total.totalTokens)}</Row>
-      <Row label={DETAILS.cached}>{compactNumber(usage.total.cachedInputTokens)}</Row>
-      <Row label={DETAILS.reasoning}>{compactNumber(usage.total.reasoningOutputTokens)}</Row>
+      {usageRows(usage).map((r) => (
+        <Row key={r.label} label={r.label}>
+          {r.value}
+        </Row>
+      ))}
     </Section>
   );
 }
@@ -171,6 +175,10 @@ function Row({ label, children, mono }: { label: string; children: ReactNode; mo
 function ThreadSection({ threadId, go }: { threadId: string; go: (id: string) => void }) {
   const thread = useThread(threadId, (s) => s.threads[threadId]);
   const owner = useThread(threadId, (s) => s.owner[threadId] ?? "codex");
+  // What it runs as its settings say once it's open, as the desktop's details show it.
+  const model = useThread(threadId, (s) => s.live[threadId]?.settings?.model ?? s.threads[threadId]?.model ?? null);
+  const effort = useThread(threadId, (s) => s.live[threadId]?.settings?.effort ?? s.threads[threadId]?.reasoningEffort ?? null);
+  const models = useConn((s) => s.providers[owner]?.models);
   const worktree = useUI((s) => s.worktrees[threadId]);
   const origin = originOf(thread);
   const source = useThread(origin?.id ?? "", (s) => (origin ? s.threads[origin.id] : undefined));
@@ -179,7 +187,7 @@ function ThreadSection({ threadId, go }: { threadId: string; go: (id: string) =>
   return (
     <Section title={DETAILS.thread}>
       <Row label={DETAILS.agent}>{engineName(owner)}</Row>
-      <Row label={DETAILS.model}>{modelLabel(thread)}</Row>
+      <Row label={DETAILS.model}>{modelLabel(model, effort, models)}</Row>
       <Row label={DETAILS.started}>{startedLabel(thread)}</Row>
       {branch ? (
         <Row label={DETAILS.branch} mono>
