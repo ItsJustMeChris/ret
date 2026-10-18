@@ -59,9 +59,28 @@ export interface LiveThread {
   settings: ThreadSettings | null;
   /** When each sleep (the agent's `clock.sleep`) seen here started and ended, in ms: its item carries neither. */
   sleeps: Record<string, { startedAt: number | null; endedAt: number | null }>;
-  /** Transient banner, e.g. "reconnecting… (retrying)". */
-  notice: string | null;
+  /** What happened along the way (a retry, a warning, a failed send), oldest first: each drawn where it happened. */
+  notices: ThreadNotice[];
+  /** Why the thread's history couldn't be loaded (it's not hydrated); anything else is a notice. */
   error: string | null;
+}
+
+/**
+ * Something that happened to a thread that isn't one of its items: the engine retrying, a warning,
+ * a message that couldn't be sent. It goes in the transcript where it happened and scrolls up with
+ * the rest, never pinned below it.
+ */
+export interface ThreadNotice {
+  id: string;
+  /** "warn": something it got past or worked around; "error": something that failed. */
+  tone: "warn" | "error";
+  text: string;
+  /** The turn it happened in, or (with `at` null) the last one before it; null: before any turn. */
+  turnId: string | null;
+  /** How many of the turn's items had come when it happened: it's drawn after them. Null: after the turn. */
+  at: number | null;
+  /** Notices of one kind in one place replace each other (a retry's attempts), not stack up. */
+  key?: string;
 }
 
 export interface PendingRequest {
@@ -131,7 +150,7 @@ export const emptyLive = (): LiveThread => ({
   tokenUsage: null,
   settings: null,
   sleeps: {},
-  notice: null,
+  notices: [],
   error: null,
 });
 
@@ -311,6 +330,40 @@ function endSleeps(lt: LiveThread) {
   for (const id of open) lt.sleeps[id] = { ...lt.sleeps[id], endedAt: Date.now() };
 }
 
+const MAX_NOTICES = 50;
+let noticeSeq = 0;
+
+/**
+ * The thread's notices with one more, placed where things are now: after the latest item of
+ * `turnId` (or of the running turn), else after the last turn. One like the last in the same place
+ * (the same `key`, or the same words) takes its place, so a retry counting up stays one row.
+ */
+function withNotice(lt: LiveThread, tone: ThreadNotice["tone"], text: string, turnId?: string | null, key?: string): ThreadNotice[] {
+  const turn = (turnId && lt.turns[turnId]) || (lt.activeTurnId ? lt.turns[lt.activeTurnId] : undefined);
+  // A message still on its way has a turn of its own only until the real one starts.
+  let i = lt.turnOrder.length - 1;
+  while (i >= 0 && lt.turnOrder[i].startsWith("pending:")) i--;
+  const place = turn ? { turnId: turn.id, at: turn.itemIds.length } : { turnId: lt.turnOrder[i] ?? null, at: null };
+  const prev = lt.notices[lt.notices.length - 1];
+  const same = !!prev && prev.turnId === place.turnId && prev.at === place.at && (key ? prev.key === key : !prev.key && prev.text === text && prev.tone === tone);
+  const notice: ThreadNotice = { id: same ? prev.id : `notice:${++noticeSeq}`, tone, text, ...place, ...(key ? { key } : {}) };
+  return same ? [...lt.notices.slice(0, -1), notice] : [...lt.notices, notice].slice(-MAX_NOTICES);
+}
+
+/** Note something that happened to a thread (a send or an interrupt that failed) in its transcript, where it happened. */
+export function addNotice(threadId: string, tone: ThreadNotice["tone"], text: string) {
+  patchLive(threadId, (lt) => ({ notices: withNotice(lt, tone, text) }));
+}
+
+export const NO_NOTICES: readonly ThreadNotice[] = [];
+
+/** A thread's notices placed in or after `turnId` (null: those before any turn). */
+export function noticesAt(lt: LiveThread | undefined, turnId: string | null): readonly ThreadNotice[] {
+  if (!lt?.notices.length) return NO_NOTICES;
+  const list = lt.notices.filter((n) => n.turnId === turnId);
+  return list.length ? list : NO_NOTICES;
+}
+
 function mutItem<T extends ThreadItem["type"]>(
   lt: LiveThread,
   turnId: string,
@@ -468,7 +521,6 @@ function apply(d: Draft, engine: EngineId, method: string, p: any, hooks: Hooks)
         lt.turnOrder.push(turn.id);
       }
       lt.activeTurnId = turn.id;
-      lt.notice = null;
       setThread(d, p.threadId, { status: { type: "active", activeFlags: [] } });
       break;
     }
@@ -484,7 +536,6 @@ function apply(d: Draft, engine: EngineId, method: string, p: any, hooks: Hooks)
       }
       if (lt.activeTurnId === turn.id) lt.activeTurnId = null;
       endSleeps(lt);
-      lt.notice = null;
       setThread(d, p.threadId, { updatedAt: Math.floor(Date.now() / 1000), recencyAt: Math.floor(Date.now() / 1000) });
       // A turn that ends with its agents still out isn't news yet (finished.ts marks it once they're done).
       const waiting = turn.status !== "failed" && agentsWorking(d, p.threadId);
@@ -562,13 +613,18 @@ function apply(d: Draft, engine: EngineId, method: string, p: any, hooks: Hooks)
     case "error": {
       if (!p.threadId) break;
       const lt = liveOf(d, p.threadId);
-      if (p.willRetry) lt.notice = `${p.error?.message ?? "Error"} — retrying…`;
+      if (p.willRetry) lt.notices = withNotice(lt, "warn", `${p.error?.message ?? "Error"} — retrying…`, p.turnId, "retry");
       else if (p.turnId) turnOf(lt, p.turnId).error = p.error;
+      else if (p.error?.message) lt.notices = withNotice(lt, "error", p.error.message);
       break;
     }
-    case "warning":
-      if (p.threadId) liveOf(d, p.threadId).notice = p.message;
+    case "warning": {
+      // An empty one only ended a status an older Ret's Claude engine showed this way (compacting).
+      if (!p.threadId || !p.message) break;
+      const lt = liveOf(d, p.threadId);
+      lt.notices = withNotice(lt, "warn", p.message);
       break;
+    }
     case "thread/reverted": {
       // History was rewritten server-side; force a re-hydrate on next view.
       if (d.live[p.threadId]) {

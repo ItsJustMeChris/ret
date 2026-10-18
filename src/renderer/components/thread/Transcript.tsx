@@ -1,17 +1,17 @@
 import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { Bot, CircleAlert, CircleDashed, FileDiff, GitFork, LoaderCircle, Radar, SquareTerminal, Workflow } from "lucide-react";
+import { Bot, CircleAlert, CircleDashed, FileDiff, GitFork, LoaderCircle, Radar, SquareTerminal, TriangleAlert, Workflow } from "lucide-react";
 import { Chevron } from "../ui/Chevron";
-import { ownerOf, useThreads } from "../../state/threads";
+import { noticesAt, ownerOf, useThreads, type ThreadNotice } from "../../state/threads";
 import { useThread } from "../../state/useThread";
 import { takesDirectInput } from "../../state/projects";
 import { shallowEqual } from "../../lib/shallow";
 import { agentOf } from "../../agents";
-import { forkThread, loadOlder, resendUnanswered } from "../../state/actions";
+import { forkThread, hydrateThread, loadOlder, resendUnanswered } from "../../state/actions";
 import type { BackgroundTask, ThreadItem } from "@shared/protocol";
 import { backgroundLabel, useBackgroundOnly } from "../StatusDot";
 import { DiffView, ItemView } from "./Items";
-import { activitySummary, isActivity } from "../../lib/activity";
+import { activitySummary, turnSegments } from "../../lib/activity";
 import { ThreadImage } from "./ThreadImage";
 import { diffStats, duration } from "../../lib/format";
 import { Approvals } from "./Approvals";
@@ -100,20 +100,19 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
     },
     shallowEqual,
   );
+  const notices = useThread(ctx.threadId, (s) => noticesAt(s.live[ctx.threadId], turnId), shallowEqual);
   const [showDiff, setShowDiff] = useState(false);
   const elsewhere = useThread(ctx.threadId, (s) => s.external[ctx.threadId]?.turnId === turnId);
   const background = useThread(ctx.threadId, (s) => s.background[ctx.threadId]?.length ?? 0);
   if (!turn) return null;
   const live = turn.status === "inProgress" && !turn.stale;
 
-  // Split items into runs: activity steps are grouped, messages/edits stand alone.
-  const segments: { kind: "item" | "group"; ids: string[] }[] = [];
-  turn.itemIds.forEach((id, i) => {
-    const activity = isActivity({ type: types[i] } as ThreadItem);
-    const last = segments[segments.length - 1];
-    if (activity && last?.kind === "group") last.ids.push(id);
-    else segments.push({ kind: activity ? "group" : "item", ids: [id] });
-  });
+  // Split items into runs: activity steps are grouped, messages/edits stand alone. A notice goes
+  // after the items that had come when it happened, and splits a run there.
+  const segments = turnSegments(turn.itemIds, types, notices);
+  // The newest item streams (or shows its steps live) whatever notice came after it.
+  const newest = segments.findLastIndex((seg) => seg.kind !== "notice");
+  const after = notices.filter((n) => n.at == null);
 
   const stats = turn.diff ? diffStats(turn.diff) : null;
   const pending = turnId.startsWith("pending:");
@@ -121,10 +120,12 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
   return (
     <section className={`turn ${live ? "live" : ""}`} data-turn={turnId}>
       {segments.map((seg, i) =>
-        seg.kind === "group" ? (
-          <ActivityGroup key={seg.ids[0]} ids={seg.ids} ctx={ctx} live={live && i === segments.length - 1} />
+        seg.kind === "notice" ? (
+          <NoticeRow key={seg.notice.id} notice={seg.notice} />
+        ) : seg.kind === "group" ? (
+          <ActivityGroup key={seg.ids[0]} ids={seg.ids} ctx={ctx} live={live && i === newest} />
         ) : (
-          <ItemView key={seg.ids[0]} itemId={seg.ids[0]} ctx={ctx} live={live && i === segments.length - 1} />
+          <ItemView key={seg.ids[0]} itemId={seg.ids[0]} ctx={ctx} live={live && i === newest} />
         ),
       )}
       {turn.plan && turn.plan.steps.length > 0 && (
@@ -179,9 +180,28 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
         </div>
       )}
       {showDiff && turn.diff && <DiffView diff={turn.diff} />}
+      {after.map((n) => (
+        <NoticeRow key={n.id} notice={n} />
+      ))}
     </section>
   );
 });
+
+/** Something that happened along the way (a retry, a warning, a failed send), where it happened. */
+function NoticeRow({ notice }: { notice: ThreadNotice }) {
+  return (
+    <div className={`notice ${notice.tone}`}>
+      {notice.tone === "error" ? <CircleAlert size={13} /> : <TriangleAlert size={13} />}
+      <span>{notice.text}</span>
+    </div>
+  );
+}
+
+/** Notices before any turn (the thread's first message couldn't be sent). */
+function LeadingNotices({ threadId }: { threadId: string }) {
+  const notices = useThread(threadId, (s) => noticesAt(s.live[threadId], null), shallowEqual);
+  return notices.map((n) => <NoticeRow key={n.id} notice={n} />);
+}
 
 /** A steer that landed after the final answer: the turn ended with the user's message unanswered. */
 function UnansweredNotice({ threadId, lastItemId, count }: { threadId: string; lastItemId: string | undefined; count: number }) {
@@ -286,7 +306,7 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
     threadId,
     (s) => {
       const l = s.live[threadId];
-      return l && { turnOrder: l.turnOrder, olderCursor: l.olderCursor, loadingOlder: l.loadingOlder, notice: l.notice, error: l.error, loading: !l.hydrated && l.hydrating };
+      return l && { turnOrder: l.turnOrder, olderCursor: l.olderCursor, loadingOlder: l.loadingOlder, failed: l.hydrated ? null : l.error, loading: !l.hydrated && l.hydrating };
     },
     shallowEqual,
   );
@@ -348,6 +368,19 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
       </div>
     );
   }
+  if (lt.failed) {
+    return (
+      <div className="transcript center">
+        <div className="transcript-failed">
+          <CircleAlert size={18} />
+          <span>{lt.failed}</span>
+          <button className="link" onClick={() => void hydrateThread(threadId)}>
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="transcript-wrap">
@@ -358,17 +391,11 @@ export function Transcript({ threadId, cwd }: { threadId: string; cwd: string | 
             {lt.loadingOlder ? <LoaderCircle className="spin" size={12} /> : null} Load earlier turns
           </button>
         )}
+        {!start && <LeadingNotices threadId={threadId} />}
         {(start ? lt.turnOrder.slice(start) : lt.turnOrder).map((id) => (
           <Turn key={id} turnId={id} ctx={ctx} />
         ))}
         <BackgroundWork threadId={threadId} />
-        {lt.notice && <div className="notice">{lt.notice}</div>}
-        {lt.error && (
-          <div className="turn-error">
-            <CircleAlert size={14} />
-            <span>{lt.error}</span>
-          </div>
-        )}
         <Approvals threadId={threadId} />
       </div>
     </div>

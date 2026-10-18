@@ -33,6 +33,7 @@ import { imageType } from "@shared/files";
 import { StatusDot } from "../StatusDot";
 import { openFrom } from "./Subagents";
 import { changeStats, duration, shortPath, unwrapCommand } from "../../lib/format";
+import { compactionLabel } from "../../lib/activity";
 import { highlight } from "../../lib/markdown";
 import { Markdown } from "../Markdown";
 import { splitContentRefs } from "../../lib/visualize";
@@ -635,7 +636,7 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
     case "contextCompaction":
       return (
         <div className="divider">
-          <Layers size={12} /> Context compacted
+          <Layers size={12} /> {compactionLabel(live)}
         </div>
       );
     case "enteredReviewMode":

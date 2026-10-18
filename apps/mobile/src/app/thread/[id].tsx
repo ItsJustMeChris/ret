@@ -43,7 +43,6 @@ function ThreadView({ id }: { id: string }) {
   const cwd = useThread(id, (s) => s.live[id]?.settings?.cwd ?? s.threads[id]?.cwd ?? null);
   const hydrating = useThread(id, (s) => !s.live[id]?.hydrated && !s.live[id]?.error);
   const error = useThread(id, (s) => (!s.live[id]?.hydrated ? (s.live[id]?.error ?? null) : null));
-  const notice = useThread(id, (s) => s.live[id]?.notice ?? null);
   const host = owner ? hostOf(owner) : null;
   const scope = useMemo(() => ({ cwd, host }), [cwd, host]);
 
@@ -110,11 +109,6 @@ function ThreadView({ id }: { id: string }) {
             <Transcript ctx={{ threadId: id, cwd, host }} />
           )}
         </View>
-        {notice ? (
-          <Text numberOfLines={2} className="px-4 pb-1 text-[12px] text-amber">
-            {notice}
-          </Text>
-        ) : null}
         <Approvals threadId={id} />
         <Composer threadId={id} />
       </ThreadKeyboardView>

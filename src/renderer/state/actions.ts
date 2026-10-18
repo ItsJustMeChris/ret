@@ -13,6 +13,7 @@ import { fillComposer } from "./composerDrafts";
 import { agentsUnasked, backfillLineage, discoverThread, lineageKnown, listAgentsOf } from "./lineage";
 import { cancelTitle, isTitleThread, titleEvent, titleFromMessage } from "./titles";
 import {
+  addNotice,
   addPendingRequest,
   emptyLive,
   enqueueNotification,
@@ -688,7 +689,8 @@ export async function loadOlder(threadId: string) {
     });
     mergeTurns(threadId, res.data, res.nextCursor, "prepend");
   } catch (err) {
-    patchLive(threadId, { loadingOlder: false, error: (err as Error).message });
+    patchLive(threadId, { loadingOlder: false });
+    toast(`Couldn't load earlier turns: ${(err as Error).message}`, "error");
   }
 }
 
@@ -987,7 +989,7 @@ export async function sendMessage(
     }
   } catch (err) {
     clearOptimistic(threadId, clientId);
-    patchLive(threadId, { error: (err as Error).message });
+    addNotice(threadId, "error", `Couldn't send: ${(err as Error).message}`);
     throw err;
   }
   return threadId;
@@ -1096,7 +1098,7 @@ export function resendUnanswered(threadId: string, item: Extract<ThreadItem, { t
 export async function interrupt(threadId: string) {
   const lt = useThreads.getState().live[threadId];
   if (!lt?.activeTurnId) return;
-  await rpcFor(ownerOf(threadId)).request("turn/interrupt", { threadId, turnId: lt.activeTurnId }).catch((err) => patchLive(threadId, { error: err.message }));
+  await rpcFor(ownerOf(threadId)).request("turn/interrupt", { threadId, turnId: lt.activeTurnId }).catch((err) => addNotice(threadId, "error", `Couldn't stop: ${err.message}`));
 }
 
 export function respondToRequest(key: string, result: unknown) {

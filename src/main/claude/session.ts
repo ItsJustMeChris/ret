@@ -104,6 +104,8 @@ interface LiveTurn {
   /** The prompt is a slash command (`/cost`…), whose output is the reply. */
   command: boolean;
   plan: TurnPlanStep[] | null;
+  /** The compaction under way: its item, started and waiting for its boundary to complete it. */
+  compacting?: string;
 }
 
 const IDLE_CLOSE_MS = 10 * 60_000;
@@ -454,7 +456,12 @@ export class ClaudeSession {
         this.host.changed(this);
         return;
       case "status":
-        if (this.turn) this.host.notify("warning", { threadId: this.config.id, message: msg.status === "compacting" ? "Compacting context…" : "" });
+        // Compacting shows as its item, started now (the Working row says so) and completed at its boundary, as Codex has it.
+        if (msg.status === "compacting" && this.turn && !this.turn.compacting) {
+          const id: string = msg.uuid ?? `${this.turn.id}:compact`;
+          this.turn.compacting = id;
+          this.emitItem("item/started", { type: "contextCompaction", id });
+        }
         return;
       case "background_tasks_changed": {
         const started = new Map(this.background.map((t) => [t.id, t.startedAt]));
@@ -466,7 +473,9 @@ export class ClaudeSession {
       }
       case "compact_boundary": {
         const turn = this.ensureTurn();
-        this.emitItem("item/completed", { type: "contextCompaction", id: msg.uuid ?? `${turn.id}:compact` });
+        const id = turn.compacting ?? msg.uuid ?? `${turn.id}:compact`;
+        turn.compacting = undefined;
+        this.emitItem("item/completed", { type: "contextCompaction", id });
         return;
       }
       case "api_retry":

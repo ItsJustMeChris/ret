@@ -2334,12 +2334,41 @@ body.resizing .transcript {
   flex: none;
   margin-top: 2px;
 }
+/* Something that happened along the way (a retry, a warning, a failed send), where it happened. */
 .notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   padding: 6px 10px;
   border-radius: 8px;
   background: var(--amber-soft);
   color: var(--amber);
   font-size: 12px;
+  user-select: text;
+}
+.notice.error {
+  background: var(--red-soft);
+  color: var(--red);
+}
+.notice svg {
+  flex: none;
+  margin-top: 1.5px;
+}
+/* The thread's history couldn't be loaded. */
+.transcript-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 420px;
+  padding: 0 24px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 12.5px;
+  user-select: text;
+}
+.transcript-failed > svg {
+  color: var(--red);
 }
 .turn-foot {
   display: flex;

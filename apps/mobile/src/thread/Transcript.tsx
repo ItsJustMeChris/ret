@@ -1,14 +1,14 @@
-import { ChevronRight, CircleAlert, FileDiff } from "lucide-react-native";
+import { ChevronRight, CircleAlert, FileDiff, TriangleAlert } from "lucide-react-native";
 import { memo, useMemo, useState } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
 import Animated, { cubicBezier } from "react-native-reanimated";
 import type { ThreadItem } from "@shared/protocol";
-import { activitySummary, isActivity } from "@ret/lib/activity";
+import { activitySummary, turnSegments } from "@ret/lib/activity";
 import { diffStats, duration } from "@ret/lib/format";
 import { shallowEqual } from "@ret/lib/shallow";
 import { loadOlder, resendUnanswered } from "@ret/state/actions";
 import { takesDirectInput } from "@ret/state/projects";
-import { ownerOf } from "@ret/state/threads";
+import { noticesAt, ownerOf, type ThreadNotice } from "@ret/state/threads";
 import { useThread } from "@ret/state/useThread";
 import { agentOf } from "@ret/agents";
 import { useWork } from "@ret/components/thread/useWork";
@@ -35,7 +35,7 @@ export function Transcript({ ctx, header }: { ctx: Ctx; header?: React.ReactElem
       keyExtractor={(id) => id}
       renderItem={({ item }) => <Turn turnId={item} ctx={ctx} />}
       ListHeaderComponent={header ?? undefined}
-      ListFooterComponent={older ? <View className="items-center py-4">{loadingOlder ? <Spinner colorClassName="accent-text-3" /> : null}</View> : undefined}
+      ListFooterComponent={older ? <View className="items-center py-4">{loadingOlder ? <Spinner colorClassName="accent-text-3" /> : null}</View> : <LeadingNotices threadId={ctx.threadId} />}
       onEndReached={() => older && void loadOlder(ctx.threadId)}
       onEndReachedThreshold={0.4}
       keyboardDismissMode="interactive"
@@ -95,18 +95,15 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
   const types = useThread(ctx.threadId, (s) => (turn ? turn.itemIds.map((id) => s.live[ctx.threadId]?.items[id]?.type ?? "") : []), shallowEqual);
   const elsewhere = useThread(ctx.threadId, (s) => s.external[ctx.threadId]?.turnId === turnId);
   const background = useThread(ctx.threadId, (s) => s.background[ctx.threadId]?.length ?? 0);
+  const notices = useThread(ctx.threadId, (s) => noticesAt(s.live[ctx.threadId], turnId), shallowEqual);
   const [showDiff, setShowDiff] = useState(false);
   if (!turn) return null;
   const live = turn.status === "inProgress" && !turn.stale;
 
-  // Activity steps are grouped; messages and edits stand alone (as the desktop's Turn).
-  const segments: { kind: "item" | "group"; ids: string[] }[] = [];
-  turn.itemIds.forEach((id, i) => {
-    const activity = isActivity({ type: types[i] } as ThreadItem);
-    const last = segments[segments.length - 1];
-    if (activity && last?.kind === "group") last.ids.push(id);
-    else segments.push({ kind: activity ? "group" : "item", ids: [id] });
-  });
+  // Activity steps are grouped; messages and edits stand alone; notices go where they happened (as the desktop's Turn).
+  const segments = turnSegments(turn.itemIds, types, notices);
+  const newest = segments.findLastIndex((seg) => seg.kind !== "notice");
+  const after = notices.filter((n) => n.at == null);
   const stats = turn.diff ? diffStats(turn.diff) : null;
   const pending = turnId.startsWith("pending:");
   const agent = agentOf(ownerOf(ctx.threadId)).name;
@@ -114,10 +111,12 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
   return (
     <View className="gap-1.5 pb-5">
       {segments.map((seg, i) =>
-        seg.kind === "group" ? (
-          <ActivityGroup key={seg.ids[0]} ids={seg.ids} ctx={ctx} live={live && i === segments.length - 1} />
+        seg.kind === "notice" ? (
+          <NoticeRow key={seg.notice.id} notice={seg.notice} />
+        ) : seg.kind === "group" ? (
+          <ActivityGroup key={seg.ids[0]} ids={seg.ids} ctx={ctx} live={live && i === newest} />
         ) : (
-          <ItemView key={seg.ids[0]} itemId={seg.ids[0]} ctx={ctx} live={live && i === segments.length - 1} />
+          <ItemView key={seg.ids[0]} itemId={seg.ids[0]} ctx={ctx} live={live && i === newest} />
         ),
       )}
       {turn.plan && turn.plan.steps.length > 0 && (
@@ -161,9 +160,38 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
           <DiffView diff={turn.diff} />
         </View>
       )}
+      {after.map((n) => (
+        <NoticeRow key={n.id} notice={n} />
+      ))}
     </View>
   );
 });
+
+/** Something that happened along the way (a retry, a warning, a failed send), where it happened: as the desktop's NoticeRow. */
+function NoticeRow({ notice }: { notice: ThreadNotice }) {
+  const error = notice.tone === "error";
+  return (
+    <View className={`flex-row items-start gap-2 rounded-lg px-3 py-2 ${error ? "bg-red-soft" : "bg-amber-soft"}`}>
+      <Icon icon={error ? CircleAlert : TriangleAlert} size={13} colorClassName={error ? "accent-red" : "accent-amber"} />
+      <Text selectable className={`flex-1 text-[13px] ${error ? "text-red" : "text-amber"}`}>
+        {notice.text}
+      </Text>
+    </View>
+  );
+}
+
+/** Notices before any turn (the thread's first message couldn't be sent): at the top, as on the desktop. */
+function LeadingNotices({ threadId }: { threadId: string }) {
+  const notices = useThread(threadId, (s) => noticesAt(s.live[threadId], null), shallowEqual);
+  if (!notices.length) return null;
+  return (
+    <View className="gap-1.5 pb-5">
+      {notices.map((n) => (
+        <NoticeRow key={n.id} notice={n} />
+      ))}
+    </View>
+  );
+}
 
 /** A steer that landed after the final answer: the turn ended with your message unanswered. */
 function UnansweredNotice({ threadId, lastItemId, count }: { threadId: string; lastItemId: string | undefined; count: number }) {

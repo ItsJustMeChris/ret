@@ -28,6 +28,7 @@ import { Image, Pressable, ScrollView, Text, View } from "react-native";
 import type { FileUpdateChange, ThreadItem } from "@shared/protocol";
 import { parseCodexMessage } from "@ret/lib/codexMessage";
 import { splitContentRefs } from "@ret/lib/visualize";
+import { compactionLabel } from "@ret/lib/activity";
 import { changeStats, duration, shortPath, unwrapCommand } from "@ret/lib/format";
 import { focusComposer, sendFromComposer } from "@ret/state/composerDrafts";
 import { agentName, takesDirectInput, threadTitle } from "@ret/state/projects";
@@ -679,7 +680,7 @@ export const ItemView = memo(function ItemView({ itemId, ctx, live }: { itemId: 
         <Disclosure icon={glyph(ImageIcon)} label={item.failure ? "Image generation failed" : "Generating image…"} />
       );
     case "contextCompaction":
-      return <Divider icon={Layers} label="Context compacted" />;
+      return <Divider icon={Layers} label={compactionLabel(live)} />;
     case "enteredReviewMode":
     case "exitedReviewMode":
       return (

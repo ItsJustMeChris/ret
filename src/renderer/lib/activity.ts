@@ -1,5 +1,6 @@
 import type { ThreadItem } from "@shared/protocol";
 import { appKey, appLabel, computerUseOf, type ComputerUse } from "../state/computerUse";
+import type { ThreadNotice } from "../state/threads";
 
 // How a turn's steps fold up in a transcript: which items are "activity" (grouped into one row),
 // and the one line that sums a group up.
@@ -22,6 +23,31 @@ export function isActivity(item: ThreadItem | undefined): boolean {
     default:
       return false;
   }
+}
+
+/** A compaction's divider: under way while it's the live turn's newest item (its item has no status). */
+export const compactionLabel = (live: boolean) => (live ? "Compacting context…" : "Context compacted");
+
+export type Segment ={ kind: "item" | "group"; ids: string[] } | { kind: "notice"; notice: ThreadNotice };
+
+/**
+ * A turn as transcripts draw it: its activity steps in runs, messages and edits standing alone,
+ * and each notice placed in it after the items that had come when it happened (splitting a run
+ * there). `types`: each item's type, in step with `itemIds`.
+ */
+export function turnSegments(itemIds: readonly string[], types: readonly string[], notices: readonly ThreadNotice[]): Segment[] {
+  const segments: Segment[] = [];
+  const inside = notices.filter((n) => n.at != null).sort((a, b) => a.at! - b.at!);
+  let next = 0;
+  itemIds.forEach((id, i) => {
+    while (next < inside.length && inside[next].at! <= i) segments.push({ kind: "notice", notice: inside[next++] });
+    const activity = isActivity({ type: types[i] } as ThreadItem);
+    const last = segments[segments.length - 1];
+    if (activity && last?.kind === "group") last.ids.push(id);
+    else segments.push({ kind: activity ? "group" : "item", ids: [id] });
+  });
+  while (next < inside.length) segments.push({ kind: "notice", notice: inside[next++] });
+  return segments;
 }
 
 /**
