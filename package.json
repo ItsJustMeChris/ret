@@ -15,6 +15,7 @@
     "start:alongside": "npm run build && electron . --ret-profile=ret-alongside",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "gen:protocol": "node scripts/gen-protocol.mjs",
+    "postinstall": "node scripts/postinstall.mjs",
     "dist": "npm run build && electron-builder --win --x64",
     "dist:mac": "npm run build && electron-builder --mac"
   },
