@@ -10,7 +10,14 @@ export interface ComposerPrefs {
   speed?: string;
 }
 
-export type ViewMode = "focus" | "canvas" | "code" | "inbox";
+/**
+ * Ret's own views as apps (each defined in src/renderer/apps, listed in its index.ts): windows on the
+ * canvas desktop, and some are full-screen modes too.
+ */
+export type ModeApp = "code" | "inbox";
+export type AppKind = ModeApp | "terminal";
+export type ViewMode = "focus" | "canvas" | ModeApp;
+export const isModeApp = (mode: ViewMode): mode is ModeApp => mode !== "focus" && mode !== "canvas";
 
 /** Code mode: a project's files in an editor, with one of its threads to talk to alongside. */
 export interface CodeLayout {
@@ -220,13 +227,14 @@ export const filePath = (id: string) => pathOfKey(id.slice(5));
 /** The paired device a file view's file is on; null for this computer. */
 export const fileHost = (id: string) => hostOfKey(id.slice(5));
 /**
- * One of Ret's own views living as a window on the canvas desktop: Inbox and Code (one of each), or
- * a terminal (`app:terminal:<terminal id>`, as many as you like).
+ * One of Ret's apps living as a window on the canvas desktop: `app:<kind>` for one there's a single
+ * window of (Inbox, Code), `app:<kind>:<instance>` for one with as many as you like (a terminal's
+ * instance is its terminal id).
  */
-export type AppKind = "inbox" | "code" | "terminal";
 export const isApp = (id: string) => id.startsWith("app:");
 export const appId = (kind: AppKind, instance?: string) => (instance ? `app:${kind}:${instance}` : `app:${kind}`);
 export const appKind = (id: string) => id.slice(4).split(":")[0] as AppKind;
+export const appInstance = (id: string) => id.slice(5 + appKind(id).length) || null;
 /** The terminal a canvas window shows, if it's a terminal's. */
 export const terminalOf = (id: string | null | undefined) => (id?.startsWith("app:terminal:") ? id.slice(13) : null);
 /** A real agent thread (not a draft, a file view, or an app window). */

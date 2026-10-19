@@ -1,13 +1,6 @@
 import { memo } from "react";
-import { Code2, Inbox } from "lucide-react";
-import { appKind, useUI } from "../../state/ui";
-import { InboxView } from "../inbox/InboxView";
-import { useInboxCount } from "../../state/inbox";
-import { CodeView } from "../code/CodeView";
-import { filePath } from "../../state/ui";
-import { TerminalPane, TerminalTile } from "../terminal/TerminalWindow";
-
-const NAMES = { inbox: "Inbox", code: "Code" } as const;
+import { appInstance } from "../../state/ui";
+import { appOf } from "../../apps";
 
 type PaneProps = {
   id: string;
@@ -18,18 +11,18 @@ type PaneProps = {
 };
 
 /**
- * One of Ret's views as a window on the canvas desktop: Inbox or Code (its mode's view as it is there,
- * under a window title bar), or a terminal.
+ * One of Ret's apps (src/renderer/apps) as a window on the canvas desktop: a title bar, and the app's
+ * view under it, as it is in its mode.
  */
-export const AppPane = memo(function AppPane(props: PaneProps) {
-  return appKind(props.id) === "terminal" ? <TerminalPane {...props} /> : <ModePane {...props} />;
-});
-
-function ModePane({ id, focused, onHeaderPointerDown, onHeaderDoubleClick, windowControls }: PaneProps) {
-  const kind = appKind(id) as "inbox" | "code";
-  const count = useInboxCount();
+export const AppPane = memo(function AppPane({ id, focused, onHeaderPointerDown, onHeaderDoubleClick, windowControls }: PaneProps) {
+  const app = appOf(id);
+  const instance = appInstance(id);
+  // A window is one app for its whole life, so the app's hooks run the same way every render.
+  const title = app.useTitle ? app.useTitle(instance) : app.name;
+  const cwd = app.useCwd?.(instance);
+  const { icon: Icon, Badge, Chips, Actions, View } = app;
   return (
-    <div className={`thread-pane app-pane app-${kind} chrome-window ${focused ? "focused" : ""}`}>
+    <div className={`thread-pane app-pane app-${app.kind} chrome-window ${focused ? "focused" : ""}`} data-cwd={cwd ?? undefined}>
       <div
         className="pane-header draggable"
         onPointerDown={onHeaderPointerDown}
@@ -38,46 +31,37 @@ function ModePane({ id, focused, onHeaderPointerDown, onHeaderDoubleClick, windo
           onHeaderDoubleClick();
         }}
       >
-        {kind === "inbox" ? <Inbox size={14} className="app-icon" /> : <Code2 size={14} className="app-icon" />}
-        <div className="pane-title">{NAMES[kind]}</div>
-        {kind === "inbox" && count > 0 && <span className="seg-badge">{count}</span>}
+        <Icon size={14} className="app-icon" />
+        <div className="pane-title">{title}</div>
+        {Badge && <Badge />}
+        {Chips && <Chips instance={instance} />}
         <div className="pane-header-actions" onPointerDown={(e) => e.stopPropagation()}>
+          {Actions && <Actions instance={instance} />}
           {windowControls}
         </div>
       </div>
-      <div className="app-win-body">{kind === "inbox" ? <InboxView active={focused} /> : <CodeView />}</div>
+      <div className="app-win-body">
+        <View instance={instance} active={focused} />
+      </div>
     </div>
   );
-}
+});
 
 type TileProps = { id: string; onPointerDown: (e: React.PointerEvent) => void; onDoubleClick: () => void };
 
 /** Zoomed out: what the app is up to, at a glance. */
-export function AppTile(props: TileProps) {
-  return appKind(props.id) === "terminal" ? <TerminalTile {...props} /> : <ModeTile {...props} />;
-}
-
-function ModeTile({ id, onPointerDown, onDoubleClick }: TileProps) {
-  const kind = appKind(id) as "inbox" | "code";
-  const count = useInboxCount();
-  const active = useUI((s) => s.code.active);
-  const tabs = useUI((s) => s.code.tabs.length);
+export function AppTile({ id, onPointerDown, onDoubleClick }: TileProps) {
+  const app = appOf(id);
+  const instance = appInstance(id);
+  const title = app.useTitle ? app.useTitle(instance) : app.name;
+  const { icon: Icon, Card } = app;
   return (
     <div className="tcard app-tile" onPointerDown={onPointerDown} onDoubleClick={onDoubleClick}>
       <div className="tcard-head">
-        {kind === "inbox" ? <Inbox className="tcard-fork" /> : <Code2 className="tcard-fork" />}
-        <span className="tcard-title">{NAMES[kind]}</span>
+        <Icon className="tcard-fork" />
+        <span className="tcard-title">{title}</span>
       </div>
-      <div className="tcard-body">
-        {kind === "inbox"
-          ? count
-            ? `${count} thing${count === 1 ? "" : "s"} need${count === 1 ? "s" : ""} you`
-            : "All clear"
-          : active
-            ? filePath(active).split(/[\\/]/).pop()
-            : "No file open"}
-      </div>
-      <div className="tcard-state">{kind === "code" && tabs ? `${tabs} open` : ""}</div>
+      <Card instance={instance} />
     </div>
   );
 }

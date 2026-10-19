@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AppWindow, FolderPlus, GitFork, LayoutGrid, MessageSquarePlus, PanelLeft, PanelRight, RefreshCw, Rows3, Scan, Settings, FolderGit2, Code2, Inbox, SquareTerminal } from "lucide-react";
-import { useUI, activeBoard, isFile, isThread } from "../state/ui";
+import { AppWindow, FolderPlus, GitFork, LayoutGrid, MessageSquarePlus, PanelLeft, PanelRight, RefreshCw, Rows3, Scan, Settings, FolderGit2, SquareTerminal } from "lucide-react";
+import { useUI, activeBoard, isFile, isModeApp, isThread } from "../state/ui";
+import { APPS, MODE_APPS } from "../apps";
 import { newTerminalWindow, toggleTerminal } from "../state/terminals";
 import { useThreads } from "../state/threads";
 import { useConn } from "../state/conn";
@@ -43,8 +44,7 @@ function score(q: string, text: string): number {
 
 export function currentThreadId(): string | null {
   const ui = useUI.getState();
-  if (ui.mode === "code") return ui.code.chat;
-  if (ui.mode === "inbox") return ui.inbox.selected;
+  if (isModeApp(ui.mode)) return APPS[ui.mode].mode.currentThread?.() ?? null;
   if (ui.mode === "focus") {
     const split = ui.activeTab ? ui.splits[ui.activeTab] : undefined;
     return split && ui.focusedSide === "right" ? split.right : ui.activeTab;
@@ -104,8 +104,7 @@ function PaletteInner() {
         : []),
       { id: "focus", kind: "command", title: "Switch to Focus mode", icon: <Rows3 size={14} />, run: () => useUI.setState({ mode: "focus" }) },
       { id: "canvas", kind: "command", title: "Switch to Canvas mode", icon: <AppWindow size={14} />, run: () => useUI.setState({ mode: "canvas" }) },
-      { id: "code", kind: "command", title: "Switch to Code mode", icon: <Code2 size={14} />, run: () => useUI.setState({ mode: "code" }) },
-      { id: "inbox", kind: "command", title: "Open the Inbox", icon: <Inbox size={14} />, run: () => useUI.setState({ mode: "inbox" }) },
+      ...MODE_APPS.map((app) => ({ id: app.kind, kind: "command" as const, title: app.mode.command, icon: <app.icon size={14} />, run: () => useUI.setState({ mode: app.kind }) })),
       { id: "fit", kind: "command", title: "Canvas: fit all windows", icon: <Scan size={14} />, run: () => { useUI.setState({ mode: "canvas" }); requestAnimationFrame(() => fitAll()); } },
       { id: "tidy", kind: "command", title: "Canvas: tidy windows", icon: <LayoutGrid size={14} />, run: () => { useUI.setState({ mode: "canvas" }); requestAnimationFrame(tidy); } },
       { id: "sidebar", kind: "command", title: "Toggle sidebar", icon: <PanelLeft size={14} />, run: () => useUI.setState((s) => ({ sidebarOpen: !s.sidebarOpen })) },

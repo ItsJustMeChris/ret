@@ -1,7 +1,8 @@
 import { startTransition, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
-import { Check, ChevronDown, Command, Copy, Folder, GitFork, LayoutGrid, MessageSquarePlus, Minus, Pencil, Plus, Scan, SquareDashed, SquareTerminal, Trash2, X, Code2, Inbox } from "lucide-react";
+import { Check, ChevronDown, Command, Copy, Folder, GitFork, LayoutGrid, MessageSquarePlus, Minus, Pencil, Plus, Scan, SquareDashed, SquareTerminal, Trash2, X } from "lucide-react";
 import { activeBoard, appId, newId, updateBoard, useUI, type AppKind, type Board, type CanvasWin } from "../../state/ui";
 import { DRAG_APP } from "../Titlebar";
+import { APP_LIST } from "../../apps";
 import { closeWindow, focusWindow, newThread, openThread } from "../../state/actions";
 import { useThreads } from "../../state/threads";
 import { newTerminalWindow } from "../../state/terminals";
@@ -596,9 +597,9 @@ export function CanvasView() {
   };
 
   const onDrop = (e: React.DragEvent) => {
-    // A thread from the sidebar, or a mode (Inbox, Code) from the title bar to have as a window.
-    const app = e.dataTransfer.getData(DRAG_APP) as AppKind | "";
-    const id = app ? appId(app) : e.dataTransfer.getData("application/x-ret-thread");
+    // A thread from the sidebar, or an app's mode (Code, Inbox) from the title bar to have as a window.
+    const app = APP_LIST.find((a) => a.kind === e.dataTransfer.getData(DRAG_APP));
+    const id = app ? appId(app.kind) : e.dataTransfer.getData("application/x-ret-thread");
     if (!id) return;
     e.preventDefault();
     const rect = vpRef.current!.getBoundingClientRect();
@@ -723,7 +724,7 @@ function contextProject(projects: ProjectNode[]): ProjectNode | undefined {
   return projects.find((p) => p.key === key) ?? projects[0];
 }
 
-/** Inbox or Code as a window at `at`. There's one of each: if it's open already, it moves there. */
+/** An app with a single window (Inbox, Code) as a window at `at`: if it's open already, it moves there. */
 function placeApp(kind: AppKind, at: { x: number; y: number }) {
   const id = appId(kind);
   const existing = activeBoard().windows.find((w) => w.threadId === id);
@@ -759,11 +760,12 @@ function canvasMenu(at: { x: number; y: number }, x: number, y: number, setMenu:
         ),
     },
     { label: "Open a thread…", icon: <Command size={14} />, hint: "Ctrl+K", onClick: () => useUI.setState({ paletteOpen: true }) },
-    ...(["inbox", "code"] as const).map((kind) => ({
-      label: kind === "inbox" ? "Inbox window" : "Code window",
-      icon: kind === "inbox" ? <Inbox size={14} /> : <Code2 size={14} />,
-      hint: board.windows.some((w) => w.threadId === appId(kind)) ? "move here" : "here",
-      onClick: () => placeApp(kind, at),
+    // The apps with a single window (Code, Inbox); terminals are opened in a project, above.
+    ...APP_LIST.filter((app) => app.instances === "one").map((app) => ({
+      label: `${app.name} window`,
+      icon: <app.icon size={14} />,
+      hint: board.windows.some((w) => w.threadId === appId(app.kind)) ? "move here" : "here",
+      onClick: () => placeApp(app.kind, at),
     })),
     { separator: true },
     { label: "Fit all windows", icon: <Scan size={14} />, hint: "Ctrl+0", disabled: !board.windows.length, onClick: () => fitAll() },

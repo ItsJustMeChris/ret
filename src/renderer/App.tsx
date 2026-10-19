@@ -1,15 +1,14 @@
-import { useEffect, useRef, type ComponentType, type ReactElement } from "react";
-import { useUI, activeBoard, isThread, type ViewMode } from "./state/ui";
+import { useEffect, useRef, type ReactElement } from "react";
+import { useUI, activeBoard, isModeApp, isThread, type ViewMode } from "./state/ui";
 import { useConn } from "./state/conn";
 import { useThreads } from "./state/threads";
-import { closeCodeTab, closePane, closeTab, closeWindow, focusWindow, forkThread, newThreadNear } from "./state/actions";
+import { closePane, closeTab, closeWindow, focusWindow, forkThread, newThreadNear } from "./state/actions";
 import { toggleTerminal } from "./state/terminals";
+import { APPS, VIEW_MODES } from "./apps";
 import { Titlebar } from "./components/Titlebar";
 import { SidebarShell } from "./components/SidebarShell";
 import { FocusView } from "./components/FocusView";
 import { CanvasView } from "./components/canvas/CanvasView";
-import { CodeView } from "./components/code/CodeView";
-import { InboxView } from "./components/inbox/InboxView";
 import { CommandPalette, currentThreadId } from "./components/CommandPalette";
 import { toggleDetails } from "./components/thread/Details";
 import { SettingsModal } from "./components/Settings";
@@ -52,14 +51,7 @@ function useAutoApplyUpdates() {
 
 function cycle(dir: 1 | -1) {
   const ui = useUI.getState();
-  if (ui.mode === "code") {
-    const tabs = ui.code.tabs;
-    if (!tabs.length) return;
-    const i = ui.code.active ? tabs.indexOf(ui.code.active) : -1;
-    useUI.setState((s) => ({ code: { ...s.code, active: tabs[(i + dir + tabs.length) % tabs.length] } }));
-    return;
-  }
-  if (ui.mode === "inbox") return;
+  if (isModeApp(ui.mode)) return APPS[ui.mode].mode.tabs?.cycle(dir);
   if (ui.mode === "focus") {
     if (!ui.tabs.length) return;
     const i = ui.activeTab ? ui.tabs.indexOf(ui.activeTab) : -1;
@@ -77,10 +69,11 @@ function useShortcuts() {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       const ui = useUI.getState();
-      // Alt+1…4: Focus, Canvas, Code, Inbox.
-      if (e.altKey && !mod && !e.shiftKey && /^[1-4]$/.test(e.key)) {
+      // Alt+1, 2…: Focus, Canvas, then the apps' modes (Code, Inbox).
+      const toMode = e.altKey && !mod && !e.shiftKey && /^[1-9]$/.test(e.key) ? VIEW_MODES[Number(e.key) - 1] : undefined;
+      if (toMode) {
         e.preventDefault();
-        useUI.setState({ mode: (["focus", "canvas", "code", "inbox"] as const)[Number(e.key) - 1] });
+        useUI.setState({ mode: toMode });
         return;
       }
       if (!mod) return;
@@ -122,7 +115,7 @@ function useShortcuts() {
           else closeTab(ui.activeTab);
         }
         else if (ui.mode === "canvas" && ui.focusedWindow) closeWindow(ui.focusedWindow);
-        else if (ui.mode === "code" && ui.code.active) closeCodeTab(ui.code.active);
+        else if (isModeApp(ui.mode)) APPS[ui.mode].mode.tabs?.close();
       } else if (k === "tab") {
         e.preventDefault();
         cycle(e.shiftKey ? -1 : 1);
@@ -132,9 +125,8 @@ function useShortcuts() {
         if (ui.mode === "focus") {
           const id = ui.tabs[n];
           if (id) useUI.setState({ activeTab: id });
-        } else if (ui.mode === "code") {
-          const id = ui.code.tabs[n];
-          if (id) useUI.setState((s) => ({ code: { ...s.code, active: id } }));
+        } else if (isModeApp(ui.mode)) {
+          APPS[ui.mode].mode.tabs?.go(n);
         } else if (ui.mode === "canvas") {
           const wins = activeBoard(ui).windows.slice().sort((a, b) => a.y - b.y || a.x - b.x);
           if (wins[n]) focusWindow(wins[n].id, true);
@@ -157,7 +149,13 @@ function useShortcuts() {
   }, []);
 }
 
-const VIEWS: Record<ViewMode, ComponentType> = { focus: FocusView, canvas: CanvasView, code: CodeView, inbox: InboxView };
+/** A mode's view: Focus, the canvas, or an app's (full screen, so it always has the keyboard). */
+function viewOf(mode: ViewMode): ReactElement {
+  if (mode === "focus") return <FocusView />;
+  if (mode === "canvas") return <CanvasView />;
+  const View = APPS[mode].View;
+  return <View instance={null} active />;
+}
 
 /**
  * The mode's view. Each is built the first time you go to it and kept from then on, so switching
@@ -166,10 +164,7 @@ const VIEWS: Record<ViewMode, ComponentType> = { focus: FocusView, canvas: Canva
 function Views({ mode }: { mode: ViewMode }) {
   // The same element each time: switching shows and hides them without re-rendering any.
   const built = useRef(new Map<ViewMode, ReactElement>());
-  if (!built.current.has(mode)) {
-    const View = VIEWS[mode];
-    built.current.set(mode, <View />);
-  }
+  if (!built.current.has(mode)) built.current.set(mode, viewOf(mode));
   return [...built.current].map(([m, view]) => (
     <Kept key={m} shown={m === mode}>
       {view}

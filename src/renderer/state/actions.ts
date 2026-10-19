@@ -34,7 +34,8 @@ import {
   type QueuedMessage,
   type ThreadSettings,
 } from "./threads";
-import { activeBoard, appId, appKind, fileId, isApp, isDraft, isFile, isThread, newId, setDetails, updateBoard, useUI, type CanvasWin, type FocusSplit, type UIState, type ViewMode } from "./ui";
+import { activeBoard, appId, appKind, fileId, isApp, isDraft, isFile, isModeApp, isThread, newId, setDetails, updateBoard, useUI, type CanvasWin, type FocusSplit, type UIState, type ViewMode } from "./ui";
+import { appBasics, modeBasics } from "./apps";
 import { onFsChanged, useFiles } from "./files";
 import { captureLive, captureTurns, noteAppRequest, screenTurnEnded } from "./computerUse";
 import { turnFinished } from "./finished";
@@ -1292,28 +1293,13 @@ export function openFile(path: string, opts: { line?: number; col?: number; from
   openThread(id, { side: true, besideThread: from ?? (ui.activeTab && !isFile(ui.activeTab) ? ui.activeTab : undefined) });
 }
 
-/** A new window's size for each of Ret's own views on the canvas. */
-const APP_SIZE = { code: { w: 1240, h: 760 }, inbox: { w: 980, h: 680 }, terminal: { w: 760, h: 440 } } as const;
-
 export function openThread(threadId: string, opts: OpenOptions = {}) {
   const ui = useUI.getState();
   const mode = opts.mode ?? ui.mode;
   void hydrateThread(threadId);
 
-  // Code mode: a thread goes in the chat column (a file goes in an editor tab).
-  if (mode === "code") {
-    if (isFile(threadId)) {
-      useUI.setState((s) => ({ code: { ...s.code, tabs: s.code.tabs.includes(threadId) ? s.code.tabs : [...s.code.tabs, threadId], active: threadId } }));
-    } else {
-      useUI.setState((s) => ({ code: { ...s.code, chat: threadId, project: null } }));
-    }
-    return;
-  }
-  // Inbox mode: show it in the reading pane.
-  if (mode === "inbox" && !isFile(threadId)) {
-    useUI.setState((s) => ({ inbox: { ...s.inbox, selected: threadId } }));
-    return;
-  }
+  // An app's mode with a place of its own for it: Code's chat column or an editor tab, the Inbox's reading pane.
+  if (isModeApp(mode) && modeBasics(mode)?.openThread?.(threadId)) return;
 
   if (mode === "focus") {
     useUI.setState((s) => focusOpen(s, threadId, opts));
@@ -1328,7 +1314,7 @@ export function openThread(threadId: string, opts: OpenOptions = {}) {
   }
   const z = Math.max(0, ...board.windows.map((w) => w.z)) + 1;
   const besideWin = opts.besideThread ? board.windows.find((w) => w.threadId === opts.besideThread) : undefined;
-  const size = isApp(threadId) ? APP_SIZE[appKind(threadId)] : { w: 560, h: 640 };
+  const size = (isApp(threadId) && appBasics(appKind(threadId))?.size) || { w: 560, h: 640 };
   // A thread beside another takes its size; an app has its own.
   const w = isApp(threadId) ? size.w : (besideWin?.w ?? size.w);
   const h = isApp(threadId) ? size.h : (besideWin?.h ?? size.h);
