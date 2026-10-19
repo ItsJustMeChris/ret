@@ -33,6 +33,7 @@ import {
   type LiveThread,
   type QueuedMessage,
   type ThreadSettings,
+  type ThreadsState,
 } from "./threads";
 import { activeBoard, appId, appKind, fileId, isApp, isDraft, isFile, isModeApp, isThread, newId, setDetails, updateBoard, useUI, type CanvasWin, type FocusSplit, type UIState, type ViewMode } from "./ui";
 import { appBasics, modeBasics } from "./apps";
@@ -104,6 +105,12 @@ export function bootstrap() {
       checkoutsTimer = 0;
       void resolveCheckouts();
     }, 300);
+  });
+
+  // A thread on screen is resumed in its engine once you look at it or it starts running there (see wantsResume).
+  useThreads.subscribe((s, prev) => {
+    if (s.attended === prev.attended && s.threads === prev.threads) return;
+    for (const id in s.visible) resumeIfWanted(id);
   });
 }
 
@@ -266,6 +273,7 @@ function wireEngine(p: EngineId) {
   rpc.onReady((info) => {
     patchProvider(p, { info });
     goalsOff.delete(p);
+    for (const id of autoResumeFailed) if ((useThreads.getState().owner[id] ?? "codex") === p) autoResumeFailed.delete(id);
     // A fresh connection knows nothing about our subscriptions. Threads that were mid-turn
     // are re-fetched: the turn either died with the old process or (shared daemon, Claude
     // sessions) is still running and gets rejoined by hydrateThread.
@@ -677,10 +685,7 @@ export async function hydrateThread(threadId: string) {
     });
     mergeTurns(threadId, res.data, res.nextCursor, "replace");
     void loadGoal(threadId);
-    // Resume it in its engine: that's what reports the thread's own settings (model, effort, speed,
-    // access, Plan) for the composer, and subscribes to live events if it's running here. Not while
-    // another app is running it: watching it is all Ret does then.
-    if (!useThreads.getState().external[threadId]) void ensureSubscribed(threadId).catch(() => {});
+    resumeIfWanted(threadId);
   } catch (err) {
     patchLive(threadId, { hydrating: false, error: (err as Error).message });
   }
@@ -781,6 +786,28 @@ export function mergeTurns(
       activeTurnId: prev.activeTurnId ?? historyActive ?? null,
     };
   });
+}
+
+/**
+ * Whether a thread in a view should be resumed in its engine before anything is sent to it: while
+ * you're looking at it (resuming reports the thread's own settings, for its composer) or while it
+ * runs in that engine (only subscribers hear its live events). Not just for being on screen: a
+ * resume loads the whole session in the engine (Codex starts the thread's MCP servers and connects
+ * to the model), and doing that for every window of a big board at once swamped Codex at startup
+ * until it stopped taking messages. Not while another app runs it: watching it is all Ret does then.
+ */
+function wantsResume(s: ThreadsState, threadId: string) {
+  const lt = s.live[threadId];
+  if (!lt?.hydrated || lt.subscribed || s.external[threadId] || autoResumeFailed.has(threadId)) return false;
+  return !!s.attended[threadId] || s.threads[threadId]?.status.type === "active";
+}
+
+/** Threads whose resume failed on its own: not tried again by itself until their engine reconnects. */
+const autoResumeFailed = new Set<string>();
+
+function resumeIfWanted(threadId: string) {
+  if (!wantsResume(useThreads.getState(), threadId)) return;
+  ensureSubscribed(threadId).catch(() => autoResumeFailed.add(threadId));
 }
 
 const resuming = new Map<string, Promise<void>>();
