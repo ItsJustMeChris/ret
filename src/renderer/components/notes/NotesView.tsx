@@ -9,6 +9,8 @@ import {
   noteHost,
   noteMessage,
   notePath,
+  noteRenamed,
+  noteTitle,
   notebooksOf,
   notesIn,
   openNote,
@@ -44,6 +46,8 @@ const at = (e: React.MouseEvent) => {
 export function NotesView({ active = true }: { active?: boolean }) {
   const folders = useNotes((s) => s.folders);
   const open = useNotes((s) => s.open);
+  // A new editor for each note you pick, the same one while the note you're on is renamed.
+  const picked = useNotes((s) => s.picked);
   const projects = useProjectTree();
   const books = useMemo(() => notebooksOf(folders, projects), [folders, projects]);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
@@ -116,7 +120,7 @@ export function NotesView({ active = true }: { active?: boolean }) {
       </aside>
       <section className="notes-read">
         {open && openBook ? (
-          <NoteEditor key={open} id={open} book={openBook} setMenu={setMenu} />
+          <NoteEditor key={picked} id={open} book={openBook} setMenu={setMenu} />
         ) : (
           <div className="inbox-empty">
             <NotebookPen size={26} />
@@ -182,10 +186,17 @@ function NoteEditor({ id, book, setMenu }: { id: string; book: Notebook; setMenu
   const latest = useRef({ title: "", body: "" });
   latest.current = { title, body };
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Renaming a file note gives it a new id but keeps this editor (NotesView keys it by the note
+  // you picked), so what you type meanwhile isn't lost: saves wait for the rename, then go to the
+  // new file, never the old one.
+  const idRef = useRef(id);
+  const renaming = useRef(false);
+  const renamedTo = useRef<string | null>(null);
+  if (!renaming.current) idRef.current = id;
 
   const load_ = async (quiet = false) => {
     try {
-      const n = await readNote(id);
+      const n = await readNote(idRef.current);
       saved.current = n;
       setTitle(n.title);
       setBody(n.body);
@@ -197,24 +208,27 @@ function NoteEditor({ id, book, setMenu }: { id: string; book: Notebook; setMenu
     }
   };
   useEffect(() => {
+    // Our own rename: what's here is already the note.
+    if (id === renamedTo.current) return;
     void load_();
   }, [id]);
 
   const flush = () => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
+    if (renaming.current) return schedule();
     const { title: t, body: b } = latest.current;
     const change = { ...(b !== saved.current.body ? { body: b } : {}), ...(!file && t !== saved.current.title ? { title: t } : {}) };
     if (!Object.keys(change).length) return;
     saved.current = { title: file ? saved.current.title : t, body: b };
-    saveNote(id, change).catch((err) => toast(`Couldn't save the note: ${(err as Error).message}`, "error"));
+    saveNote(idRef.current, change).catch((err) => toast(`Couldn't save the note: ${(err as Error).message}`, "error"));
   };
   const schedule = () => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(flush, 400);
   };
   // Leaving the note (another one, or closing the window) saves what's waiting.
-  useEffect(() => () => flush(), [id]);
+  useEffect(() => () => flush(), []);
 
   // A file changed by something else (an agent, another editor) while you're not mid-edit: take it.
   useEffect(() => {
@@ -231,13 +245,25 @@ function NoteEditor({ id, book, setMenu }: { id: string; book: Notebook; setMenu
   }, [id]);
 
   const commitTitle = async () => {
-    if (!file) return;
+    if (!file || renaming.current) return;
     flush();
-    const next = await retitleNote(id, latest.current.title, latest.current.body, book).catch((err) => {
+    const from = idRef.current;
+    const body = latest.current.body;
+    renaming.current = true;
+    const next = await retitleNote(from, latest.current.title, body, book).catch((err) => {
       toast(`Couldn't rename the note: ${(err as Error).message}`, "error");
-      return id;
+      return from;
     });
-    if (next === id) setTitle(saved.current.title);
+    // The new file has the text as it was when the rename started; anything typed since saves next.
+    if (next !== from) {
+      renamedTo.current = next;
+      idRef.current = next;
+      saved.current = { title: noteTitle(useNotes.getState(), next), body };
+      noteRenamed(from, next);
+    }
+    renaming.current = false;
+    if (next === from) setTitle(saved.current.title);
+    else if (latest.current.body !== body) flush();
   };
 
   const message = () => noteMessage(latest.current.title, latest.current.body);
@@ -290,7 +316,7 @@ function NoteEditor({ id, book, setMenu }: { id: string; book: Notebook; setMenu
               if (timer.current) clearTimeout(timer.current);
               timer.current = null;
               saved.current = latest.current;
-              void deleteNote(id, book).catch((err) => toast(`Couldn't delete the note: ${(err as Error).message}`, "error"));
+              void deleteNote(idRef.current, book).catch((err) => toast(`Couldn't delete the note: ${(err as Error).message}`, "error"));
             }}
           >
             Delete

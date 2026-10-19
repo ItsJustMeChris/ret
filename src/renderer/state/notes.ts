@@ -49,15 +49,17 @@ interface NotesState {
   folders: string[];
   /** The note showing in the Notes app. */
   open: string | null;
+  /** Counts the notes picked (not renamed: a file note's id changes with its title). */
+  picked: number;
   /** Each folder's and project's notes, as last listed (not kept: they're listed again when the app shows). */
   listed: Record<string, FileNote[] | { error: string }>;
 }
 
 export const useNotes = create<NotesState>()(
-  persist(() => ({ local: {}, folders: [], open: null, listed: {} }) as NotesState, {
+  persist(() => ({ local: {}, folders: [], open: null, picked: 0, listed: {} }) as NotesState, {
     name: "ret-notes",
     version: 1,
-    partialize: ({ listed: _l, ...rest }) => rest,
+    partialize: ({ listed: _l, picked: _p, ...rest }) => rest,
   }),
 );
 
@@ -195,7 +197,7 @@ function touchFile(id: string) {
 
 /**
  * Rename a file note for its new title (moving its text, `body`, to the new name). Returns its id
- * after: the same if the name didn't change or is taken.
+ * after: the same if the name didn't change or is taken. The editor then calls `noteRenamed`.
  */
 export async function retitleNote(id: string, title: string, body: string, book: Notebook): Promise<string> {
   const name = fileTitle(title) || "Untitled";
@@ -211,17 +213,19 @@ export async function retitleNote(id: string, title: string, body: string, book:
   const to = join(dirOf(from), `${name}.md`);
   await writeText(to, body, host);
   await fsClient(host).request("fs/remove", { path: from, recursive: false });
-  const next = fileNoteId(to, host);
-  useNotes.setState((s) => ({ open: s.open === id ? next : s.open }));
   await listNotebook(book);
-  return next;
+  return fileNoteId(to, host);
 }
+
+/** The open note was renamed: still open, under its new id (and still in the same editor). */
+export const noteRenamed = (from: string, to: string) => useNotes.setState((s) => (s.open === from ? { open: to } : s));
 
 /** A new, empty note in `book`, opened. */
 export async function createNote(book: Notebook) {
   if (!book.dir) {
     const key = newId();
-    useNotes.setState((s) => ({ local: { ...s.local, [key]: { title: "", body: "", updatedAt: Date.now() } }, open: `ret:${key}` }));
+    useNotes.setState((s) => ({ local: { ...s.local, [key]: { title: "", body: "", updatedAt: Date.now() } } }));
+    openNote(`ret:${key}`);
     return;
   }
   try {
@@ -234,7 +238,7 @@ export async function createNote(book: Notebook) {
     const path = join(book.dir, `${name}.md`);
     await writeText(path, "", book.host);
     await listNotebook(book);
-    useNotes.setState({ open: fileNoteId(path, book.host) });
+    openNote(fileNoteId(path, book.host));
   } catch (err) {
     toast(`Couldn't make a note in ${book.name}: ${(err as Error).message}`, "error");
   }
@@ -253,7 +257,7 @@ export async function deleteNote(id: string, book: Notebook | undefined) {
   });
 }
 
-export const openNote = (id: string | null) => useNotes.setState({ open: id });
+export const openNote = (id: string | null) => useNotes.setState((s) => (s.open === id ? s : { open: id, picked: s.picked + 1 }));
 
 /** Add a folder of notes (picked in the system's dialog). */
 export async function addNotesFolder() {
