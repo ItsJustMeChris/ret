@@ -1,4 +1,5 @@
 import { normPath } from "../state/projects";
+import { hostPlatform } from "../state/hosts";
 import { fileId, useUI, type Board, type CanvasWin, type UIState, type ViewMode } from "../state/ui";
 import { T } from "./fixtures";
 import { P, REDIS_WT } from "./workspace";
@@ -28,8 +29,10 @@ export const BOARD: Board = {
 export function seedUI(mode: ViewMode, theme: "dark" | "light", sidebarPinned: boolean) {
   const added = Date.now() - 30 * 86_400_000;
   const projects: UIState["projects"] = {};
-  for (const path of Object.values(P)) projects[normPath(path)] = { path, explicit: true, addedAt: added };
-  const api = normPath(P.api);
+  // Keyed as the threads are grouped: by the demo engines' platform, whatever the visitor's computer.
+  const key = (path: string) => normPath(path, hostPlatform(null));
+  for (const path of Object.values(P)) projects[key(path)] = { path, explicit: true, addedAt: added };
+  const api = key(P.api);
   const file = (rel: string) => fileId(`${P.api}/${rel}`);
 
   const seed: Partial<UIState> = {

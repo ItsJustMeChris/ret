@@ -3,12 +3,15 @@ import type { Thread } from "@shared/protocol";
 import type { ProjectConf } from "./ui";
 import { requestText } from "../lib/codexMessage";
 
-const caseInsensitive = /win/i.test(navigator.platform);
-/** Windows paths: case-insensitive, written with backslashes. A device's platform, or this computer's. */
-const windowsPaths = (platform?: string | null) => (platform ? platform === "win32" : caseInsensitive);
+/**
+ * Windows paths: case-insensitive, written with backslashes. `platform` is the device's as its
+ * engine reports it (hostPlatform), never guessed from the browser: a key built any other way
+ * wouldn't match its threads' (the website demo's engines say "web" on any visitor's computer).
+ */
+const windowsPaths = (platform: string | null) => platform === "win32";
 
-/** Canonical project key for a filesystem path (on a device with `platform`, or this computer). */
-export function normPath(p: string, platform?: string | null): string {
+/** Canonical project key for a filesystem path on a device with `platform` (hostPlatform). */
+export function normPath(p: string, platform: string | null): string {
   let s = p.replace(/\\/g, "/").replace(/\/+$/, "");
   if (windowsPaths(platform)) s = s.toLowerCase();
   return s;
@@ -309,7 +312,7 @@ export function buildProjects(
 }
 
 /** Recover original casing for an auto-detected project from one of its threads' cwd. */
-function displayPathFor(key: string, cwd: string, platform?: string | null): string {
+function displayPathFor(key: string, cwd: string, platform: string | null): string {
   const norm = cwd.replace(/\\/g, "/");
   return norm.slice(0, key.length).replace(/\//g, windowsPaths(platform) ? "\\" : "/");
 }
