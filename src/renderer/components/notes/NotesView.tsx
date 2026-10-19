@@ -26,7 +26,7 @@ import { recencyOf, threadTitle } from "../../state/projects";
 import { useThreads } from "../../state/threads";
 import { activeBoard, isApp, isDraft, isFile, useUI } from "../../state/ui";
 import { focusWindow, newThread, openThread } from "../../state/actions";
-import { fillComposer } from "../../state/composerDrafts";
+import { composerDrafts, fillComposer } from "../../state/composerDrafts";
 import { watchPath } from "../../state/files";
 import { timeAgo } from "../../lib/format";
 import { toast } from "../../state/toasts";
@@ -382,7 +382,8 @@ function threadItems(message: () => string): MenuItem[] {
   const add = (threadId: string, winId?: string) => {
     const text = message();
     if (!text) return toast("The note is empty.", "info");
-    fillComposer(threadId, text, { focus: true });
+    // Under what's written there already, a blank line apart (fillComposer starts a new line).
+    fillComposer(threadId, composerDrafts.get(threadId)?.trim() ? `\n${text}` : text, { focus: true });
     if (winId) focusWindow(winId, true);
     else openThread(threadId);
   };
