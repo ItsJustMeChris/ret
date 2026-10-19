@@ -3235,7 +3235,7 @@ body.resizing .transcript {
 .pane-body.draft.compact .sel.draft-project {
   font-size: 13px;
 }
-.chrome-window .draft-inner {
+.chrome-window > .pane-body > .draft-inner {
   padding-left: 12px;
   padding-right: 12px;
 }
@@ -3460,11 +3460,12 @@ html.autoscrolling[data-autoscroll="down"] * {
   transition: none;
   box-shadow: var(--shadow-lg);
 }
-.cwin .pane-header {
+/* The window's own title bar only: an Inbox or Code window's view keeps its headers as in its mode. */
+.cwin-body > .thread-pane > .pane-header {
   background: var(--bg-1);
   border-radius: 11px 11px 0 0;
 }
-.cwin.focused .pane-header {
+.cwin.focused > .cwin-body > .thread-pane > .pane-header {
   background: color-mix(in srgb, var(--accent) 5%, var(--bg-1));
 }
 /* Its right-click menu is open: show which window the menu is about. */
@@ -4256,7 +4257,6 @@ html.autoscrolling[data-autoscroll="down"] * {
   max-width: 420px;
 }
 
-/* Remote access (Settings) and the device a remote window shows (title bar). */
 /* Settings → Custom agent: its command and name, and the agents whose command is known. */
 .setting-field {
   flex: 1;
@@ -4278,6 +4278,7 @@ html.autoscrolling[data-autoscroll="down"] * {
   border-color: var(--accent);
 }
 
+/* Remote access (Settings) and the device a remote window shows (title bar). */
 .setting-subhead {
   margin-top: 4px;
   font-size: 11.5px;
@@ -6447,6 +6448,11 @@ body.resizing .sidebar-dock {
 .cwin .glance {
   cursor: grab;
 }
+/* An Inbox, Code or terminal window's view is for using, not dragging (CanvasWindow): its mode's cursors. */
+.cwin .app-win-body,
+.cwin .app-win-body :is(.thread-pane, .transcript, .pane-body, .glance) {
+  cursor: auto;
+}
 .cwin .composer,
 .cwin .approval,
 .cwin .details {
@@ -7061,10 +7067,10 @@ body.resizing .sidebar-dock {
 [data-theme="dark"] .cwin-body > .thread-pane {
   background: var(--bg-1);
 }
-[data-theme="dark"] .cwin .pane-header {
+[data-theme="dark"] .cwin-body > .thread-pane > .pane-header {
   background: var(--bg-2);
 }
-[data-theme="dark"] .cwin.focused .pane-header {
+[data-theme="dark"] .cwin.focused > .cwin-body > .thread-pane > .pane-header {
   background: color-mix(in srgb, var(--accent) 7%, var(--bg-2));
 }
 
@@ -7517,7 +7523,8 @@ body.resizing .sidebar-dock {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  /* Narrow (a small window, or a window on the canvas): the list gives up room so the reading pane still fits. */
+  grid-template-columns: minmax(220px, min(380px, 40%)) minmax(0, 1fr);
 }
 .inbox-list {
   min-height: 0;
@@ -7532,7 +7539,8 @@ body.resizing .sidebar-dock {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 42px;
+  /* Level with the reading pane's header beside it. */
+  height: 44px;
   padding: 0 14px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-1);
@@ -7541,6 +7549,7 @@ body.resizing .sidebar-dock {
 }
 .inbox-keys {
   margin-left: auto;
+  white-space: nowrap;
   font-size: 11px;
   font-weight: 400;
   color: var(--text-3);
@@ -7677,13 +7686,14 @@ body.resizing .sidebar-dock {
 }
 
 /* ==========================================================================
-   App windows: Inbox and Code as windows on the canvas desktop
+   App windows: Inbox and Code as windows on the canvas desktop. The window adds a title bar; the
+   view inside is its mode's, as it is there (nothing here styles inside it).
    ========================================================================== */
-.app-pane .app-icon {
+.app-pane > .pane-header .app-icon {
   flex: none;
   color: var(--accent);
 }
-.app-pane .pane-header .seg-badge {
+.app-pane > .pane-header .seg-badge {
   flex: none;
   margin-left: 2px;
 }
@@ -7694,17 +7704,13 @@ body.resizing .sidebar-dock {
   border-bottom-left-radius: inherit;
   border-bottom-right-radius: inherit;
   overflow: hidden;
+  /* The mode's background, not the window's (a step lighter in the black theme). */
+  background: var(--bg);
 }
 .app-win-body > .code-view,
 .app-win-body > .inbox-view {
   flex: 1;
   min-width: 0;
-}
-/* A narrow Inbox window: the list gets less room so the reading pane still fits. */
-@container pane (width < 760px) {
-  .app-inbox .inbox-view {
-    grid-template-columns: minmax(220px, 40%) minmax(0, 1fr);
-  }
 }
 .app-tile .tcard-head svg {
   color: var(--accent);
@@ -7712,22 +7718,6 @@ body.resizing .sidebar-dock {
 .app-tile .tcard-body {
   font-size: calc(13px * var(--s));
   color: var(--text);
-}
-/* The window header already says Inbox (and carries the key hints while focused). */
-.app-inbox .inbox-head {
-  display: none;
-}
-.app-pane .pane-header .inbox-keys {
-  margin: 0 8px 0 auto;
-  white-space: nowrap;
-}
-@container pane (width < 560px) {
-  .app-pane .pane-header .inbox-keys {
-    display: none;
-  }
-}
-.app-pane .pane-header .inbox-keys + .pane-header-actions {
-  margin-left: 0;
 }
 
 /* ==========================================================================

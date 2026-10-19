@@ -17,7 +17,10 @@ type PaneProps = {
   windowControls: React.ReactNode;
 };
 
-/** One of Ret's views as a window on the canvas desktop: Inbox or Code (the same view as its mode, framed), or a terminal. */
+/**
+ * One of Ret's views as a window on the canvas desktop: Inbox or Code (its mode's view as it is there,
+ * under a window title bar), or a terminal.
+ */
 export const AppPane = memo(function AppPane(props: PaneProps) {
   return appKind(props.id) === "terminal" ? <TerminalPane {...props} /> : <ModePane {...props} />;
 });
@@ -38,12 +41,6 @@ function ModePane({ id, focused, onHeaderPointerDown, onHeaderDoubleClick, windo
         {kind === "inbox" ? <Inbox size={14} className="app-icon" /> : <Code2 size={14} className="app-icon" />}
         <div className="pane-title">{NAMES[kind]}</div>
         {kind === "inbox" && count > 0 && <span className="seg-badge">{count}</span>}
-        {kind === "inbox" && focused && (
-          <span className="inbox-keys">
-            <kbd>j</kbd>
-            <kbd>k</kbd> move · <kbd>e</kbd> done
-          </span>
-        )}
         <div className="pane-header-actions" onPointerDown={(e) => e.stopPropagation()}>
           {windowControls}
         </div>

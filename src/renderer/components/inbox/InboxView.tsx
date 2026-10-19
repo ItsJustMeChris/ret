@@ -127,10 +127,13 @@ export function InboxView({ active = true }: { active?: boolean } = {}) {
         <div className="inbox-head">
           <InboxIcon size={15} />
           <span>Inbox</span>
-          <span className="inbox-keys">
-            <kbd>j</kbd>
-            <kbd>k</kbd> move · <kbd>e</kbd> done
-          </span>
+          {/* Only while the keys work: always in Inbox mode, while its window is focused on the canvas. */}
+          {active && (
+            <span className="inbox-keys">
+              <kbd>j</kbd>
+              <kbd>k</kbd> move · <kbd>e</kbd> done
+            </span>
+          )}
         </div>
         {empty ? (
           <div className="inbox-empty">
