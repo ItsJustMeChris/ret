@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppWindow, FolderPlus, GitFork, LayoutGrid, MessageSquarePlus, PanelLeft, PanelRight, RefreshCw, Rows3, Scan, Settings, FolderGit2, SquareTerminal } from "lucide-react";
-import { useUI, activeBoard, isFile, isModeApp, isThread } from "../state/ui";
-import { APPS, MODE_APPS } from "../apps";
+import { useUI, activeBoard, appId, isFile, isModeApp, isThread } from "../state/ui";
+import { APPS, APP_LIST, MODE_APPS } from "../apps";
 import { newTerminalWindow, toggleTerminal } from "../state/terminals";
 import { useThreads } from "../state/threads";
 import { useConn } from "../state/conn";
@@ -105,6 +105,18 @@ function PaletteInner() {
       { id: "focus", kind: "command", title: "Switch to Focus mode", icon: <Rows3 size={14} />, run: () => useUI.setState({ mode: "focus" }) },
       { id: "canvas", kind: "command", title: "Switch to Canvas mode", icon: <AppWindow size={14} />, run: () => useUI.setState({ mode: "canvas" }) },
       ...MODE_APPS.map((app) => ({ id: app.kind, kind: "command" as const, title: app.mode.command, icon: <app.icon size={14} />, run: () => useUI.setState({ mode: app.kind }) })),
+      // An app that's only a window (Notes): its window on the canvas.
+      ...APP_LIST.filter((app) => !app.mode && app.instances === "one").map((app) => ({
+        id: app.kind,
+        kind: "command" as const,
+        title: `Open ${app.name}`,
+        sub: "On the canvas",
+        icon: <app.icon size={14} />,
+        run: () => {
+          useUI.setState({ mode: "canvas" });
+          openThread(appId(app.kind), { mode: "canvas" });
+        },
+      })),
       { id: "fit", kind: "command", title: "Canvas: fit all windows", icon: <Scan size={14} />, run: () => { useUI.setState({ mode: "canvas" }); requestAnimationFrame(() => fitAll()); } },
       { id: "tidy", kind: "command", title: "Canvas: tidy windows", icon: <LayoutGrid size={14} />, run: () => { useUI.setState({ mode: "canvas" }); requestAnimationFrame(tidy); } },
       { id: "sidebar", kind: "command", title: "Toggle sidebar", icon: <PanelLeft size={14} />, run: () => useUI.setState((s) => ({ sidebarOpen: !s.sidebarOpen })) },

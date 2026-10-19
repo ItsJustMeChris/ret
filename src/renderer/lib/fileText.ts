@@ -22,3 +22,11 @@ export async function readText(path: string, device: string | null): Promise<{ t
   if (bytes.subarray(0, 8000).includes(0)) return { binary: true };
   return { text: new TextDecoder("utf-8").decode(bytes) };
 }
+
+/** Save `text` (UTF-8) to `path` on this computer or the paired device `device`. */
+export async function writeText(path: string, text: string, device: string | null) {
+  const bytes = new TextEncoder().encode(text);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  await fsClient(device).request("fs/writeFile", { path, dataBase64: btoa(bin) });
+}

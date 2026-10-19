@@ -16,12 +16,20 @@ export class DemoFs {
   private files = new Map<string, string>();
   private dirs = new Set<string>(["/"]);
   private watchers = new Map<string, Watcher>();
+  /** When each file was last written (ms); seeded files count as written when the demo started. */
+  private mtimes = new Map<string, number>();
+  private readonly started = Date.now();
 
   write(path: string, text: string) {
     const p = clean(path);
     this.mkdirp(parentOf(p));
     this.files.set(p, text);
+    this.mtimes.set(p, Date.now());
     this.changed(p);
+  }
+
+  modified(path: string): number {
+    return this.mtimes.get(clean(path)) ?? this.started;
   }
 
   read(path: string): string | null {
@@ -30,6 +38,7 @@ export class DemoFs {
 
   remove(path: string) {
     const p = clean(path);
+    this.mtimes.delete(p);
     if (this.files.delete(p)) this.changed(p);
   }
 

@@ -1,10 +1,10 @@
 import { watch, type FSWatcher } from "node:fs";
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 
 /**
- * The app-server's `fs/*` methods (read, write, list, watch), for engines that don't provide
- * them natively. Code mode and the file viewer read files through whichever engine is up, so a
- * Claude-only setup still has a working editor.
+ * The app-server's `fs/*` methods (read, write, list, metadata, create folders, remove, watch), for
+ * engines that don't provide them natively. Code mode, the file viewer and Notes reach files through
+ * whichever engine is up, so a Claude-only setup still has them.
  */
 export class FsService {
   private watchers = new Map<string, { watcher: FSWatcher | null; path: string; timer: NodeJS.Timeout | null; closed: boolean }>();
@@ -26,6 +26,17 @@ export class FsService {
         const entries = await readdir(p.path, { withFileTypes: true });
         return { entries: entries.map((e) => ({ fileName: e.name, isDirectory: e.isDirectory(), isFile: e.isFile() })) };
       }
+      case "fs/getMetadata": {
+        const st = await lstat(p.path);
+        const target = st.isSymbolicLink() ? await stat(p.path) : st;
+        return { isDirectory: target.isDirectory(), isFile: target.isFile(), isSymlink: st.isSymbolicLink(), createdAtMs: target.birthtimeMs, modifiedAtMs: target.mtimeMs };
+      }
+      case "fs/createDirectory":
+        await mkdir(p.path, { recursive: p.recursive !== false });
+        return {};
+      case "fs/remove":
+        await rm(p.path, { recursive: p.recursive !== false, force: p.force !== false });
+        return {};
       case "fs/watch":
         this.watch(String(p.watchId), String(p.path));
         return {};

@@ -3,6 +3,7 @@ import { appKind, type AppKind, type ModeApp, type ViewMode } from "../state/ui"
 import type { RetApp } from "./app";
 import { code } from "./code";
 import { inbox } from "./inbox";
+import { notes } from "./notes";
 import { terminal } from "./terminal";
 
 /**
@@ -10,7 +11,7 @@ import { terminal } from "./terminal";
  * AppKind (state/ui.ts), or in ModeApp if it's a full-screen mode too. In this order: the modes in
  * the title bar after Focus and Canvas, and the windows in the canvas's menu.
  */
-export const APPS: { [K in AppKind]: RetApp<K> } = { code, inbox, terminal };
+export const APPS: { [K in AppKind]: RetApp<K> } = { code, inbox, notes, terminal };
 
 export const APP_LIST: readonly RetApp[] = Object.values(APPS);
 export const MODE_APPS = APP_LIST.filter((app): app is RetApp<ModeApp> => !!app.mode);

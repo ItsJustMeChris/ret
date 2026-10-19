@@ -622,6 +622,18 @@ export class DemoEngine {
         if (!entries) throw rpcError("No such file or directory (os error 2)");
         return { entries: entries.map((e) => ({ fileName: e.name, isDirectory: e.dir, isFile: !e.dir })) };
       }
+      case "fs/getMetadata": {
+        const st = fs.stat(path);
+        if (!st.exists) throw rpcError("No such file or directory (os error 2)");
+        const at = fs.modified(path);
+        return { isDirectory: st.isDir, isFile: !st.isDir, isSymlink: false, createdAtMs: at, modifiedAtMs: at };
+      }
+      case "fs/createDirectory":
+        fs.mkdirp(path);
+        return {};
+      case "fs/remove":
+        fs.remove(path);
+        return {};
       case "fs/watch":
         fs.watch(String(p.watchId), path, (changedPaths) => this.notify("fs/changed", { watchId: p.watchId, changedPaths }));
         return {};

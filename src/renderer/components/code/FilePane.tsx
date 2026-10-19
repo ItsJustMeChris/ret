@@ -1,8 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { Check, Copy, ExternalLink, FileCode2, FileWarning, FolderOpen, LoaderCircle, Pencil, RotateCw, Save } from "lucide-react";
 import type * as Monaco from "monaco-editor/editor/editor.api.js";
-import { fsClient } from "../../rpc/client";
-import { readText } from "../../lib/fileText";
+import { readText, writeText } from "../../lib/fileText";
 import { bridge, isDesktop } from "../../bridge";
 import { copyText, openFileRef, revealLabel } from "../../lib/files";
 import { shortPath } from "../../lib/format";
@@ -14,13 +13,6 @@ import { useConn } from "../../state/conn";
 type MonacoModule = typeof import("../../lib/monaco");
 let monacoModule: Promise<MonacoModule> | null = null;
 const loadMonaco = () => (monacoModule ??= import("../../lib/monaco"));
-
-async function writeText(path: string, text: string, device: string | null) {
-  const bytes = new TextEncoder().encode(text);
-  let bin = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  await fsClient(device).request("fs/writeFile", { path, dataBase64: btoa(bin) });
-}
 
 const fmtSize = (n: number) => (n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`);
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;

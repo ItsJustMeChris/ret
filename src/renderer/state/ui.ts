@@ -15,7 +15,7 @@ export interface ComposerPrefs {
  * canvas desktop, and some are full-screen modes too.
  */
 export type ModeApp = "code" | "inbox";
-export type AppKind = ModeApp | "terminal";
+export type AppKind = ModeApp | "terminal" | "notes";
 export type ViewMode = "focus" | "canvas" | ModeApp;
 export const isModeApp = (mode: ViewMode): mode is ModeApp => mode !== "focus" && mode !== "canvas";
 
