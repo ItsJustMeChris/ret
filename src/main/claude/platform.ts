@@ -1,7 +1,8 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { closeSync, existsSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { openTerminalWindow } from "../terminalWindow";
 
 /**
  * Locating and talking to the user's own Claude Code install. Ret never ships or downloads
@@ -168,14 +169,5 @@ export async function claudeAuthStatus(binary: string): Promise<ClaudeAuthStatus
  * happens entirely in Anthropic's flow; Ret only notices afterwards that the CLI is signed in.
  */
 export function openLoginTerminal(binary: string) {
-  const cmd = isScript(binary) ? `node "${binary}" auth login` : `"${binary}" auth login`;
-  const env = claudeEnv();
-  if (process.platform === "win32") {
-    spawn("cmd.exe", ["/c", "start", '"Claude sign-in"', "cmd", "/k", cmd], { env, detached: true, stdio: "ignore", windowsVerbatimArguments: true }).unref();
-  } else if (process.platform === "darwin") {
-    const script = `tell application "Terminal" to do script ${JSON.stringify(cmd)}\ntell application "Terminal" to activate`;
-    spawn("osascript", ["-e", script], { env, detached: true, stdio: "ignore" }).unref();
-  } else {
-    spawn("x-terminal-emulator", ["-e", `sh -c '${cmd.replace(/'/g, "'\\''")}; exec sh'`], { env, detached: true, stdio: "ignore" }).unref();
-  }
+  openTerminalWindow("Claude sign-in", isScript(binary) ? `node "${binary}" auth login` : `"${binary}" auth login`, claudeEnv());
 }

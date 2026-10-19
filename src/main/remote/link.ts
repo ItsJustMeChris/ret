@@ -171,6 +171,8 @@ export class HostLink {
     const host = hostKeyOf(this.host().id);
     const base = this.hostStatus[provider] ?? placeholder(provider);
     if (this.connected && this.hostStatus[provider]) return { ...base, host, generation: g.local };
+    // Connected, and the device says nothing of it: a Ret from before it had this agent.
+    if (this.connected && this.providers && this.providers.enabled?.[provider] === undefined) return { ...base, host, state: "disabled", error: null, generation: g.local };
     const name = this.host().name;
     const error = this.fatal ?? (this.everConnected ? `Lost the connection to ${name}. Reconnecting…` : this.lastError);
     return { ...base, host, state: this.fatal || this.lastError || this.everConnected ? "error" : "starting", error, generation: g.local };

@@ -47,7 +47,12 @@ export async function startTestHost(opts: TestHostOptions = {}): Promise<TestHos
 
   const world = new World();
   populate(world);
-  const providers: ProvidersSettings = { enabled: { codex: true, claude: true }, claude: { source: "system", customPath: null, autoUpdate: false } };
+  const providers: ProvidersSettings = {
+    enabled: { codex: true, claude: true, opencode: false, acp: false },
+    claude: { source: "system", customPath: null, autoUpdate: false },
+    opencode: { source: "system", customPath: null },
+    acp: { name: "", command: "" },
+  };
   const muxes = {} as Record<ProviderId, AgentMux>;
   for (const p of PROVIDER_IDS) {
     const status: EngineStatus = {

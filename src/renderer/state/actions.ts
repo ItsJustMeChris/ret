@@ -1,9 +1,9 @@
 import { bridge } from "../bridge";
 import { onAppFocus } from "../lib/appFocus";
 import { dropClient, rpcFor } from "../rpc/client";
-import { PROVIDER_IDS, engineId, hostOf, providerOf, type EngineId, type ProviderId, type ProvidersSettings } from "@shared/bridge";
+import { PROVIDER_IDS, engineId, hostOf, providerOf, type EngineId, type EngineStatus, type ProviderId, type ProvidersSettings } from "@shared/bridge";
 import type { ServerRequest, Thread, ThreadItem, UsageActivity, UserInput } from "@shared/protocol";
-import { PROVIDERS, accessFor, agentOf, pickProvider } from "../agents";
+import { PROVIDERS, accessFor, agentOf, nameCustomAgent, pickProvider } from "../agents";
 import { dropProvider, emptyProviderConn, enabledProviders, enabledProvidersOn, patchProvider, signedIn, useConn, type ProviderConn, type TokenUsage } from "./conn";
 import { guarded, toast } from "./toasts";
 import { askerTitle, hostOfKey, lineageRoot, normPath, scopedKey, spawnedBy, threadTitle, type Workspace } from "./projects";
@@ -51,8 +51,8 @@ export function bootstrap() {
   if (booted) return;
   booted = true;
 
-  bridge.agents.onStatus((status) => patchProvider(engineId(status.provider, status.host), { status }));
-  for (const p of PROVIDER_IDS) void bridge.agents.getStatus(p).then((status) => patchProvider(p, { status }));
+  bridge.agents.onStatus(applyStatus);
+  for (const p of PROVIDER_IDS) void bridge.agents.getStatus(p).then(applyStatus);
   bridge.agents.onSettings(applyProviderSettings);
   void bridge.agents.getSettings().then(applyProviderSettings);
   bridge.updater.onState((updater) => useConn.setState({ updater }));
@@ -106,8 +106,14 @@ export function bootstrap() {
   });
 }
 
+function applyStatus(status: EngineStatus) {
+  patchProvider(engineId(status.provider, status.host), { status });
+  if (status.provider === "acp" && !status.host) nameCustomAgent(useConn.getState().settings?.acp?.name || status.agentName);
+}
+
 /** Providers turned on or off: a disabled provider's threads leave the sidebar until it's back. */
 function applyProviderSettings(settings: ProvidersSettings) {
+  nameCustomAgent(settings.acp?.name || useConn.getState().providers.acp?.status?.agentName);
   useConn.setState({ settings });
   const off: EngineId[] = PROVIDER_IDS.filter((p) => !settings.enabled[p]);
   if (!off.length) return;
@@ -203,6 +209,10 @@ function wireEngine(p: EngineId) {
         return;
       case "project/changed":
         void loadWorkspaces(p);
+        return;
+      case "model/list/updated":
+        // An ACP agent says what models it has only once a session is open.
+        void loadModels(p);
         return;
       case "turn/started":
         if (agentOf(p).subagentThreads) discoverThread(p, params?.threadId);

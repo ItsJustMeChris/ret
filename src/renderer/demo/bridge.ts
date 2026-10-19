@@ -22,7 +22,12 @@ export function createDemoBridge(): RetBridge & { world: World } {
   const settingsSubs = new Set<(s: ProvidersSettings) => void>();
   const updaterSubs = new Set<(s: UpdaterState) => void>();
   const appUpdateSubs = new Set<(s: AppUpdateState) => void>();
-  let settings: ProvidersSettings = { enabled: { codex: true, claude: true }, claude: { source: "system", customPath: null, autoUpdate: true } };
+  let settings: ProvidersSettings = {
+    enabled: { codex: true, claude: true, opencode: false, acp: false },
+    claude: { source: "system", customPath: null, autoUpdate: true },
+    opencode: { source: "system", customPath: null },
+    acp: { name: "", command: "" },
+  };
   const hourAgo = Date.now() - 52 * 60_000;
 
   world.engines.codex = new DemoEngine("codex", world, (lines) => deliver("codex", lines), {
@@ -46,6 +51,20 @@ export function createDemoBridge(): RetBridge & { world: World } {
     stderrTail: [],
     update: { phase: "idle", latest: "2.1.296", error: null, checkedAt: hourAgo, auto: true },
   });
+
+  // The ACP agents are left out of the demo: off, with nothing behind them.
+  for (const p of ["opencode", "acp"] as const) {
+    world.engines[p] = new DemoEngine(p, world, (lines) => deliver(p, lines), {
+      state: "disabled",
+      generation: 0,
+      version: null,
+      binaryPath: null,
+      source: null,
+      engine: "dedicated",
+      error: null,
+      stderrTail: [],
+    });
+  }
 
   function deliver(provider: ProviderId, lines: string[]) {
     if (!settings.enabled[provider]) return;
@@ -113,7 +132,14 @@ export function createDemoBridge(): RetBridge & { world: World } {
       onSettings: (cb) => sub(settingsSubs, cb),
       setSettings: async (patch) => {
         const prev = settings;
-        settings = { ...settings, ...patch, enabled: { ...settings.enabled, ...patch.enabled }, claude: { ...settings.claude, ...patch.claude } };
+        settings = {
+          ...settings,
+          ...patch,
+          enabled: { ...settings.enabled, ...patch.enabled, opencode: false, acp: false },
+          claude: { ...settings.claude, ...patch.claude },
+          opencode: { ...settings.opencode, ...patch.opencode },
+          acp: { ...settings.acp, ...patch.acp },
+        };
         for (const cb of settingsSubs) cb(settings);
         for (const p of PROVIDER_IDS) {
           if (prev.enabled[p] === settings.enabled[p]) continue;

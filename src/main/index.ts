@@ -28,6 +28,9 @@ import { codexHome, findSystemCodex, probeVersion } from "./codex/platform";
 import { ClaudeEngine } from "./claude/engine";
 import { findSystemClaude, openLoginTerminal, probeClaudeVersion } from "./claude/platform";
 import { ClaudeUpdater } from "./claude/updater";
+import { AcpEngine } from "./acp/engine";
+import { findOpencode, resolveProgram, splitCommand } from "./acp/platform";
+import { openTerminalWindow } from "./terminalWindow";
 import { LocalUsage } from "./usage";
 import { PtyService } from "./pty";
 import { renderVisualization } from "./visualize";
@@ -140,6 +143,26 @@ const claude = new ClaudeEngine(
   (status) => muxes.claude.setEngineStatus(status),
 );
 
+/** OpenCode, over the Agent Client Protocol (`opencode acp`). */
+const opencode = new AcpEngine(
+  "opencode",
+  () => "OpenCode",
+  join(userData, "opencode-state.json"),
+  app.getVersion(),
+  (lines) => muxes.opencode.fromEngine(lines),
+  (status) => muxes.opencode.setEngineStatus(status),
+);
+
+/** The agent the user brings: any program with an ACP mode, started by the command in Settings. */
+const customAgent = new AcpEngine(
+  "acp",
+  () => providers.acp.name.trim(),
+  join(userData, "acp-state.json"),
+  app.getVersion(),
+  (lines) => muxes.acp.fromEngine(lines),
+  (status) => muxes.acp.setEngineStatus(status),
+);
+
 /**
  * Codex's activity by day (tokens by model, prompts by hour), from its rollouts: Ret's own
  * `ret/usage/activity`, answered here ahead of the app-server, which doesn't know it.
@@ -175,6 +198,8 @@ function toCodex(line: string) {
 
 muxes.codex = new AgentMux(toCodex, true, appServer.status);
 muxes.claude = new AgentMux((line) => claude.send(line), false, claude.status);
+muxes.opencode = new AgentMux((line) => opencode.send(line), false, opencode.status);
+muxes.acp = new AgentMux((line) => customAgent.send(line), false, customAgent.status);
 
 /** This computer's window, as a client of each engine's mux. */
 const localClients = Object.fromEntries(
@@ -219,18 +244,28 @@ const claudeUpdater = new ClaudeUpdater({
 
 const providersFile = join(userData, "providers.json");
 const DEFAULT_PROVIDERS: ProvidersSettings = {
-  enabled: { codex: true, claude: true },
+  // OpenCode turns on by itself where it's installed (bootOpencode); a custom agent once it's set up.
+  enabled: { codex: true, claude: true, opencode: false, acp: false },
   claude: { source: "system", customPath: null, autoUpdate: true },
+  opencode: { source: "system", customPath: null },
+  acp: { name: "", command: "" },
 };
+
+/** Settings saved before OpenCode was an option: whether it's on is still to be decided. */
+let opencodeUndecided = false;
 
 function loadProviders(): ProvidersSettings {
   try {
     const raw = JSON.parse(readFileSync(providersFile, "utf8"));
+    opencodeUndecided = typeof raw.enabled?.opencode !== "boolean";
     return {
       enabled: { ...DEFAULT_PROVIDERS.enabled, ...raw.enabled },
       claude: { ...DEFAULT_PROVIDERS.claude, ...raw.claude },
+      opencode: { ...DEFAULT_PROVIDERS.opencode, ...raw.opencode },
+      acp: { ...DEFAULT_PROVIDERS.acp, ...raw.acp },
     };
   } catch {
+    opencodeUndecided = true;
     return DEFAULT_PROVIDERS;
   }
 }
@@ -244,7 +279,10 @@ async function setProviders(patch: ProvidersSettingsPatch): Promise<ProvidersSet
     ...patch,
     enabled: { ...prev.enabled, ...patch.enabled },
     claude: { ...prev.claude, ...patch.claude },
+    opencode: { ...prev.opencode, ...patch.opencode },
+    acp: { ...prev.acp, ...patch.acp },
   };
+  if (patch.enabled?.opencode !== undefined) opencodeUndecided = false;
   await writeFile(providersFile, JSON.stringify(providers, null, 2));
   send(IPC.providersState, providers);
   remote?.broadcastProviders(providers);
@@ -258,7 +296,40 @@ async function setProviders(patch: ProvidersSettingsPatch): Promise<ProvidersSet
   const claudeMoved = prev.claude.source !== providers.claude.source || prev.claude.customPath !== providers.claude.customPath;
   if (prev.enabled.claude !== providers.enabled.claude || claudeMoved) void bootClaude().then(() => scheduleClaudeUpdates());
   else if (prev.claude.autoUpdate !== providers.claude.autoUpdate) scheduleClaudeUpdates();
+  const opencodeMoved = prev.opencode.source !== providers.opencode.source || prev.opencode.customPath !== providers.opencode.customPath;
+  if (prev.enabled.opencode !== providers.enabled.opencode || opencodeMoved) void bootOpencode();
+  const acpMoved = prev.acp.command.trim() !== providers.acp.command.trim();
+  // Another agent altogether: what was remembered about the last one's sessions isn't its.
+  if (acpMoved && splitCommand(prev.acp.command)[0] !== splitCommand(providers.acp.command)[0]) customAgent.resetState();
+  if (prev.enabled.acp !== providers.enabled.acp || acpMoved) void bootAcp();
   return providers;
+}
+
+/** OpenCode from where its installers put it (or the path in Settings), run as `opencode acp`. */
+async function bootOpencode() {
+  const o = providers.opencode;
+  const custom = o.source === "custom" && o.customPath && existsSync(o.customPath) ? o.customPath : null;
+  const program = custom ?? (o.source === "system" ? findOpencode() : null);
+  // The first run that knows OpenCode turns it on where it's installed; after that it's the user's call.
+  if (opencodeUndecided) {
+    opencodeUndecided = false;
+    if (program && !providers.enabled.opencode) return void setProviders({ enabled: { opencode: true } });
+  }
+  if (!providers.enabled.opencode) return opencode.disable();
+  if (!program) {
+    return opencode.setMissing(o.source === "custom" ? "The OpenCode path in Settings doesn't exist." : "OpenCode isn't installed. Install it from opencode.ai, then restart it here.");
+  }
+  await opencode.start({ command: { program, args: ["acp"] }, source: custom ? "custom" : "system", version: null });
+}
+
+/** The user's own agent, started by the command they gave it. */
+async function bootAcp() {
+  if (!providers.enabled.acp) return customAgent.disable();
+  const [name, ...args] = splitCommand(providers.acp.command);
+  if (!name) return customAgent.setMissing("Give the command that starts your agent in its ACP mode (Settings → Custom agent).");
+  const program = resolveProgram(name);
+  if (!program) return customAgent.setMissing(`${name} wasn't found. Check the command in Settings → Custom agent.`);
+  await customAgent.start({ command: { program, args }, source: "custom", version: null });
 }
 
 /** Find the user's own Claude Code (Ret never installs it) and point the engine at it. */
@@ -383,6 +454,8 @@ async function applyStaged() {
 
 async function boot() {
   void bootClaude().then(() => scheduleClaudeUpdates());
+  void bootOpencode();
+  void bootAcp();
   await updater.init();
   await bootCodex();
 }
@@ -418,6 +491,8 @@ function onPageLoad() {
 
 async function restartProvider(provider: ProviderId) {
   if (provider === "claude") return bootClaude();
+  if (provider === "opencode") return bootOpencode();
+  if (provider === "acp") return bootAcp();
   if (providers.enabled.codex) return launch(await resolveTarget(), true);
 }
 
@@ -600,10 +675,20 @@ function registerIpc() {
   });
   ipcMain.handle(IPC.agentUpdate, (_e, provider: ProviderId) => {
     if (provider === "claude") return claudeUpdater.check({ install: true });
+    // ACP agents keep themselves current.
+    if (provider === "opencode" || provider === "acp") return;
     return updater.check({ install: true }).then(() => {});
   });
   ipcMain.handle(IPC.agentLogin, (_e, provider: ProviderId) => {
     if (provider === "claude" && claude.status.binaryPath) openLoginTerminal(claude.status.binaryPath);
+    if (provider === "opencode") {
+      const cmd = opencode.loginCommand(["auth", "login"]);
+      if (cmd) openTerminalWindow("OpenCode sign-in", cmd);
+    }
+    if (provider === "acp") {
+      const cmd = customAgent.loginCommand();
+      if (cmd) openTerminalWindow(`${providers.acp.name || "Agent"} sign-in`, cmd);
+    }
   });
   ipcMain.handle(IPC.providersGet, () => providers);
   ipcMain.handle(IPC.providersSet, (_e, patch: ProvidersSettingsPatch) => setProviders(patch));
@@ -803,6 +888,8 @@ app.on("before-quit", (e) => {
   e.preventDefault();
   claudeUpdater.stop();
   claude.stop();
+  opencode.stop();
+  customAgent.stop();
   codexPty.dispose();
   void Promise.all([appServer.stop(), remote?.shutdown()]).finally(() => app.quit());
 });

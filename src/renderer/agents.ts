@@ -133,7 +133,41 @@ const claude: AgentProvider = {
   configName: "Claude Code settings",
 };
 
-export const PROVIDERS: Record<ProviderId, AgentProvider> = { codex, claude };
+/**
+ * An agent Ret runs over the Agent Client Protocol. It keeps its own permissions and sign-in,
+ * titles its own sessions, and can't be seen at work in other apps.
+ */
+function acpAgent(id: ProviderId, name: string, short: string, configName: string): AgentProvider {
+  return {
+    id,
+    name,
+    short,
+    accessLabel: "Permissions",
+    access: [{ id: "config", label: "Default", title: `Whatever ${configName} says` }],
+    threadAccess: () => ({}),
+    turnAccess: () => ({}),
+    inAppLogin: false,
+    external: false,
+    externalQuietS: null,
+    workspaces: false,
+    goals: false,
+    autoTitle: false,
+    subagentThreads: false,
+    configName,
+  };
+}
+
+const opencode = acpAgent("opencode", "OpenCode", "OpenCode", "your OpenCode config");
+const acp = acpAgent("acp", "Custom agent", "Agent", "the agent's own settings");
+
+export const PROVIDERS: Record<ProviderId, AgentProvider> = { codex, claude, opencode, acp };
+
+/** The custom agent goes by the name it was given in Settings, else the one it gives itself. */
+export function nameCustomAgent(name: string | null | undefined) {
+  const n = name?.trim() || "Custom agent";
+  acp.name = n;
+  acp.short = n.length > 12 ? n.split(/\s+/)[0] : n;
+}
 
 export const providerInfo = (id: ProviderId | null | undefined): AgentProvider => PROVIDERS[id ?? "codex"] ?? codex;
 

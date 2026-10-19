@@ -17,7 +17,13 @@ function createWebBridge(base: string): RetBridge {
   const messageSubs = new Set<(provider: ProviderId, lines: string[]) => void>();
   const statusSubs = new Set<(s: EngineStatus) => void>();
   const settingsSubs = new Set<(s: ProvidersSettings) => void>();
-  let settings: ProvidersSettings = { enabled: { codex: true, claude: true }, claude: { source: "system", customPath: null, autoUpdate: false } };
+  // The ACP agents run only in the desktop app (the dev server hosts Codex and Claude Code).
+  let settings: ProvidersSettings = {
+    enabled: { codex: true, claude: true, opencode: false, acp: false },
+    claude: { source: "system", customPath: null, autoUpdate: false },
+    opencode: { source: "system", customPath: null },
+    acp: { name: "", command: "" },
+  };
 
   /** One provider's engine over a WebSocket, reconnecting while it's enabled. */
   const pipe = (provider: ProviderId, url: string) => {
@@ -66,7 +72,12 @@ function createWebBridge(base: string): RetBridge {
       },
     };
   };
-  const pipes: Record<ProviderId, ReturnType<typeof pipe>> = { codex: pipe("codex", `${base}/codex-ws`), claude: pipe("claude", `${base}/claude-ws`) };
+  const pipes: Record<ProviderId, ReturnType<typeof pipe>> = {
+    codex: pipe("codex", `${base}/codex-ws`),
+    claude: pipe("claude", `${base}/claude-ws`),
+    opencode: pipe("opencode", `${base}/opencode-ws`),
+    acp: pipe("acp", `${base}/acp-ws`),
+  };
 
   const updater: UpdaterState = {
     settings: { source: "system", autoUpdate: false, channel: "latest", customPath: null, checkIntervalHours: 2, engine: "dedicated" },
@@ -103,7 +114,14 @@ function createWebBridge(base: string): RetBridge {
         return () => settingsSubs.delete(cb);
       },
       setSettings: async (patch) => {
-        settings = { ...settings, ...patch, enabled: { ...settings.enabled, ...patch.enabled }, claude: { ...settings.claude, ...patch.claude } };
+        settings = {
+          ...settings,
+          ...patch,
+          enabled: { ...settings.enabled, ...patch.enabled },
+          claude: { ...settings.claude, ...patch.claude },
+          opencode: { ...settings.opencode, ...patch.opencode },
+          acp: { ...settings.acp, ...patch.acp },
+        };
         settingsSubs.forEach((cb) => cb(settings));
         return settings;
       },

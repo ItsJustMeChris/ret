@@ -25,6 +25,8 @@ function SettingsInner() {
   const enabled = useEnabledProviders();
   const codexOn = enabled.includes("codex");
   const claudeOn = enabled.includes("claude");
+  const opencodeOn = enabled.includes("opencode");
+  const acpOn = enabled.includes("acp");
 
   return (
     <div className="overlay" onPointerDown={close}>
@@ -39,6 +41,8 @@ function SettingsInner() {
           <AgentsSection />
           {codexOn && <CodexSection />}
           {claudeOn && <ClaudeSection />}
+          {opencodeOn && <OpencodeSection />}
+          {acpOn && <CustomAgentSection />}
           {isDesktop && <RemoteAccessSection />}
 
           <section>
@@ -138,6 +142,13 @@ function SettingsInner() {
   );
 }
 
+const ABOUT: Record<ProviderId, string> = {
+  codex: "OpenAI's coding agent, on your ChatGPT plan or API key.",
+  claude: "Anthropic's coding agent, using your own Claude Code install and sign-in.",
+  opencode: "The open-source coding agent, on whichever model providers you've set up in OpenCode.",
+  acp: "Any other agent with an Agent Client Protocol mode: Gemini CLI, Goose, Copilot, Qwen Code, Cursor…",
+};
+
 /** Which agents are on, and which one new threads start with. */
 function AgentsSection() {
   const settings = useConn((s) => s.settings);
@@ -158,7 +169,7 @@ function AgentsSection() {
                 {on && st && <span className={`badge ${st.state === "running" ? "ok" : st.state === "starting" ? "" : "err"}`}>{st.state === "running" ? (st.version ?? "running") : st.state}</span>}
               </div>
               <div className="muted small">
-                {p === "codex" ? "OpenAI's coding agent, on your ChatGPT plan or API key." : "Anthropic's coding agent, using your own Claude Code install and sign-in."}
+                {ABOUT[p]}
               </div>
             </div>
             <Switch
@@ -205,7 +216,7 @@ function EngineRow({ provider, children }: { provider: ProviderId; children?: Re
       )}
       {children}
       <button className="link small" onClick={() => setShowLog(!showLog)}>
-        {showLog ? "Hide" : "Show"} {provider === "codex" ? "app-server" : name} log
+        {showLog ? "Hide" : "Show"} {provider === "codex" ? "app-server" : (st?.agentName ?? name)} log
       </button>
       {showLog && <pre className="output log">{st?.stderrTail.join("\n") || "(empty)"}</pre>}
     </>
@@ -460,6 +471,146 @@ function ClaudeSection() {
             <ClaudeUpdates />
           </>
         )}
+      </EngineRow>
+    </section>
+  );
+}
+
+/**
+ * OpenCode runs from the user's own install as `opencode acp`, with the model providers and keys
+ * it keeps itself.
+ */
+function OpencodeSection() {
+  const settings = useConn((s) => s.settings);
+  const running = useConn((s) => s.providers.opencode.status?.state === "running");
+
+  const setSource = async (source: "system" | "custom") => {
+    let customPath = settings?.opencode.customPath ?? null;
+    if (source === "custom") {
+      customPath = await bridge.dialog.pickFile();
+      if (!customPath) return;
+    }
+    await bridge.agents.setSettings({ opencode: { source, customPath } });
+  };
+
+  return (
+    <section>
+      <h4>OpenCode</h4>
+      <div className="setting-row">
+        <div>
+          <div>Model providers</div>
+          <div className="muted small">
+            OpenCode signs in to its providers itself (<code>opencode auth login</code>) and keeps the keys; Ret never sees them.
+          </div>
+        </div>
+        <button className="btn" disabled={!running} onClick={() => void bridge.agents.openLogin("opencode")}>
+          <Terminal size={13} /> Add a provider
+        </button>
+      </div>
+      <EngineRow provider="opencode">
+        {isDesktop && settings && (
+          <div className="setting-row">
+            <div>
+              <div>Source</div>
+              <div className="muted small">Ret uses the OpenCode you installed; it never installs its own copy.</div>
+            </div>
+            <div className="segmented small">
+              {(["system", "custom"] as const).map((s) => (
+                <button key={s} className={settings.opencode.source === s ? "on" : ""} onClick={() => void setSource(s)}>
+                  {s === "system" ? "System" : "Custom…"}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </EngineRow>
+    </section>
+  );
+}
+
+/** Agents whose ACP mode is known, to fill in the command. */
+const ACP_PRESETS: { name: string; command: string }[] = [
+  { name: "Gemini CLI", command: "gemini --acp" },
+  { name: "Goose", command: "goose acp" },
+  { name: "GitHub Copilot", command: "copilot --acp --stdio" },
+  { name: "Qwen Code", command: "qwen --acp" },
+  { name: "Cursor", command: "cursor-agent acp" },
+];
+
+/** A field that saves when it loses focus or Enter is pressed, not on every key. */
+function SettingField({ value, placeholder, mono, onCommit }: { value: string; placeholder: string; mono?: boolean; onCommit: (v: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const [was, setWas] = useState(value);
+  if (value !== was) {
+    setWas(value);
+    setDraft(value);
+  }
+  const commit = () => draft !== value && onCommit(draft);
+  return (
+    <input
+      className={`input${mono ? " mono" : ""}`}
+      value={draft}
+      placeholder={placeholder}
+      spellCheck={false}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") setDraft(value);
+      }}
+    />
+  );
+}
+
+/**
+ * Bring your own agent: anything that speaks the Agent Client Protocol over stdio, started by the
+ * command given here. It keeps its own sign-in, models and permissions.
+ */
+function CustomAgentSection() {
+  const settings = useConn((s) => s.settings);
+  const st = useConn((s) => s.providers.acp.status);
+  if (!settings) return null;
+  const acp = settings.acp;
+  const set = (patch: Partial<typeof acp>) => void bridge.agents.setSettings({ acp: patch });
+  return (
+    <section>
+      <h4>{acp.name.trim() || st?.agentName || "Custom agent"}</h4>
+      <div className="muted small">
+        Any agent that speaks the <a href="https://agentclientprotocol.com" target="_blank" rel="noreferrer">Agent Client Protocol</a>. Ret starts it with this
+        command and talks to it over stdin and stdout.
+      </div>
+      <div className="setting-row">
+        <div>Command</div>
+        <div className="setting-field">
+          <SettingField value={acp.command} placeholder="gemini --acp" mono onCommit={(command) => set({ command })} />
+        </div>
+      </div>
+      <div className="setting-row">
+        <div>Name</div>
+        <div className="setting-field">
+          <SettingField value={acp.name} placeholder={st?.agentName ?? "What Ret calls it"} onCommit={(name) => set({ name })} />
+        </div>
+      </div>
+      <div className="setting-row">
+        <div className="muted small">Known agents</div>
+        <div className="row-gap acp-presets">
+          {ACP_PRESETS.map((p) => (
+            <button key={p.name} className={`btn ghost${acp.command === p.command ? " on" : ""}`} onClick={() => set(p)}>
+              {p.name}
+            </button>
+          ))}
+        </div>
+      </div>
+      <EngineRow provider="acp">
+        <div className="setting-row">
+          <div>
+            <div>Sign-in</div>
+            <div className="muted small">The agent signs in for itself. If it offers a sign-in for the terminal, Ret opens it for you.</div>
+          </div>
+          <button className="btn" disabled={st?.state !== "running"} onClick={() => void bridge.agents.openLogin("acp")}>
+            <Terminal size={13} /> Sign in
+          </button>
+        </div>
       </EngineRow>
     </section>
   );

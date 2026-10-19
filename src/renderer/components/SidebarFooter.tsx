@@ -127,6 +127,8 @@ export function EngineBadge({ provider }: { provider: ProviderId }) {
 /** How a provider is signed in, in a word or two. Never the account's email (Settings shows that). */
 function AccountLine({ provider, label }: { provider: ProviderId; label: boolean }) {
   const account = useConn((s) => s.providers[provider].account?.account);
+  // An engine that needs no account from Ret (an ACP agent signs in for itself).
+  const ownSignIn = useConn((s) => s.providers[provider].account?.requiresOpenaiAuth === false && !s.providers[provider].account?.account);
   const subscription = account?.type === "chatgpt" || account?.type === "claudeAi";
   // A subscription reads as "Codex PLUS": the provider's name stands where the email was.
   const name = subscription
@@ -135,7 +137,9 @@ function AccountLine({ provider, label }: { provider: ProviderId; label: boolean
       ? "API key"
       : account?.type === "cloud"
         ? account.provider
-        : "Not signed in";
+        : ownSignIn
+          ? "Own sign-in"
+          : "Not signed in";
   const plan = account?.type === "chatgpt" || account?.type === "claudeAi" ? account.planType : null;
   // Usage is out of sight until hovered, so a limit that's nearly used up still says so here.
   const windows = useUsageWindows(provider);

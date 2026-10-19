@@ -8,8 +8,11 @@ import type { DeviceNotice, RemoteHost, RemoteState } from "./remote";
  * app-server JSON-RPC protocol (src/shared/protocol) to the renderer: Codex natively, the others
  * through an adapter that translates their own protocol into it.
  */
-export type ProviderId = "codex" | "claude";
-export const PROVIDER_IDS: readonly ProviderId[] = ["codex", "claude"];
+export type ProviderId = "codex" | "claude" | "opencode" | "acp";
+export const PROVIDER_IDS: readonly ProviderId[] = ["codex", "claude", "opencode", "acp"];
+
+/** Agents Ret runs over the Agent Client Protocol (agentclientprotocol.com): OpenCode, and one the user brings. */
+export const ACP_PROVIDERS: readonly ProviderId[] = ["opencode", "acp"];
 
 /**
  * One agent on one machine: this computer's engines are known by their provider alone
@@ -53,6 +56,8 @@ export interface EngineStatus {
   engine: "dedicated" | "shared";
   error: string | null;
   stderrTail: string[];
+  /** What the agent calls itself, when that's its engine's to say (an ACP agent's `agentInfo`). */
+  agentName?: string | null;
   /** Keeping the provider's own install current (Claude Code; Codex has its UpdaterState). */
   update?: EngineUpdate | null;
 }
@@ -79,11 +84,24 @@ export interface ProvidersSettings {
     /** Run Claude Code's own updater when a new version is out (its model list comes from it). */
     autoUpdate: boolean;
   };
+  /** OpenCode, run as `opencode acp`. */
+  opencode: {
+    source: "system" | "custom";
+    customPath: string | null;
+  };
+  /** Any other agent with an ACP mode, started by the command the user gives (`gemini --experimental-acp`…). */
+  acp: {
+    /** What Ret calls it ("Gemini CLI"); empty: the name the agent gives itself. */
+    name: string;
+    command: string;
+  };
 }
 
-export type ProvidersSettingsPatch = Partial<Omit<ProvidersSettings, "enabled" | "claude">> & {
+export type ProvidersSettingsPatch = Partial<Omit<ProvidersSettings, "enabled" | "claude" | "opencode" | "acp">> & {
   enabled?: Partial<Record<ProviderId, boolean>>;
   claude?: Partial<ProvidersSettings["claude"]>;
+  opencode?: Partial<ProvidersSettings["opencode"]>;
+  acp?: Partial<ProvidersSettings["acp"]>;
 };
 
 export interface UpdaterSettings {

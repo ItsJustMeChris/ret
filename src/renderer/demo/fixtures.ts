@@ -83,6 +83,9 @@ const MODELS: Record<ProviderId, Model[]> = {
     model("sonnet", "Sonnet 5.5", "Best for everyday tasks", ALL, "high"),
     model("haiku", "Haiku 5.5", "Fastest for quick answers", ["low", "medium", "high"], "medium"),
   ],
+  // The demo's ACP agents are off.
+  opencode: [],
+  acp: [],
 };
 
 function snapshot(id: string, name: string | null, primary: RateLimitWindow | null, secondary: RateLimitWindow | null, planType: RateLimitSnapshot["planType"] = null): RateLimitSnapshot {
@@ -97,6 +100,8 @@ function limits(now: number) {
       snapshot: snapshot("claude", null, w(22, 300, 3 * HOUR + 41 * MIN), w(47, 10_080, 4 * DAY + 2 * HOUR)),
       byId: { seven_day_opus: snapshot("seven_day_opus", "Opus", w(64, 10_080, 4 * DAY + 2 * HOUR), null) },
     },
+    opencode: { snapshot: snapshot("opencode", null, null, null), byId: {} },
+    acp: { snapshot: snapshot("acp", null, null, null), byId: {} },
   };
 }
 
@@ -120,7 +125,7 @@ function usageHistory(now: number) {
     p === "codex"
       ? [[ago > 110 ? "gpt-6-sol" : "gpt-6.1-sol", 0.64], ["gpt-6-astra", 0.24], ["gpt-6-luna", 0.12]]
       : [[ago > 150 ? "claude-opus-5" : "claude-opus-5-5", 0.7], ["claude-sonnet-5-5", 0.2], ["claude-haiku-5-5", 0.1]];
-  const out: Record<ProviderId, UsageActivity> = { codex: { days: {} }, claude: { days: {} } };
+  const out: Record<ProviderId, UsageActivity> = { codex: { days: {} }, claude: { days: {} }, opencode: { days: {} }, acp: { days: {} } };
   for (let ago = 370; ago >= 0; ago--) {
     const day = new Date((now - ago * DAY) * 1000);
     const weekend = day.getDay() === 0 || day.getDay() === 6;
@@ -621,7 +626,7 @@ export function populate(world: World) {
   const now = Math.floor(Date.now() / 1000);
   W.seedFiles(world.fs);
   world.models = MODELS;
-  world.defaults = { codex: { model: "gpt-6.1-sol", effort: "medium" }, claude: { model: "default", effort: "high" } };
+  world.defaults = { codex: { model: "gpt-6.1-sol", effort: "medium" }, claude: { model: "default", effort: "high" }, opencode: { model: "", effort: "" }, acp: { model: "", effort: "" } };
   world.limits = limits(now);
   world.usage = usageHistory(now);
   world.respond = respond;

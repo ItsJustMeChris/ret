@@ -47,6 +47,8 @@ export function createMobileBridge(deps: MobileBridgeDeps): { bridge: RetBridge;
   const settings: ProvidersSettings = {
     enabled: Object.fromEntries(PROVIDER_IDS.map((p) => [p, false])) as Record<ProviderId, boolean>,
     claude: { source: "system", customPath: null, autoUpdate: false },
+    opencode: { source: "system", customPath: null },
+    acp: { name: "", command: "" },
   };
   const localStatus = (provider: ProviderId): EngineStatus => ({
     provider,
