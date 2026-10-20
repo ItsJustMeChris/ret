@@ -375,6 +375,26 @@ h1 {
 .cta-meta .sep {
   color: var(--bg-4);
 }
+.launch-badges {
+  margin-top: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+.launch-badges a {
+  display: block;
+  border-radius: 10px;
+  transition: transform 0.15s var(--ease);
+}
+.launch-badges a:hover {
+  transform: translateY(-2px);
+}
+.launch-badges img {
+  display: block;
+  height: 54px;
+  width: auto;
+}
 
 .hero-stage {
   margin-top: 64px;
