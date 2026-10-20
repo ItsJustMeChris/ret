@@ -7,7 +7,7 @@ import { PROVIDER_IDS, engineId } from "@shared/bridge";
 import { shortDeviceId, type RemoteHost } from "@shared/remote";
 import { bridge } from "@ret/bridge";
 import { useShallow } from "@ret/lib/shallow";
-import { useConn } from "@ret/state/conn";
+import { isSetUp, useConn } from "@ret/state/conn";
 import { toast } from "@ret/state/toasts";
 import { useUI, type Theme } from "@ret/state/ui";
 import { PROVIDERS } from "@ret/agents";
@@ -105,7 +105,8 @@ function HostRow({ host, first }: { host: RemoteHost; first: boolean }) {
       </View>
       {host.connected && (
         <View className="gap-1 pl-[30px]">
-          {PROVIDER_IDS.map((p, i) => [p, statuses[i]] as const).map(([p, status]) => (
+          {/* As the desktop's titlebar and sidebar: an agent that's off or not set up there goes unmentioned. */}
+          {PROVIDER_IDS.map((p, i) => [p, statuses[i]] as const).filter(([p, status]) => isSetUp(p, status)).map(([p, status]) => (
             <Text key={p} className="text-[13px] text-text-2">
               {PROVIDERS[p].name}
               <Text className="text-text-3">

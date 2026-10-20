@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Download, LoaderCircle, RefreshCw, Settings, CircleAlert, Check, ArrowUpCircle } from "lucide-react";
 import type { ProviderId } from "@shared/bridge";
-import { useConn, useEnabledProviders } from "../state/conn";
+import { useConn, useSetUpProviders } from "../state/conn";
 import { useUI } from "../state/ui";
 import { PROVIDERS } from "../agents";
 import { engineStatus } from "./HoverCards";
@@ -127,26 +127,28 @@ export function EngineBadge({ provider }: { provider: ProviderId }) {
 /** How a provider is signed in, in a word or two. Never the account's email (Settings shows that). */
 function AccountLine({ provider, label }: { provider: ProviderId; label: boolean }) {
   const account = useConn((s) => s.providers[provider].account?.account);
+  const loaded = useConn((s) => s.providers[provider].accountLoaded);
+  const running = useConn((s) => s.providers[provider].status?.state === "running");
   // An engine that needs no account from Ret (an ACP agent signs in for itself).
   const ownSignIn = useConn((s) => s.providers[provider].account?.requiresOpenaiAuth === false && !s.providers[provider].account?.account);
   const subscription = account?.type === "chatgpt" || account?.type === "claudeAi";
-  // A subscription reads as "Codex PLUS": the provider's name stands where the email was.
-  const name = subscription
+  // A subscription reads as "Codex PLUS": the provider's name stands where the email was. So does
+  // an agent with its own sign-in ("OpenCode READY"), and one not heard from yet.
+  const named = subscription || ownSignIn || !loaded;
+  const name = named
     ? PROVIDERS[provider].short
     : account?.type === "apiKey"
       ? "API key"
       : account?.type === "cloud"
         ? account.provider
-        : ownSignIn
-          ? "Own sign-in"
-          : "Not signed in";
-  const plan = account?.type === "chatgpt" || account?.type === "claudeAi" ? account.planType : null;
+        : "Not signed in";
+  const plan = subscription ? account.planType : ownSignIn && running ? "ready" : null;
   // Usage is out of sight until hovered, so a limit that's nearly used up still says so here.
   const windows = useUsageWindows(provider);
   const left = windows.length ? Math.max(0, Math.round(100 - Math.max(...windows.map((m) => m.w.usedPercent)))) : null;
   return (
     <span className="account-line">
-      {label && !subscription && <span className="account-provider">{PROVIDERS[provider].short}</span>}
+      {label && !named && <span className="account-provider">{PROVIDERS[provider].short}</span>}
       <span className="account-name">{name}</span>
       {plan && <span className="plan">{String(plan)}</span>}
       {left != null && left < LOW_LEFT && (
@@ -159,7 +161,7 @@ function AccountLine({ provider, label }: { provider: ProviderId; label: boolean
 }
 
 export function SidebarFooter() {
-  const enabled = useEnabledProviders();
+  const enabled = useSetUpProviders();
   const several = enabled.length > 1;
   return (
     <div className="sidebar-foot">

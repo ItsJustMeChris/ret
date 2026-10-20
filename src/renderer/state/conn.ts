@@ -137,5 +137,18 @@ export function useEnabledProviders(): ProviderId[] {
   return PROVIDER_IDS.filter((p) => enabled?.[p] ?? true);
 }
 
+/**
+ * Whether an agent is worth reporting on: on, and set up (installed, or given a command). Codex
+ * always is once on: Ret installs it itself. The rest only Settings mentions. The phone's
+ * computer rows go by this too.
+ */
+export const isSetUp = (p: ProviderId, st: EngineStatus | null | undefined) => st?.state !== "disabled" && (p === "codex" || st?.state !== "missing");
+
+/** The agents on this computer that the titlebar and sidebar report on (see isSetUp). */
+export function useSetUpProviders(): ProviderId[] {
+  const key = useConn((s) => enabledProviders(s).filter((p) => isSetUp(p, s.providers[p].status)).join(","));
+  return key ? (key.split(",") as ProviderId[]) : [];
+}
+
 /** Signed in (any account kind). */
 export const signedIn = (c: ProviderConn) => !!c.account?.account;

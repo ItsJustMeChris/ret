@@ -1,7 +1,7 @@
 import { AppWindow, Command, PanelLeft, Rows3 } from "lucide-react";
 import { useUI } from "../state/ui";
 import { MODE_APPS, VIEW_MODES } from "../apps";
-import { useConn, useEnabledProviders } from "../state/conn";
+import { useConn, useSetUpProviders } from "../state/conn";
 import { PROVIDERS } from "../agents";
 import { useThreads } from "../state/threads";
 import { bridge } from "../bridge";
@@ -37,7 +37,7 @@ export function Titlebar() {
   const mode = useUI((s) => s.mode);
   const sidebarOpen = useUI((s) => s.sidebarOpen);
   const engines = useConn((s) => s.providers);
-  const enabled = useEnabledProviders();
+  const enabled = useSetUpProviders();
   const isMac = bridge.platform === "darwin";
 
   return (
@@ -81,10 +81,10 @@ export function Titlebar() {
         <GlobalActivity />
         {enabled.map((p) => {
           const st = engines[p].status;
-          if (!st || st.state === "running" || st.state === "disabled") return null;
+          if (!st || st.state === "running") return null;
           const name = PROVIDERS[p].name;
           const label =
-            st.state === "starting" ? `Starting ${name}…` : st.state === "missing" ? (p === "codex" ? "Installing Codex…" : `${name} not found`) : `${name} offline`;
+            st.state === "starting" ? `Starting ${name}…` : st.state === "missing" ? "Installing Codex…" : `${name} offline`;
           return (
             <span key={p} className={`conn conn-${st.state}`} data-card="engine" data-provider={p}>
               {label}
