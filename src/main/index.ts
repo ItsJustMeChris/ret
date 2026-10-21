@@ -37,8 +37,12 @@ import { renderVisualization } from "./visualize";
 import { createWorktree, gitInfo, mainCheckouts } from "./git";
 import { AgentMux, RemoteAccess, type HostCalls, type MuxClient } from "./remote";
 import { appInfo } from "./apps";
+import { loadShellEnv } from "./shellEnv";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
+
+// Started now so it overlaps window creation; boot() waits for it before spawning anything.
+const shellEnvReady = loadShellEnv();
 
 // Images in threads (attachments, files the agent viewed, local images in messages) are local
 // files. The page can't load file:// from the dev server, and shouldn't read arbitrary files
@@ -453,6 +457,7 @@ async function applyStaged() {
 }
 
 async function boot() {
+  await shellEnvReady;
   void bootClaude().then(() => scheduleClaudeUpdates());
   void bootOpencode();
   void bootAcp();
