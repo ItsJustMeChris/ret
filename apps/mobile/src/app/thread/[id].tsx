@@ -1,5 +1,5 @@
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { CircleAlert, FolderOpen, Info, MessageSquarePlus, RotateCw } from "lucide-react-native";
+import { Bot, CircleAlert, FolderOpen, GitFork, Info, MessageSquarePlus, RotateCw } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -7,11 +7,12 @@ import { useHeaderHeight } from "expo-router/react-navigation";
 import { hostOf } from "@shared/bridge";
 import { hydrateThread } from "@ret/state/actions";
 import { hostName } from "@ret/state/hosts";
-import { baseName, hostOfKey, threadTitle } from "@ret/state/projects";
+import { baseName, hostOfKey, spawnedBy, threadTitle } from "@ret/state/projects";
 import { markAttended, markVisible, patchLive } from "@ret/state/threads";
 import { isDraft, useUI } from "@ret/state/ui";
 import { useThread } from "@ret/state/useThread";
 import { agentOf } from "@ret/agents";
+import { FORK } from "@ret/lib/forks";
 import { DETAILS } from "@ret/lib/threadDetails";
 import { dropDraftIfUnused } from "../../drafts";
 import { FileScopeContext, openFolder } from "../../files";
@@ -20,6 +21,7 @@ import { StatusDot } from "../../ui/StatusDot";
 import { Approvals } from "../../thread/Approvals";
 import { Composer } from "../../thread/Composer";
 import { DetailsSheet } from "../../thread/Details";
+import { ForkContext, ForkSheet, type ForkAt } from "../../thread/Fork";
 import { Transcript } from "../../thread/Transcript";
 
 export default function ThreadScreen() {
@@ -48,6 +50,7 @@ function ThreadView({ id }: { id: string }) {
   const host = owner ? hostOf(owner) : null;
   const scope = useMemo(() => ({ cwd, host }), [cwd, host]);
   const [details, setDetails] = useState(false);
+  const [fork, setFork] = useState<ForkAt | null>(null);
 
   // On screen: kept subscribed and fresh, loaded on first sight (as a desktop pane).
   useEffect(() => {
@@ -70,59 +73,72 @@ function ThreadView({ id }: { id: string }) {
 
   return (
     <FileScopeContext.Provider value={scope}>
-      <ThreadKeyboardView>
-        <Stack.Screen
-          options={{
-            headerTitle: () => (
-              <View className="max-w-[230px] items-center">
-                <View className="flex-row items-center gap-2">
-                  <StatusDot threadId={id} size={7} />
-                  <Text numberOfLines={1} className="text-[16px] font-semibold text-text">
-                    {threadTitle(thread)}
+      <ForkContext.Provider value={setFork}>
+        <ThreadKeyboardView>
+          <Stack.Screen
+            options={{
+              headerTitle: () => (
+                <View className="max-w-[230px] items-center">
+                  <View className="flex-row items-center gap-2">
+                    <StatusDot threadId={id} size={7} />
+                    {/* A fork or a subagent says so, as its desktop tab does. */}
+                    {spawnedBy(thread) ? (
+                      <Icon icon={Bot} size={13} colorClassName="accent-text-3" />
+                    ) : thread?.forkedFromId ? (
+                      <Icon icon={GitFork} size={13} colorClassName="accent-text-3" />
+                    ) : null}
+                    <Text numberOfLines={1} className="text-[16px] font-semibold text-text">
+                      {threadTitle(thread)}
+                    </Text>
+                  </View>
+                  <Text numberOfLines={1} className="text-[12px] text-text-3">
+                    {[cwd ? baseName(cwd) : null, owner ? agentOf(owner).name : null, host ? hostName(host) : null].filter(Boolean).join(" · ")}
                   </Text>
                 </View>
-                <Text numberOfLines={1} className="text-[12px] text-text-3">
-                  {[cwd ? baseName(cwd) : null, owner ? agentOf(owner).name : null, host ? hostName(host) : null].filter(Boolean).join(" · ")}
-                </Text>
-              </View>
-            ),
-            headerRight: () => (
-              <View className="flex-row items-center gap-5">
-                {cwd && host ? (
-                  <Pressable hitSlop={10} onPress={() => openFolder(cwd, host)} accessibilityLabel="Browse the thread's folder">
-                    <Icon icon={FolderOpen} size={19} colorClassName="accent-text-2" />
+              ),
+              headerRight: () => (
+                <View className="flex-row items-center gap-5">
+                  {cwd && host ? (
+                    <Pressable hitSlop={10} onPress={() => openFolder(cwd, host)} accessibilityLabel="Browse the thread's folder">
+                      <Icon icon={FolderOpen} size={19} colorClassName="accent-text-2" />
+                    </Pressable>
+                  ) : null}
+                  {/* The desktop's Fork menu, as a sheet. */}
+                  <Pressable hitSlop={10} onPress={() => setFork({})} accessibilityLabel={FORK.button}>
+                    <Icon icon={GitFork} size={19} colorClassName="accent-text-2" />
                   </Pressable>
-                ) : null}
-                {/* The desktop's details button (its header's, beside the terminal's). */}
-                <Pressable hitSlop={10} onPress={() => setDetails(true)} accessibilityLabel={DETAILS.show}>
-                  <Icon icon={Info} size={19} colorClassName="accent-text-2" />
+                  {/* The desktop's details button (its header's, beside the terminal's). */}
+                  <Pressable hitSlop={10} onPress={() => setDetails(true)} accessibilityLabel={DETAILS.show}>
+                    <Icon icon={Info} size={19} colorClassName="accent-text-2" />
+                  </Pressable>
+                </View>
+              ),
+            }}
+          />
+          <View className="flex-1">
+            {error ? (
+              <View className="flex-1 items-center justify-center gap-3 px-8">
+                <Icon icon={CircleAlert} size={26} colorClassName="accent-red" />
+                <Text className="text-center text-[15px] text-text-2">{error}</Text>
+                <Pressable onPress={retry} className="flex-row items-center gap-1.5 rounded-lg border border-line px-3.5 py-2 active:bg-bg-3">
+                  <Icon icon={RotateCw} size={14} colorClassName="accent-text" />
+                  <Text className="text-[14px] text-text">Try again</Text>
                 </Pressable>
               </View>
-            ),
-          }}
-        />
-        <View className="flex-1">
-          {error ? (
-            <View className="flex-1 items-center justify-center gap-3 px-8">
-              <Icon icon={CircleAlert} size={26} colorClassName="accent-red" />
-              <Text className="text-center text-[15px] text-text-2">{error}</Text>
-              <Pressable onPress={retry} className="flex-row items-center gap-1.5 rounded-lg border border-line px-3.5 py-2 active:bg-bg-3">
-                <Icon icon={RotateCw} size={14} colorClassName="accent-text" />
-                <Text className="text-[14px] text-text">Try again</Text>
-              </Pressable>
-            </View>
-          ) : hydrating ? (
-            <View className="flex-1 items-center justify-center">
-              <Spinner colorClassName="accent-text-3" />
-            </View>
-          ) : (
-            <Transcript ctx={{ threadId: id, cwd, host }} />
-          )}
-        </View>
-        <Approvals threadId={id} />
-        <Composer threadId={id} />
-        <DetailsSheet ctx={{ threadId: id, cwd, host }} open={details} onClose={() => setDetails(false)} />
-      </ThreadKeyboardView>
+            ) : hydrating ? (
+              <View className="flex-1 items-center justify-center">
+                <Spinner colorClassName="accent-text-3" />
+              </View>
+            ) : (
+              <Transcript ctx={{ threadId: id, cwd, host }} />
+            )}
+          </View>
+          <Approvals threadId={id} />
+          <Composer threadId={id} />
+          <DetailsSheet ctx={{ threadId: id, cwd, host }} open={details} onClose={() => setDetails(false)} />
+          <ForkSheet threadId={id} at={fork} onClose={() => setFork(null)} />
+        </ThreadKeyboardView>
+      </ForkContext.Provider>
     </FileScopeContext.Provider>
   );
 }

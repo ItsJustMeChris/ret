@@ -96,7 +96,8 @@ The skill lives in `.agents/skills/phone-parity/`. This file is also at
 | components/ui/RetBot.tsx (loops in lib/retBotMotion, shapes in lib/retBot) | ui/RetBot.tsx |
 | components/StatusDot.tsx (state logic shared) | ui/StatusDot.tsx |
 | components/inbox/InboxView.tsx | app/(tabs)/index.tsx |
-| components/Sidebar.tsx (projects) | app/(tabs)/projects.tsx |
+| components/Sidebar.tsx (projects, fork groups; numbering and words in lib/forks, counts in StatusDot's useActivityCounts) | app/(tabs)/projects.tsx |
+| Fork menus and "Fork from here" (ThreadPane, Transcript, CanvasWindow; words in lib/forks) | thread/Fork.tsx (a sheet from the thread's header and its turns) |
 | components/Settings.tsx, RemoteAccess.tsx | app/(tabs)/settings.tsx, app/pair.tsx |
 | Code mode's explorer and files | app/files.tsx, app/file.tsx |
 | components/Markdown.tsx | ui/Markdown.tsx |
@@ -125,6 +126,12 @@ closes or a new one is chosen on purpose.
   in `useUI.details`) or peeks at them as a card in a narrower one, behind a panel-right button and
   Ctrl+Alt+B; the phone opens the same sections in a bottom sheet from an info button in the
   thread's header, and keeps nothing. Its context bar doesn't animate a change.
+- Forks: the phone's projects list nests them under the thread they came from as the sidebar does (open
+  groups kept in `useUI.expanded`), but keeps a project's collapse and "Show more" for the session only,
+  and draws the groups' guide lines solid (React Native won't dash one side). Forking goes through a
+  sheet (header button, or a turn's "Fork from here", always shown); the desktop's "Fork from here" acts at
+  once and shows on hover. The fork opens over the thread it came from, where the desktop opens it beside it.
+  No "Fork with selection" (no text selection to fork from).
 - The model tuner: the desktop previews an effort while the pointer hovers its bars, and swaps its
   popover to the model list in place; the phone has no hover (a tap or drag sets it, with a haptic
   tick per step), and its model list is a sheet of its own that hands back to the tuner.

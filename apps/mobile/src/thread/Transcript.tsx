@@ -1,10 +1,11 @@
-import { ChevronRight, CircleAlert, FileDiff, TriangleAlert } from "lucide-react-native";
-import { memo, useMemo, useState } from "react";
+import { ChevronRight, CircleAlert, FileDiff, GitFork, TriangleAlert } from "lucide-react-native";
+import { memo, useContext, useMemo, useState } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
 import Animated, { cubicBezier } from "react-native-reanimated";
 import type { ThreadItem } from "@shared/protocol";
 import { activitySummary, turnSegments } from "@ret/lib/activity";
 import { diffStats, duration } from "@ret/lib/format";
+import { FORK } from "@ret/lib/forks";
 import { shallowEqual } from "@ret/lib/shallow";
 import { loadOlder, resendUnanswered } from "@ret/state/actions";
 import { takesDirectInput } from "@ret/state/projects";
@@ -14,6 +15,7 @@ import { agentOf } from "@ret/agents";
 import { useWork } from "@ret/components/thread/useWork";
 import { Badge, Icon, Spinner, useNow } from "../ui/primitives";
 import { RetBot } from "../ui/RetBot";
+import { ForkContext } from "./Fork";
 import { DiffView, ItemView, type Ctx } from "./Items";
 
 const NO_TURNS: string[] = [];
@@ -97,6 +99,7 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
   const background = useThread(ctx.threadId, (s) => s.background[ctx.threadId]?.length ?? 0);
   const notices = useThread(ctx.threadId, (s) => noticesAt(s.live[ctx.threadId], turnId), shallowEqual);
   const [showDiff, setShowDiff] = useState(false);
+  const fork = useContext(ForkContext);
   if (!turn) return null;
   const live = turn.status === "inProgress" && !turn.stale;
 
@@ -140,6 +143,13 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
               <Icon icon={FileDiff} size={12} colorClassName="accent-text-3" />
               <Text className="text-[12px] text-green">+{stats.add}</Text>
               <Text className="text-[12px] text-red">−{stats.del}</Text>
+            </Pressable>
+          )}
+          {/* The desktop's "Fork from here" (shown there on hover): always here, quietly, at the end. */}
+          {fork && (
+            <Pressable onPress={() => fork({ turnId })} hitSlop={10} accessibilityLabel={FORK.hereHint} className="ml-auto flex-row items-center gap-1">
+              <Icon icon={GitFork} size={12} colorClassName="accent-text-3" />
+              <Text className="text-[12px] text-text-3">{FORK.here}</Text>
             </Pressable>
           )}
         </View>

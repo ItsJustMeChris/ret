@@ -1,5 +1,4 @@
 import { memo, useCallback, useMemo, useState } from "react";
-import { useShallow } from "../lib/shallow";
 import { holdCursor } from "../lib/cursorShield";
 import {
   Archive,
@@ -31,7 +30,8 @@ import { useHosts } from "../state/hosts";
 import { scopedKey } from "../state/projects";
 import { hostOf } from "@shared/bridge";
 import { addProject, archiveThread, forkThread, newThread, openThread, renameThread, updateProject } from "../state/actions";
-import { StatusDot, useThreadState, type ThreadState } from "./StatusDot";
+import { StatusDot, useActivityCounts, useThreadState, type ThreadState } from "./StatusDot";
+import { FORK, forkNumbers, forkTitle } from "../lib/forks";
 import { Menu, type MenuItem } from "./Menu";
 import { bridge, isDesktop } from "../bridge";
 import { SidebarFooter } from "./SidebarFooter";
@@ -172,7 +172,7 @@ const HostSection = memo(function HostSection({
     void addProject(undefined, host);
   };
   const ids = useMemo(() => projects.flatMap((p) => p.roots.flatMap((r) => flattenNode(r).map((t) => t.id))), [projects]);
-  const { running, attention } = useAggregate(ids);
+  const { running, attention } = useActivityCounts(ids);
   const menuItems: MenuItem[] = [
     { label: host ? `Add a project on ${name}` : "Add project folder", icon: <FolderPlus size={14} />, onClick: () => add() },
     ...(host ? [{ label: "Remote access settings", icon: <SettingsIcon size={14} />, onClick: () => useUI.setState({ settingsOpen: true }) }] : []),
@@ -299,25 +299,9 @@ const ProjectFolder = memo(function ProjectFolder({ project, forceOpen, showMenu
   );
 });
 
-/** Running/attention counts for a collapsed project or fork group. */
-function useAggregate(ids: string[]): { running: number; attention: number } {
-  return useThreads(
-    useShallow((s) => {
-      let running = 0;
-      let attention = 0;
-      const reqThreads = new Set(Object.values(s.requests).map((r) => r.threadId));
-      for (const id of ids) {
-        if (reqThreads.has(id)) attention++;
-        else if (s.live[id]?.activeTurnId || s.external[id] || s.threads[id]?.status.type === "active") running++;
-      }
-      return { running, attention };
-    }),
-  );
-}
-
 function ProjectActivity({ project }: { project: ProjectNode }) {
   const ids = useMemo(() => project.roots.flatMap((r) => flattenNode(r).map((t) => t.id)), [project.roots]);
-  const { running, attention } = useAggregate(ids);
+  const { running, attention } = useActivityCounts(ids);
   return (
     <>
       {attention > 0 && <span className="pill attention">{attention}</span>}
@@ -348,8 +332,8 @@ function threadMenu(threadId: string, rename: () => void): MenuItem[] {
     },
     { label: "Open in canvas", icon: <AppWindow size={14} />, onClick: () => { useUI.setState({ mode: "canvas" }); openThread(threadId, { mode: "canvas" }); } },
     { separator: true },
-    { label: "Fork", icon: <GitFork size={14} />, onClick: () => void forkThread(threadId) },
-    ...(isDesktop && useThreads.getState().threads[threadId]?.gitInfo ? [{ label: "Fork into new worktree", icon: <FolderGit2 size={14} />, onClick: () => void forkThread(threadId, { worktree: true }) }] : []),
+    { label: FORK.button, icon: <GitFork size={14} />, onClick: () => void forkThread(threadId) },
+    ...(isDesktop && useThreads.getState().threads[threadId]?.gitInfo ? [{ label: FORK.worktree, icon: <FolderGit2 size={14} />, onClick: () => void forkThread(threadId, { worktree: true }) }] : []),
     { label: "Rename", icon: <Pencil size={14} />, onClick: rename },
     { separator: true },
     { label: "Archive", icon: <Archive size={14} />, danger: true, onClick: () => void archiveThread(threadId) },
@@ -375,7 +359,7 @@ const ForkGroup = memo(function ForkGroup({
   const expanded = useUI((s) => s.expanded[id] ?? false);
   const open = expanded || forceOpen;
   const ids = useMemo(() => flattenNode(node).map((t) => t.id), [node]);
-  const { running, attention } = useAggregate(ids);
+  const { running, attention } = useActivityCounts(ids);
   const active = useIsActive(id);
   const [renaming, setRenaming] = useState(false);
   const toggle = () => useUI.setState((s) => ({ expanded: { ...s.expanded, [id]: !expanded } }));
@@ -411,7 +395,7 @@ const ForkGroup = memo(function ForkGroup({
           />
         ) : (
           <span className="row-title">
-            {fork != null && (!node.thread.name || node.thread.name === parentName) ? `Fork ${fork}` : threadTitle(node.thread)}
+            {fork != null ? forkTitle(node.thread, fork, parentName) : threadTitle(node.thread)}
           </span>
         )}
         {attention > 0 && <span className="pill attention">{attention}</span>}
@@ -431,7 +415,7 @@ const ForkGroup = memo(function ForkGroup({
       </div>
       {open && (
         <div className="fork-body">
-          <ThreadRow node={node} depth={depth + 1} showMenu={showMenu} label="Original" />
+          <ThreadRow node={node} depth={depth + 1} showMenu={showMenu} label={FORK.original} />
           {forkNumbers(node.children).map(([c, fork]) =>
             c.children.length ? (
               <ForkGroup
@@ -452,12 +436,6 @@ const ForkGroup = memo(function ForkGroup({
     </div>
   );
 });
-
-/** Forks are numbered in the order they were made; subagents go by their own names. */
-function forkNumbers(children: ThreadNode[]): [ThreadNode, number | undefined][] {
-  let n = 0;
-  return children.map((c) => [c, spawnedBy(c.thread) ? undefined : ++n]);
-}
 
 const ThreadRow = memo(function ThreadRow({
   node,
@@ -482,8 +460,7 @@ const ThreadRow = memo(function ThreadRow({
   const [renaming, setRenaming] = useState(false);
 
   // Forks inherit their parent's name; number them unless they were renamed.
-  const inherited = fork != null && (!t.name || t.name === parentName);
-  const title = label ?? (inherited ? `Fork ${fork}` : threadTitle(t));
+  const title = label ?? (fork != null ? forkTitle(t, fork, parentName) : threadTitle(t));
 
   return (
     <div

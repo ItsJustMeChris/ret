@@ -134,8 +134,3 @@ export function forksOf(threads: Record<string, Thread>, threadId: string): Thre
     .filter((t) => t.forkedFromId === threadId && !spawnedBy(t))
     .sort((a, b) => a.createdAt - b.createdAt);
 }
-
-/** A fork's name, or "Fork 2" while it has its parent's. */
-export function forkLabel(fork: Thread, index: number, parentName: string | null | undefined): string {
-  return fork.name && fork.name !== parentName ? fork.name : `Fork ${index + 1}`;
-}

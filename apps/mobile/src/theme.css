@@ -23,6 +23,7 @@
       --color-red-soft: rgba(242, 97, 106, 0.13);
       --color-grid-dot: rgba(255, 255, 255, 0.085);
       --color-code-bg: #0a0a0a;
+      --color-term-bg: #0a0a0a;
       --color-series-codex: #7383f7;
       --color-series-claude: #d95926;
     }
@@ -48,6 +49,7 @@
       --color-red-soft: rgba(217, 58, 68, 0.1);
       --color-grid-dot: rgba(10, 10, 40, 0.11);
       --color-code-bg: #f3f3f7;
+      --color-term-bg: #ffffff;
       --color-series-codex: #4f5fe8;
       --color-series-claude: #d95926;
     }

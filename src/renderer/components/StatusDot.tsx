@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { useShallow } from "../lib/shallow";
 import { agentsWorking, useThreads } from "../state/threads";
 import { spawnedBy } from "../state/projects";
 import { useThread } from "../state/useThread";
@@ -79,6 +80,22 @@ export const STATE_LABEL: Record<ThreadState, string> = {
 /** True when the thread's current turn is running in another process of its agent (VS Code, the CLI, a desktop app…). */
 export function useRunsElsewhere(threadId: string) {
   return useThread(threadId, (s) => !!s.external[threadId]);
+}
+
+/** How many of `ids` want you and how many work: the pills on a project or a group of forks, the desktop's sidebar's and the phone's projects list's. */
+export function useActivityCounts(ids: string[]): { running: number; attention: number } {
+  return useThreads(
+    useShallow((s) => {
+      let running = 0;
+      let attention = 0;
+      const reqThreads = new Set(Object.values(s.requests).map((r) => r.threadId));
+      for (const id of ids) {
+        if (reqThreads.has(id)) attention++;
+        else if (s.live[id]?.activeTurnId || s.external[id] || s.threads[id]?.status.type === "active") running++;
+      }
+      return { running, attention };
+    }),
+  );
 }
 
 export const StatusDot = memo(function StatusDot({ threadId }: { threadId: string }) {

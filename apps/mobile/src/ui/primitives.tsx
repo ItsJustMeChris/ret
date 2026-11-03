@@ -87,6 +87,17 @@ export function Count({ n }: { n: number }) {
   );
 }
 
+/** How many threads want you (amber) or work (green), on a project or a group of forks: the desktop's .pill. */
+export function Pill({ n, tone }: { n: number; tone: "attention" | "running" }) {
+  return (
+    <View className={`h-5 min-w-5 items-center justify-center rounded-full px-1.5 ${tone === "attention" ? "bg-amber-soft" : "bg-green-soft"}`}>
+      <Text className={`text-[12px] font-semibold ${tone === "attention" ? "text-amber" : "text-green"}`} style={{ fontVariant: ["tabular-nums"] }}>
+        {n}
+      </Text>
+    </View>
+  );
+}
+
 /** A centred empty state: an icon, a line in bold, and what to do about it. */
 export function Empty({ icon, title, children, action }: { icon: LucideIcon; title: string; children?: ReactNode; action?: ReactNode }) {
   return (

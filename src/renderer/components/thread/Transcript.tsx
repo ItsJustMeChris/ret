@@ -14,6 +14,7 @@ import { DiffView, ItemView } from "./Items";
 import { activitySummary, turnSegments } from "../../lib/activity";
 import { ThreadImage } from "./ThreadImage";
 import { diffStats, duration } from "../../lib/format";
+import { FORK } from "../../lib/forks";
 import { Approvals } from "./Approvals";
 import { TurnRail } from "./TurnRail";
 import { Shimmer } from "../ui/Shimmer";
@@ -174,8 +175,8 @@ const Turn = memo(function Turn({ turnId, ctx }: { turnId: string; ctx: Ctx }) {
               <FileDiff size={12} /> <span className="add">+{stats.add}</span> <span className="del">−{stats.del}</span>
             </button>
           )}
-          <button className="link fork-here" title="Fork the conversation from this point" onClick={() => void forkThread(ctx.threadId, { atTurnId: turnId })}>
-            <GitFork size={12} /> Fork from here
+          <button className="link fork-here" title={FORK.hereHint} onClick={() => void forkThread(ctx.threadId, { atTurnId: turnId })}>
+            <GitFork size={12} /> {FORK.here}
           </button>
         </div>
       )}

@@ -32,6 +32,7 @@ import { Composer } from "./Composer";
 import { SubagentBar } from "./Subagents";
 import { Details, useDetails } from "./Details";
 import { DETAILS } from "../../lib/threadDetails";
+import { FORK } from "../../lib/forks";
 import { RequestCard } from "./Approvals";
 import { ScreenGlance, useLiveScreen } from "./ComputerUse";
 import { bridge, isDesktop } from "../../bridge";
@@ -241,9 +242,9 @@ function Header({
       x: r.left,
       y: r.bottom + 4,
       items: [
-        { label: "Fork conversation", icon: <GitFork size={14} />, onClick: () => void forkThread(threadId), hint: "Ctrl+Shift+F" },
+        { label: FORK.conversation, icon: <GitFork size={14} />, onClick: () => void forkThread(threadId), hint: "Ctrl+Shift+F" },
         ...(isDesktop && thread?.gitInfo
-          ? [{ label: "Fork into new worktree", icon: <FolderGit2 size={14} />, onClick: () => void forkThread(threadId, { worktree: true }) }]
+          ? [{ label: FORK.worktree, icon: <FolderGit2 size={14} />, onClick: () => void forkThread(threadId, { worktree: true }) }]
           : []),
       ],
     });
@@ -335,7 +336,7 @@ function Header({
           </button>
         )}
         {!draft && (
-          <button className="icon-btn" title="Fork" onClick={forkMenu}>
+          <button className="icon-btn" title={FORK.button} onClick={forkMenu}>
             <GitFork size={14} />
             {size !== "compact" && size !== "glance" && <ChevronDown size={11} />}
           </button>

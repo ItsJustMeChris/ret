@@ -20,6 +20,7 @@ import { toggleMaximize, viewport, viewportSize } from "./viewport";
 import { setLiveRect } from "./live";
 import { lodAtMount, registerWindow, type Lod } from "./lod";
 import { plainText } from "../../lib/format";
+import { FORK } from "../../lib/forks";
 import { classify } from "../../lib/useSize";
 import { holdCursor } from "../../lib/cursorShield";
 import { hostOfView } from "../../state/projectTree";
@@ -375,9 +376,9 @@ export const CanvasWindow = memo(function CanvasWindow({ win, focused }: { win: 
         : [
             ...threadMoreItems(id, rename),
             { separator: true as const },
-            { label: "Fork conversation", icon: <GitFork size={14} />, hint: "Ctrl+Shift+F", onClick: () => void forkThread(id) },
+            { label: FORK.conversation, icon: <GitFork size={14} />, hint: "Ctrl+Shift+F", onClick: () => void forkThread(id) },
             ...(isDesktop && thread?.gitInfo
-              ? [{ label: "Fork into new worktree", icon: <FolderGit2 size={14} />, onClick: () => void forkThread(id, { worktree: true }) }]
+              ? [{ label: FORK.worktree, icon: <FolderGit2 size={14} />, onClick: () => void forkThread(id, { worktree: true }) }]
               : []),
             { separator: true as const },
           ]),

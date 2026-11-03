@@ -3,13 +3,13 @@ import { CornerLeftUp } from "lucide-react-native";
 import { useMemo, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import { compactNumber } from "@ret/lib/format";
+import { forkTitle } from "@ret/lib/forks";
 import { useShallow } from "@ret/lib/shallow";
 import {
   DETAILS,
   changeTotals,
   contextUse,
   fileChanges,
-  forkLabel,
   forksOf,
   latestDiff,
   latestPlan,
@@ -221,7 +221,7 @@ function ForksSection({ threadId, go }: { threadId: string; go: (id: string) => 
   return (
     <Section title={DETAILS.forks} meta={forks.length}>
       {forks.map((f, i) => (
-        <Link key={f.id} threadId={f.id} label={forkLabel(f, i, name)} go={go} />
+        <Link key={f.id} threadId={f.id} label={forkTitle(f, i + 1, name)} go={go} />
       ))}
     </Section>
   );

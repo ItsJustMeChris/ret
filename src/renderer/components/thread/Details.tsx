@@ -8,12 +8,12 @@ import { openThread } from "../../state/actions";
 import { baseName, threadTitle } from "../../state/projects";
 import { engineName } from "../../state/hosts";
 import { compactNumber } from "../../lib/format";
+import { forkTitle } from "../../lib/forks";
 import {
   DETAILS,
   changeTotals,
   contextUse,
   fileChanges,
-  forkLabel,
   forksOf,
   latestDiff,
   latestPlan,
@@ -300,7 +300,7 @@ function ForksSection({ threadId }: { threadId: string }) {
       {forks.map((f, i) => (
         <button key={f.id} className="lineage" onClick={() => openThread(f.id)}>
           <StatusDot threadId={f.id} />
-          <span>{forkLabel(f, i, name)}</span>
+          <span>{forkTitle(f, i + 1, name)}</span>
         </button>
       ))}
     </Section>
